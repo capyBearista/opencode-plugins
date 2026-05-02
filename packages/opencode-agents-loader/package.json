@@ -1,0 +1,31 @@
+{
+  "name": "@capybearista/opencode-agents-loader",
+  "version": "1.0.0",
+  "description": "OpenCode plugin that extends command and agent discovery to ~/.agents/ and .agents/ directories",
+  "type": "module",
+  "license": "MPL-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "bunx @biomejs/biome check .",
+    "check": "bunx @biomejs/biome check --write .",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.14.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": ">=1.14.0"
+  }
+}

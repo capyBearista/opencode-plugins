@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+**/dist/
+.turbo/
+**/.turbo/
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+bun-debug.log*
+
+# Changesets
+# Do not ignore .changeset/*.md as they must be committed to trigger releases
+.changeset/pre.json
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE configs
+.vscode/
+.idea/
+
+# Testing
+coverage/
+**/coverage/

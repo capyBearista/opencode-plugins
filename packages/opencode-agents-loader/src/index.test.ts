@@ -1,0 +1,12 @@
+import { describe, expect, test } from "bun:test";
+import plugin from "./index.js";
+
+describe("@capybearista/opencode-agents-loader", () => {
+  test("has an id", () => {
+    expect(plugin.id).toBeString();
+  });
+
+  test("exports server hooks", () => {
+    expect(plugin.server).toBeFunction();
+  });
+});
