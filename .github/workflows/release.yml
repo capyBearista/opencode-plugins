@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'packages/**'
+      - '.changeset/**'
+      - 'bun.lock'
+      - 'package.json'
+      - 'turbo.json'
+      - 'tsconfig*.json'
+      - '.github/workflows/release.yml'
 
 permissions:
   contents: write
