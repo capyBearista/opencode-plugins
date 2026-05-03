@@ -2,31 +2,41 @@
   "name": "@capybearista/opencode-double-tap-timeline",
   "version": "0.1.1",
   "description": "Double-tap Escape key to open the timeline modal, inspired by Claude Code's /rewind feature",
+  "author": "capyBearista <capybearista@github.com>",
   "type": "module",
   "license": "MPL-2.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
-    "./tui": "./dist/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tui": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc --emitDeclarationOnly && bun build src/index.ts --outdir=dist --target=bun --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*'",
     "typecheck": "tsc --noEmit",
     "lint": "bunx @biomejs/biome check .",
     "check": "bunx @biomejs/biome check --write .",
+    "ci": "bunx @biomejs/biome ci .",
     "test": "bun test"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.14.24",
-    "@opentui/solid": ">=0.1.103"
+    "@opentui/solid": ">=0.1.103",
+    "solid-js": ">=1.9.0"
   },
   "devDependencies": {
     "@opencode-ai/plugin": ">=1.14.24",
     "@opentui/solid": ">=0.1.103",
-    "@opentui/core": ">=0.1.103"
+    "@opentui/core": ">=0.1.103",
+    "solid-js": ">=1.9.0"
   }
 }

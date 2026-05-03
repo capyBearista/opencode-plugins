@@ -1,8 +1,8 @@
-import type { Plugin } from "@opencode-ai/plugin";
 import fs from "node:fs/promises";
-import matter from "gray-matter";
 import os from "node:os";
 import path from "node:path";
+import type { Plugin } from "@opencode-ai/plugin";
+import matter from "gray-matter";
 
 function fallbackSanitization(content: string): string {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -92,7 +92,7 @@ async function scanDirectory(dir: string, subdirs: string[]) {
           content: md.content.trim(),
         };
       } catch (err) {
-        console.error(`[opencode-agents-loader] Failed to parse ${file}:`, err);
+        console.error(`[capybearista.opencode-agents-loader] Failed to parse ${file}:`, err);
       }
     }
   }
@@ -211,6 +211,6 @@ export const AgentsLoaderPlugin: Plugin = async ({ directory, worktree }) => {
 };
 
 export default {
-  id: "opencode-agents-loader",
+  id: "capybearista.opencode-agents-loader",
   server: AgentsLoaderPlugin,
 };

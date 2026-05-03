@@ -3,7 +3,7 @@ import plugin from "./index.js";
 
 describe("@capybearista/opencode-agents-loader", () => {
   test("has an id", () => {
-    expect(plugin.id).toBeString();
+    expect(plugin.id).toBe("capybearista.opencode-agents-loader");
   });
 
   test("exports server hooks", () => {

@@ -1,10 +1,47 @@
-# OpenCode Double-Tap Timeline
+# opencode-double-tap-timeline
 
-Double-tap `Escape` to open the `/timeline` modal, inspired by Claude Code's double-tap-to-invoke-`/rewind` feature.
+<p align="center">Double-tap Escape to open the timeline modal</p>
+<p align="center">
+  <a href="https://www.npmjs.com/package/@capybearista/opencode-double-tap-timeline"><img alt="npm" src="https://img.shields.io/npm/v/@capybearista/opencode-double-tap-timeline?style=flat-square&logo=npm" /></a>
+  <a href="https://www.npmjs.com/package/@capybearista/opencode-double-tap-timeline"><img alt="npm" src="https://img.shields.io/npm/dm/@capybearista/opencode-double-tap-timeline?style=flat-square&logo=npm" /></a>
+  <a href="https://opencode.ai"><img alt="opencode" src="https://img.shields.io/badge/OpenCode-Plugin-blue?style=flat-square" /></a>
+  <a href="https://opensource.org/licenses/MPL-2.0"><img alt="license" src="https://img.shields.io/badge/License-MPL--2.0-blue.svg?style=flat-square" /></a>
+</p>
 
-## Installation
+---
 
-Simply add to your `tui.json`:
+## Why?
+
+> Inspired by Claude Code's double-tap-to-invoke-`/rewind` feature. Instead of typing `/timeline` or reaching for the mouse, just double-tap Escape while in a session to open the timeline modal instantly.
+
+## Philosophy: Extending OpenCode
+
+OpenCode's TUI plugin system enables keyboard-driven UI extensions. This plugin hooks into the `app` slot to listen for Escape key presses globally, detects a double-tap within 800ms, and triggers the timeline command. It cleanly disposes of its timers on deactivation.
+
+### Architecture
+
+```text
+src/index.ts
+    └── tui hook
+        ├── lifecycle.onDispose() — cleanup
+        └── slots.register({ app() })
+            └── useKeyboard() — Escape key listener
+                └── double-tap detection (800ms window)
+                    └── api.command.trigger("session.timeline")
+```
+
+## Features
+
+- Global Escape key listener via the `app` slot — works regardless of which screen is active
+- 800ms double-tap window, matching Claude Code's behavior
+- Only triggers timeline when in a session with a valid session ID
+- Single Escape still works normally (closes modals, cancels operations)
+- Proper timer cleanup on plugin deactivation
+- Skips trigger if a dialog is already open
+
+## Install
+
+Add the plugin to `tui.json` or `tui.jsonc`:
 
 ```json
 {
@@ -12,31 +49,47 @@ Simply add to your `tui.json`:
 }
 ```
 
+Add the plugin to `opencode.json` or `opencode.jsonc`:
+
+```json
+{
+  "plugin": ["@capybearista/opencode-double-tap-timeline"]
+}
+```
+
+You can also install it through the CLI:
+
+```bash
+opencode plugin -g    # global install
+opencode plugin       # project-local install
+```
+
 ## Usage
 
 1. Open a session in OpenCode
 2. Double-tap `Escape` quickly (within 800ms)
 3. The timeline modal opens
-4. Profit
-
-## How it works
-
-- **Global listener**: Uses the `app` slot to always be active regardless of which screen you're on
-- **Double-tap detection**: 800ms window, matching Claude Code's behavior
-- **Smart triggers**: Only opens timeline when in a session with a valid session ID
-- **Graceful fallback**: Single `Escape` works normally (closes modals, cancels operations)
-- **Cleanup**: Properly disposes of timers when the plugin is deactivated
-
-## Requirements
-
-- **OpenCode** (tested on 1.14.24)
-- **@opentui/solid** (installed automatically as peer dependency)
-- **@opentui/core** (installed automatically as peer dependency)
 
 ## Notes
 
-Hitting `Escape` two times in quick succession to interrupt your running prompt will *also* invoke the timeline modal. Just hit `Escape` again to quickly exit out of the resulting modal.
+Hitting `Escape` two times in quick succession to interrupt a running prompt will also invoke the timeline modal. Hit `Escape` again to quickly exit.
+
+## Troubleshooting
+
+- If double-tap doesn't work, ensure you're in a session screen (not the home screen)
+- If a dialog is open, the timeline won't trigger — close any open dialogs first
+- The plugin uses OpenTUI's `useKeyboard` hook, which requires `@opentui/solid` installed
+
+## Contributing
+
+This package lives in the `opencode-plugins` monorepo.
+
+- Run `bun run build`, `bun run typecheck`, `bun run lint`, and `bun test` before opening a PR.
+- Keep the plugin focused on the double-tap timeline trigger.
+- Prefer small, direct changes.
+
+Please open an issue or check for existing ones before creating a pull request.
 
 ## License
 
-MPL 2.0
+[MPL-2.0](LICENSE.md)
