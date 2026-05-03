@@ -16,27 +16,29 @@
 
 ## Philosophy: Extending OpenCode
 
-OpenCode is designed to be extensible through plugins. This plugin takes the narrowest useful path: it does not rewrite the base OpenCode prompt, and it does not try to change model behavior outside the style block. It simply discovers styles, persists the active selection, and appends the chosen style instructions to the system prompt.
+OpenCode is designed to be extensible through plugins. This plugin takes the narrowest useful path: it does not rewrite the base OpenCode prompt, and it does not try to change model behavior outside the style block. It simply discovers styles, persists the active selection, and injects the chosen style wrapped in `<output-style>` tags into the system prompt.
 
 ### Architecture
 
 ```text
 src/
-└── index.ts
-    ├── parseStyleFile()
-    ├── discoverStyles()
-    ├── command.execute.before
-    └── experimental.chat.system.transform
+├── index.ts           # Plugin hooks (thin barrel)
+├── styles.ts          # Style parsing, discovery, built-in loading
+└── built-in-styles/   # Shipped output styles
+    ├── explanatory.md
+    └── learning.md
 ```
 
 ## Features
 
+- Ships built-in styles inspired by Claude Code (`explanatory`, `learning`) out of the box
 - Discovers global styles from `~/.config/opencode/output-styles/`
 - Discovers project-local styles from `.opencode/output-styles/`
-- Activates styles with `/style <id>`
+- Activates styles with `/output-style <id>`
 - Persists the active style in `.opencode/active-style.json`
-- Appends the selected style as an `# Output Style` block on each request
-- Lets project-local styles override global styles with the same id
+- Injects the selected style wrapped in `<output-style>` tags into the system prompt
+- Marks built-in styles with `[Built-in]` in the style listing
+- Supports overriding: user styles take precedence over built-in styles with the same id
 
 ## Install
 
@@ -57,6 +59,24 @@ opencode plugin       # project-local install
 
 ## Usage
 
+### Built-in styles
+
+The plugin ships with two built-in styles that are available immediately:
+
+| Id | Name | Description |
+| --- | --- | --- |
+| `explanatory` | explanatory | Provides educational insights while helping with tasks |
+| `learning` | learning | Interactive learning mode for CS students |
+
+Use them like any other style:
+
+```text
+/output-style explanatory
+/output-style learning
+```
+
+### Custom styles
+
 Create a markdown file in `~/.config/opencode/output-styles/` or `<project-root>/.opencode/output-styles/` with YAML frontmatter:
 
 ```md
@@ -68,16 +88,19 @@ description: "Talks like a pirate"
 You must respond like a swashbuckling pirate.
 ```
 
-Then use:
+### Overriding built-in styles
 
-```text
-/style pirate
-```
+To replace a built-in style with your own version, create a markdown file with the **same id** (same filename without `.md`) in one of the user style directories. Your version takes precedence over the built-in.
 
-Other commands:
+For example, to override `explanatory` with a custom version, create `~/.config/opencode/output-styles/explanatory.md` or `<project-root>/.opencode/output-styles/explanatory.md`.
 
-- `/style` lists available styles
-- `/style clear` removes the active style
+### Commands
+
+| Command | Description |
+| --- | --- |
+| `/output-style` | Lists all available styles (built-in and user) |
+| `/output-style <id>` | Activates the specified style |
+| `/output-style clear` | Removes the active style |
 
 ## Configuration
 
@@ -85,8 +108,16 @@ Style files support the following frontmatter:
 
 | Property | Type | Description |
 | --- | --- | --- |
-| `name` | `string` | Display name shown in the `/style` list. Defaults to the filename. |
-| `description` | `string` | Short summary shown in the `/style` list. Defaults to empty. |
+| `name` | `string` | Display name shown in the `/output-style` list. Defaults to the filename. |
+| `description` | `string` | Short summary shown in the `/output-style` list. Defaults to empty. |
+
+The active style's body is wrapped in `<output-style>` tags and appended to the system prompt:
+
+```text
+<output-style>
+...style body...
+</output-style>
+```
 
 The plugin also writes one project-local state file:
 
@@ -96,9 +127,9 @@ The plugin also writes one project-local state file:
 
 ## Troubleshooting
 
-- If `/style` shows no results, confirm your style files end in `.md` and include YAML frontmatter.
-- If two styles share the same filename, the project-local version takes precedence over the global one.
-- The `/style` command currently uses a plugin API workaround that asks the model to echo the command result, because the plugin API does not yet expose a clean command short-circuit path.
+- If `/output-style` shows no results, confirm your style files end in `.md` and include YAML frontmatter.
+- If two styles share the same filename, the project-local version takes precedence over the global one, which takes precedence over the built-in.
+- The `/output-style` command currently uses a plugin API workaround that throws a handled error to short-circuit the command pipeline, because the plugin API does not yet expose a clean command short-circuit path.
 
 ## Contributing
 

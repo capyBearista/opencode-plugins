@@ -14,7 +14,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "built-in-styles"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc",
