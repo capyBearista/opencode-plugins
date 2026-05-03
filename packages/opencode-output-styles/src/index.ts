@@ -112,60 +112,70 @@ export const server: Plugin = async (ctx) => {
   };
 
   return {
-    "command.execute.before": async (input, output) => {
-      if (input.command === "style") {
-        const styles = await discoverStyles(projectPath);
-        const args = input.arguments.trim().split(/\s+/);
-        const firstArg = args[0];
+    config: async (opencodeConfig) => {
+      opencodeConfig.command ??= {};
+      opencodeConfig.command["output-style"] = {
+        template: "",
+        description: "List, set, or clear the active output style",
+      };
+    },
 
-        let resultMsg = "";
+    "command.execute.before": async (input) => {
+      if (input.command !== "output-style") return;
 
-        if (!firstArg) {
-          const activeId = await getActiveStyleId();
+      const styles = await discoverStyles(projectPath);
+      const args = input.arguments.trim().split(/\s+/);
+      const firstArg = args[0];
 
-          if (styles.length === 0) {
-            resultMsg =
-              "No output styles found. Create .md files with YAML frontmatter in `~/.config/opencode/output-styles/` or `.opencode/output-styles/`.";
-          } else {
-            resultMsg = "Available Output Styles:\n\n";
-            for (const style of styles) {
-              const activeMark = style.id === activeId ? " (Active)" : "";
-              resultMsg += `- **${style.id}**: ${style.name} - ${style.description}${activeMark}\n`;
-            }
-            resultMsg +=
-              "\nUse `/style <id>` to select a style, or `/style clear` to remove the active style.";
-          }
+      let resultMsg = "";
+
+      if (!firstArg) {
+        const activeId = await getActiveStyleId();
+
+        if (styles.length === 0) {
+          resultMsg =
+            "No output styles found. Create .md files with YAML frontmatter in `~/.config/opencode/output-styles/` or `.opencode/output-styles/`.";
         } else {
-          const selectedId = firstArg;
+          resultMsg = "Available Output Styles:\n\n";
+          for (const style of styles) {
+            const activeMark = style.id === activeId ? " (Active)" : "";
+            resultMsg += `- **${style.id}**: ${style.name} - ${style.description}${activeMark}\n`;
+          }
+          resultMsg +=
+            "\nUse `/style <id>` to select a style, or `/style clear` to remove the active style.";
+        }
+      } else {
+        const selectedId = firstArg;
 
-          if (selectedId === "clear") {
-            await setActiveStyleId(null);
-            resultMsg = "Cleared active output style.";
+        if (selectedId === "clear") {
+          await setActiveStyleId(null);
+          resultMsg = "Cleared active output style.";
+        } else {
+          const style = styles.find((s) => s.id === selectedId);
+          if (!style) {
+            resultMsg = `Style not found: ${selectedId}`;
           } else {
-            const style = styles.find((s) => s.id === selectedId);
-            if (!style) {
-              resultMsg = `Style not found: ${selectedId}`;
-            } else {
-              await setActiveStyleId(style.id);
-              resultMsg = `Active output style set to: ${style.name}`;
-            }
+            await setActiveStyleId(style.id);
+            resultMsg = `Active output style set to: ${style.name}`;
           }
         }
-
-        // Note: The OpenCode Plugin API doesn't currently provide a direct way to abort
-        // a command execution without generating an LLM response or throwing an error stack trace.
-        // As a workaround, we overwrite the parts to explicitly instruct the LLM to echo our response.
-        // This is fragile but necessary until a proper short-circuit API exists.
-        output.parts = [
-          {
-            type: "text",
-            id: Date.now().toString(),
-            sessionID: input.sessionID,
-            messageID: "system",
-            text: `I have handled the user's /style command. Acknowledge this to the user by printing exactly this response and nothing else:\n\n${resultMsg}`,
-          },
-        ];
       }
+
+      await ctx.client.session.prompt({
+        path: { id: input.sessionID },
+        body: {
+          noReply: true,
+          parts: [
+            {
+              type: "text",
+              text: resultMsg,
+              ignored: true,
+            },
+          ],
+        },
+      });
+
+      throw new Error("__STYLE_COMMAND_HANDLED__");
     },
 
     "experimental.chat.system.transform": async (_input, output) => {

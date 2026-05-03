@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -15,6 +15,19 @@ type Hooks = Awaited<ReturnType<typeof plugin.server>>;
 
 let projectDir = "";
 let hooks: Hooks;
+let promptMock = mock();
+
+function createMockCtx() {
+  return {
+    directory: projectDir,
+    worktree: projectDir,
+    client: {
+      session: {
+        prompt: promptMock,
+      },
+    },
+  } as never;
+}
 
 async function writeStyle(id = "pirate") {
   const styleDir = path.join(projectDir, ".opencode", "output-styles");
@@ -25,7 +38,8 @@ async function writeStyle(id = "pirate") {
 describe("@capybearista/opencode-output-styles", () => {
   beforeEach(async () => {
     projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-output-styles-"));
-    hooks = await plugin.server({ directory: projectDir, worktree: projectDir } as never);
+    promptMock = mock();
+    hooks = await plugin.server(createMockCtx());
   });
 
   afterEach(async () => {
@@ -99,16 +113,18 @@ describe("@capybearista/opencode-output-styles", () => {
     await writeStyle();
 
     const output = { parts: [] };
-    await hooks["command.execute.before"]?.(
-      { command: "style", arguments: "pirate", sessionID: "session-1" } as never,
-      output as never,
-    );
+    await expect(
+      hooks["command.execute.before"]?.(
+        { command: "output-style", arguments: "pirate", sessionID: "session-1" } as never,
+        output as never,
+      ),
+    ).rejects.toThrow("__STYLE_COMMAND_HANDLED__");
 
     const saved = JSON.parse(
       await fs.readFile(path.join(projectDir, ".opencode", "active-style.json"), "utf-8"),
     );
 
     expect(saved).toEqual({ activeStyle: "pirate" });
-    expect(output.parts).toHaveLength(1);
+    expect(promptMock).toHaveBeenCalled();
   });
 });
