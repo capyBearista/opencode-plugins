@@ -1,4 +1,4 @@
-# @capybearista/opencode-output-styles
+# opencode-output-styles
 
 <p align="center">Reusable response styles for OpenCode sessions</p>
 <p align="center">
