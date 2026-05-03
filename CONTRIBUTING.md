@@ -6,7 +6,7 @@ Thank you for your interest in contributing!
 
 ```bash
 # Clone the monorepo
-git clone https://github.com/capyBearista/opencode-plugins
+git clone https://github.com/capybearista/opencode-plugins
 cd opencode-plugins
 
 # Install dependencies
@@ -18,13 +18,13 @@ bun install
 Before opening a pull request, run the full quality gate:
 
 ```bash
-bun run typecheck && bun run lint && bun run test
+bun run build && bun run typecheck && bun run lint && bun run test
 ```
 
-Or use Turbo for parallel execution:
+Auto-format all code with Biome (`bun run check` runs `biome check --write` in every package):
 
 ```bash
-bun run build && bun run typecheck && bun run lint && bun test
+bun run check
 ```
 
 ## Commit Messages
@@ -66,11 +66,20 @@ A commit-msg hook will block commits that don't follow this format.
 5. Commit with conventional commit format
 6. Push and open a PR
 
+## Automation
+
+The repository uses **Husky** to enforce quality on every commit:
+
+- **Pre-commit** — runs `graphify update .` to keep the project knowledge graph current
+- **Commit-msg** — enforces conventional commits via `commitlint`
+
+**CI** runs on every push via GitHub Actions (typecheck, lint, test).
+
 ## Monorepo Structure
 
 - `packages/` — published OpenCode plugins
+- `tools/` — auxiliary scripts and utilities (e.g., the Cloudflare Worker for the total-downloads badge)
 - `docs/` — internal documentation and upstream prompt snapshots
-- `external/` — independent external projects (not part of workspace)
 
 Each package in `packages/` is independently versioned and published via Changesets.
 
