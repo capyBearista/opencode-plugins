@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "Output styles plugin for OpenCode",
   "author": "capyBearista <capybearista@github.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/capyBearista/opencode-plugins.git",
+    "directory": "packages/opencode-output-styles"
+  },
   "type": "module",
   "license": "MPL-2.0",
   "main": "./dist/index.js",
