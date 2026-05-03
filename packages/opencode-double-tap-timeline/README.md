@@ -49,14 +49,6 @@ Add the plugin to `tui.json` or `tui.jsonc`:
 }
 ```
 
-Add the plugin to `opencode.json` or `opencode.jsonc`:
-
-```json
-{
-  "plugin": ["@capybearista/opencode-double-tap-timeline"]
-}
-```
-
 You can also install it through the CLI:
 
 ```bash
@@ -70,9 +62,11 @@ opencode plugin       # project-local install
 2. Double-tap `Escape` quickly (within 800ms)
 3. The timeline modal opens
 
-## Notes
+**Note:** Hitting `Escape` two times in quick succession to interrupt a running prompt will also invoke the timeline modal. Hit `Escape` again to quickly exit.
 
-Hitting `Escape` two times in quick succession to interrupt a running prompt will also invoke the timeline modal. Hit `Escape` again to quickly exit.
+## Configuration
+
+This plugin requires no manual configuration.
 
 ## Troubleshooting
 

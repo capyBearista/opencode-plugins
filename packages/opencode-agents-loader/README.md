@@ -101,7 +101,11 @@ Place agent markdown files in `agent/` or `agents/` subdirectories:
     project-expert.md
 ```
 
-## Precedence
+## Configuration
+
+This plugin requires no manual configuration. It works automatically by reading from `.agents/` directories.
+
+### Precedence
 
 Existing config entries from `.opencode/` directories always take precedence over `.agents/` entries. The plugin only injects entries that **do not already exist**.
 
