@@ -1,5 +1,11 @@
 <p align="center">
-  <img src=".github/assets/opencode-plugins.svg" alt="OpenCode Plugins" width="200" />
+  <a href="https://github.com/capybearista/opencode-plugins">
+    <picture>
+      <source srcset=".github/assets/opencode-plugins-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/assets/opencode-plugins-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/assets/opencode-plugins-light.svg" alt="OpenCode Plugins logo">
+    </picture>
+  </a>
 </p>
 
 # OpenCode Plugins by capyBearista
