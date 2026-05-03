@@ -3,8 +3,22 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/assets/**'
+      - '.changeset/**'
+      - 'CONTRIBUTING.md'
+      - 'LICENSE*'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/assets/**'
+      - '.changeset/**'
+      - 'CONTRIBUTING.md'
+      - 'LICENSE*'
 
 permissions:
   contents: read
