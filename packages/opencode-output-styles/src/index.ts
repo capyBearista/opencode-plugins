@@ -8,14 +8,13 @@ interface OutputStyle {
   id: string;
   name: string;
   description: string;
-  keepCodingInstructions: boolean;
   body: string;
 }
 
 async function parseStyleFile(filePath: string): Promise<OutputStyle | null> {
   try {
     const content = await fs.readFile(filePath, "utf-8");
-    const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
     if (!match) return null;
 
     const frontmatter = yaml.parse(match[1]);
@@ -26,7 +25,6 @@ async function parseStyleFile(filePath: string): Promise<OutputStyle | null> {
       id,
       name: frontmatter.name || id,
       description: frontmatter.description || "",
-      keepCodingInstructions: frontmatter["keep-coding-instructions"] !== false, // defaults to true
       body,
     };
   } catch {
@@ -85,8 +83,8 @@ export const server: Plugin = async (ctx) => {
     try {
       await fs.mkdir(path.dirname(configPath), { recursive: true });
       await fs.writeFile(configPath, JSON.stringify({ activeStyle: id }, null, 2));
-    } catch (e) {
-      console.error("Failed to save active style", e);
+    } catch {
+      // Silently ignore write failures (e.g., read-only filesystem)
     }
   };
 
@@ -177,20 +175,7 @@ export const server: Plugin = async (ctx) => {
       const activeStyle = await getActiveStyle(activeId);
       if (!activeStyle) return;
 
-      if (output.system && output.system.length > 0) {
-        if (!activeStyle.keepCodingInstructions) {
-          // Anthropic prompt uses # Doing tasks up to # Tool usage policy
-          output.system[0] = output.system[0].replace(
-            /# Doing tasks[\s\S]*?(?=# Tool usage policy)/,
-            "",
-          );
-          // Gemini / GPT prompt uses # Core Mandates up to # Operational Guidelines
-          output.system[0] = output.system[0].replace(
-            /# Core Mandates[\s\S]*?(?=# Operational Guidelines)/,
-            "",
-          );
-        }
-
+      if (output.system) {
         output.system.push(`\n# Output Style: ${activeStyle.name}\n${activeStyle.body}`);
       }
     },

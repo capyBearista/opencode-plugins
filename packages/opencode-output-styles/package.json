@@ -2,21 +2,26 @@
   "name": "@capybearista/opencode-output-styles",
   "version": "0.0.0",
   "description": "Output styles plugin for OpenCode",
+  "author": "capyBearista <capybearista@github.com>",
   "type": "module",
   "license": "MPL-2.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "typecheck": "tsc --noEmit",
     "lint": "bunx @biomejs/biome check .",
     "check": "bunx @biomejs/biome check --write .",
+    "ci": "bunx @biomejs/biome ci .",
     "test": "bun test"
   },
   "dependencies": {
