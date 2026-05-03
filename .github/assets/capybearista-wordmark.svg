@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 24" width="320" height="24">
+  <defs>
+    <style>
+      .line { stroke: #24292f; stroke-width: 0.75; opacity: 0.35; }
+      .text { fill: #24292f; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; font-weight: 350; letter-spacing: 2.5px; opacity: 0.55; }
+      @media (prefers-color-scheme: dark) {
+        .line { stroke: #e6edf3; }
+        .text { fill: #e6edf3; }
+      }
+    </style>
+  </defs>
+  <line class="line" x1="0" y1="12" x2="55" y2="12" />
+  <text class="text" x="160" y="16" text-anchor="middle">capybearista's</text>
+  <line class="line" x1="265" y1="12" x2="320" y2="12" />
+</svg>
