@@ -83,16 +83,6 @@ The repository uses **Husky** to enforce quality on every commit:
 
 Each package in `packages/` is independently versioned and published via Changesets.
 
-## Changesets
-
-For changes that should be released, add a changeset:
-
-```bash
-bun changeset
-```
-
-This creates a changeset file describing your change. The changeset will be consumed during the next release cycle.
-
 ## Code Style
 
 - **TypeScript strict mode** is required

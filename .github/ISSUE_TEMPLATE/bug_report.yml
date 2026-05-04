@@ -2,27 +2,51 @@ name: Bug Report
 description: File a bug report
 title: "[Bug]: "
 labels: ["bug"]
+type: bug
 body:
   - type: markdown
     attributes:
       value: |
         Thanks for taking the time to fill out this bug report!
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      options:
+        - label: I have searched existing issues to avoid duplicates
+          required: true
+        - label: I have provided clear steps to reproduce (in the field below)
+          required: false
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: Which plugin is affected?
+      description: Select the plugin you're reporting a bug for.
+      options:
+        - Select
+        - opencode-agents-loader
+        - opencode-double-tap-timeline
+        - opencode-output-styles
+        - opencode-plugins (this monorepo itself)
+        - Other
+    validations:
+      required: true
   - type: textarea
     id: what-happened
     attributes:
       label: What happened?
-      description: Also tell us what you expected to happen.
-      placeholder: Tell us what you see!
+      description: Outline the unexpected behavior or error you encountered.
+      placeholder: I keep running into...
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
       label: Steps to reproduce
-      description: How can we reproduce the issue?
+      description: How can the issue be reproduced?
       placeholder: |
-        1. Go to '...'
-        2. Click on '....'
+        1. Run OpenCode...
+        2. Run the command '....'
         3. Scroll down to '....'
         4. See error
     validations:
@@ -34,10 +58,38 @@ body:
       description: Please copy and paste any relevant log output. This will be automatically formatted into code.
       render: shell
   - type: input
-    id: version
+    id: plugin-version
     attributes:
-      label: Version
+      label: Plugin Version
       description: What version of the plugin are you running?
       placeholder: e.g., 1.0.0
     validations:
       required: true
+  - type: input
+    id: opencode-version
+    attributes:
+      label: OpenCode Version
+      description: What version of OpenCode are you using?
+      placeholder: e.g., 1.14.33
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What OS are you running?
+      options:
+        - Select
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: upload
+    id: uploads
+    attributes:
+      label: Upload screenshots or logs
+      description: Add images or log files to help explain the issue.
+    validations:
+      required: false
