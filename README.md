@@ -107,6 +107,8 @@ bun run build
 bun run test
 ```
 
+Please review the [contribution guidelines](./CONTRIBUTING.md) before contributing :)
+
 ## License
 
 [MPL-2.0](./LICENSE.md)
