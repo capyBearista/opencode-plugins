@@ -27,14 +27,14 @@ opencode plugin add -g \
 
 ## Meet The Plugins
 
-### [@capybearista/opencode-output-styles](./packages/opencode-output-styles/)
-Persistent response styles for OpenCode sessions. This plugin injects selected guidelines (like "explanatory" or "learning" modes) into the system prompt so they stay active across your session. 🗣️
+### 🗣️ [@capybearista/opencode-output-styles](./packages/opencode-output-styles/)
+Persistent response styles for OpenCode sessions. This plugin injects selected guidelines (like "explanatory" or "learning" modes) into the system prompt so they stay active across your session.
 
-### [@capybearista/opencode-agents-loader](./packages/opencode-agents-loader/)
-Extends command and agent discovery to the `.agents/` directory standard. This enables interoperability with other AI tools and keeps project configuration organized. 🛠️
+### 🛠️ [@capybearista/opencode-agents-loader](./packages/opencode-agents-loader/)
+Extends command and agent discovery to the `.agents/` directory standard. This enables interoperability with other AI tools and keeps project configuration organized.
 
-### [@capybearista/opencode-double-tap-timeline](./packages/opencode-double-tap-timeline/)
-A keyboard-driven UI extension. Double-tap the Escape key to instantly open the session timeline modal without typing commands or using a mouse. ⌨️
+### ⏱️ [@capybearista/opencode-double-tap-timeline](./packages/opencode-double-tap-timeline/)
+A keyboard-driven UI extension. Double-tap the Escape key to instantly open the session timeline modal without typing commands or using a mouse.
 
 ## Installation
 
