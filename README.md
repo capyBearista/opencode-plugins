@@ -11,6 +11,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/~capybearista"><img alt="npm downloads" src="https://img.shields.io/endpoint?url=https://dry-haze-b628.capybearista.workers.dev&style=flat-square" /></a>
   <a href="https://github.com/capybearista/opencode-plugins/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/capybearista/opencode-plugins/ci.yml?style=flat-square&branch=main&label=CI" /></a>
+  <a href="https://deepwiki.com/capybearista/opencode-plugins"><img alt="ask deepwiki" src=".github/assets/deepwiki.svg" /></a>
   <a href="./LICENSE"><img alt="License: MPL-2.0" src="https://img.shields.io/badge/License-MPL_2.0-white.svg?style=flat-square" /></a>
 </p>
 
