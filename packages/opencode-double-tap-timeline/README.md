@@ -52,8 +52,8 @@ Add the plugin to `tui.json` or `tui.jsonc`:
 You can also install it through the CLI:
 
 ```bash
-opencode plugin -g    # global install
-opencode plugin       # project-local install
+opencode plugin -g @capybearista/opencode-double-tap-timeline    # global install
+opencode plugin @capybearista/opencode-double-tap-timeline       # project-local install
 ```
 
 ## Usage

@@ -52,8 +52,8 @@ Add the plugin to `opencode.json` or `opencode.jsonc`:
 You can also install it through the CLI:
 
 ```bash
-opencode plugin -g    # global install
-opencode plugin       # project-local install
+opencode plugin -g @capybearista/opencode-agents-loader    # global install
+opencode plugin @capybearista/opencode-agents-loader       # project-local install
 ```
 
 ## Usage
