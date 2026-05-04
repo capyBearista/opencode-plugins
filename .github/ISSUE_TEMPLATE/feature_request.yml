@@ -2,7 +2,6 @@ name: Feature Request
 description: Suggest an idea for an existing plugin or this monorepo itself
 title: "[Feature]: "
 labels: ["enhancement"]
-type: feature
 body:
   - type: markdown
     attributes:
