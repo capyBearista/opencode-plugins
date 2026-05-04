@@ -53,8 +53,8 @@ Add the plugin to `opencode.json` or `opencode.jsonc`:
 You can also install it through the CLI:
 
 ```bash
-opencode plugin -g    # global install
-opencode plugin       # project-local install
+opencode plugin -g @capybearista/opencode-output-styles    # global install
+opencode plugin @capybearista/opencode-output-styles       # project-local install
 ```
 
 ## Usage

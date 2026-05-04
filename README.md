@@ -42,15 +42,26 @@ You can install any of these plugins globally or locally using the OpenCode CLI:
 
 ```bash
 opencode plugin add -g @capybearista/opencode-output-styles
+opencode plugin add @capybearista/opencode-output-styles
 ```
 
-Alternatively, add them directly to your `opencode.json` configuration file:
+Alternatively, add them directly to your `opencode.json`/`opencode.jsonc` configuration file:
 
 ```json
 {
   "plugin": [
     "@capybearista/opencode-output-styles",
     "@capybearista/opencode-agents-loader"
+  ]
+}
+```
+
+For TUI-based plugins, add them directly to `tui.json`/`tui.jsonc`:
+
+```json
+{
+  "plugin": [
+    "@capybearista/opencode-double-tap-timeline"
   ]
 }
 ```
