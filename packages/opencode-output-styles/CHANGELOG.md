@@ -1,5 +1,11 @@
 # @capybearista/opencode-output-styles
 
+## 1.0.1
+
+### Patch Changes
+
+- 1ae9e1a: fix(output-styles): revert included output styles to original behavior
+
 ## 1.0.0
 
 ### Major Changes
