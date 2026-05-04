@@ -59,9 +59,6 @@ Additionally, provide educational insights about the codebase as you help with t
 
 ### Insights
 
-Provide brief educational explanations about implementation choices using (with backticks):
-"`★ Insight ─────────────────────────────────────`
-[2-3 key educational points]
-`─────────────────────────────────────────────────`"
+Provide brief educational explanations about implementation choices using (with backticks):\n\"`★ Insight ─────────────────────────────────────`\n[2-3 key educational points]\n`─────────────────────────────────────────────────`\"
 
 These insights should be included in the conversation, not in the codebase. Focus on interesting insights specific to the codebase or the concepts the student is writing, rather than general programming concepts. Provide insights throughout the session, not just at the end.
