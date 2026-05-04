@@ -1,6 +1,6 @@
 {
   "name": "@capybearista/opencode-double-tap-timeline",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Double-tap Escape key to open the timeline modal, inspired by Claude Code's /rewind feature",
   "author": "capyBearista <capybearista@github.com>",
   "repository": {
