@@ -11,8 +11,7 @@
 <p align="center">
   <!-- <a href="https://www.npmjs.com/package/@capybearista/opencode-plugins"><img alt="npm" src="https://img.shields.io/npm/v/@capybearista/opencode-plugins?style=flat-square&color=8d60e6" /></a> -->
   <a href="https://www.npmjs.com/~capybearista"><img alt="npm downloads" src="https://img.shields.io/endpoint?url=https://dry-haze-b628.capybearista.workers.dev&style=flat-square&color=%236067e6" /></a>
-  <a href="https://opencode.ai"><img alt="opencode" src="https://img.shields.io/badge/OpenCode-Plugins-orange?style=flat-square&color=60a5e6
-  " /></a>
+  <a href="https://opencode.ai"><img alt="opencode" src="https://img.shields.io/badge/OpenCode-Plugins-orange?style=flat-square&color=60a5e6" /></a>
   <a href="https://opensource.org/licenses/MPL-2.0"><img alt="license" src="https://img.shields.io/badge/License-MPL--2.0-blue.svg?style=flat-square&color=60dfe6" /></a>
 </p>
 <p align="center">
