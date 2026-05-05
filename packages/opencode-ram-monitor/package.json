@@ -1,0 +1,45 @@
+{
+  "name": "@capybearista/opencode-ram-monitor",
+  "version": "0.0.0",
+  "description": "Monitor RAM usage of OpenCode sessions",
+  "author": "capyBearista <capybearista@gmail.com>",
+  "license": "MPL-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc --project tsconfig.build.json --emitDeclarationOnly && bun build src/index.ts --outdir=dist --target=bun --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*' && [ -f dist/src/index.js ] && mv dist/src/index.js dist/index.js && rm -rf dist/src || true",
+    "typecheck": "tsc --noEmit",
+    "check": "bunx @biomejs/biome check --write .",
+    "lint": "bunx @biomejs/biome check .",
+    "ci": "bunx @biomejs/biome ci .",
+    "test": "bun test"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tui": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.14.24",
+    "@opentui/solid": ">=0.1.103",
+    "solid-js": ">=1.9.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": ">=1.14.24",
+    "@opentui/core": ">=0.1.103",
+    "@opentui/solid": ">=0.1.103",
+    "@types/bun": "latest",
+    "@types/node": "^25.6.0",
+    "solid-js": ">=1.9.0",
+    "typescript": "^5.8.0"
+  }
+}
