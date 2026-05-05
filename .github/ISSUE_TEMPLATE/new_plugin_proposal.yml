@@ -1,0 +1,59 @@
+name: New Plugin Proposal
+description: Propose a brand-new plugin for this monorepo
+title: "[Plugin]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to propose a new plugin idea.
+
+        You can keep this high-level, but if you want to sketch additional details, feel free to add them in the optional sections below or in a follow-up comment.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      options:
+        - label: I have searched existing issues to avoid duplicates
+          required: true
+        - label: I have checked the README and existing plugin docs for overlap
+          required: true
+  - type: input
+    id: plugin-archetype
+    attributes:
+      label: Proposed plugin archetype
+      description: In a few words, what problem does this plugin solve?
+      placeholder: e.g., It solves ... in one prompt
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this plugin solve?
+      description: Describe the user pain point or workflow gap at a high level.
+      placeholder: I keep running into...
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Describe the plugin idea
+      description: Outline the core behavior you want. Keep it focused on the user experience.
+      placeholder: The plugin should...
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Extra details & alternatives
+      description: Add any extra context, examples, constraints, related plugins, or likely hooks if you want to sketch the idea further. Share any other approaches, workarounds, plugins, and tools you considered.
+      placeholder: Potential integrations, edge cases, examples, notes...
+    validations:
+      required: false
+  - type: upload
+    id: mockups
+    attributes:
+      label: Upload mockups or examples
+      description: Add images or reference files to help illustrate your idea.
+    validations:
+      required: false

@@ -1,12 +1,12 @@
 name: Feature Request
-description: Suggest an idea for an existing plugin or this monorepo itself
+description: Suggest an enhancement for an existing plugin or this monorepo itself
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to suggest a feature!
+        Thanks for taking the time to suggest an enhancement!
   - type: checkboxes
     id: preflight
     attributes:
@@ -14,7 +14,7 @@ body:
       options:
         - label: I have searched existing issues to avoid duplicates
           required: true
-        - label: I have checked the plugin's README for existing capabilities
+        - label: I have checked the relevant README for existing capabilities
           required: true
   - type: dropdown
     id: plugin
@@ -27,25 +27,24 @@ body:
         - opencode-double-tap-timeline
         - opencode-output-styles
         - opencode-plugins (this monorepo itself)
-        - Other
     validations:
       required: true
   - type: dropdown
     id: request-type
     attributes:
-      label: Is your feature request related to a problem with the selected option above?
+      label: Is your request related to a problem or bug with the selected option?
       options:
         - "No — I have an idea for a new capability"
-        - "Yes — something is broken, frustrating, or missing"
+        - "Yes — please open a bug report issue :)"
       default: 0
     validations:
       required: true
   - type: textarea
     id: problem
     attributes:
-      label: If No — What would you like to see? || If Yes — What's the problem? 
-      description:  Describe the new capability or enhancement you'd like added. || A clear and concise description of the issue you're facing.
-      placeholder: I'd love to be able to... || I'm always frustrated when...
+      label: What would you like to see?
+      description: Describe the enhancement you'd like added.
+      placeholder: I'd love to be able to...
     validations:
       required: true
   - type: textarea
@@ -59,12 +58,12 @@ body:
     id: alternatives
     attributes:
       label: Describe alternatives you've considered
-      description: A clear and concise description of any alternative solutions or features you've considered.
+      description: Share any other approaches, workarounds, plugins, and tools you considered.
   - type: input
     id: plugin-version
     attributes:
       label: Plugin Version
-      description: What version of the plugin are you running?
+      description: What version of the plugin are you running? Leave blank if this is about the monorepo.
       placeholder: e.g., 1.0.0
     validations:
       required: false
