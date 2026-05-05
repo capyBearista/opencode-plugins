@@ -2,10 +2,11 @@
 
 <p align="center">Extend agent discovery to the .agents/ directory standard</p>
 <p align="center">
-  <a href="https://www.npmjs.com/package/@capybearista/opencode-agents-loader"><img alt="npm" src="https://img.shields.io/npm/v/@capybearista/opencode-agents-loader?style=flat-square&logo=npm" /></a>
-  <a href="https://www.npmjs.com/package/@capybearista/opencode-agents-loader"><img alt="npm" src="https://img.shields.io/npm/d18m/@capybearista/opencode-agents-loader?style=flat-square&logo=npm" /></a>
-  <a href="https://opencode.ai"><img alt="opencode" src="https://img.shields.io/badge/OpenCode-Plugin-blue?style=flat-square" /></a>
-  <a href="https://opensource.org/licenses/MPL-2.0"><img alt="license" src="https://img.shields.io/badge/License-MPL--2.0-blue.svg?style=flat-square" /></a>
+  <a href="https://www.npmjs.com/package/@capybearista/opencode-agents-loader"><img alt="npm" src="https://img.shields.io/npm/v/@capybearista/opencode-agents-loader?style=flat-square&color=8d60e6" /></a>
+  <a href="https://www.npmjs.com/package/@capybearista/opencode-agents-loader"><img alt="npm" src="https://img.shields.io/npm/dm/@capybearista/opencode-agents-loader?style=flat-square&color=6067e6" /></a>
+  <a href="https://opencode.ai"><img alt="opencode" src="https://img.shields.io/badge/OpenCode-Plugin-orange?style=flat-square&color=60a5e6
+  " /></a>
+  <a href="https://opensource.org/licenses/MPL-2.0"><img alt="license" src="https://img.shields.io/badge/License-MPL--2.0-blue.svg?style=flat-square&color=60dfe6" /></a>
 </p>
 
 ---
@@ -101,10 +102,6 @@ Place agent markdown files in `agent/` or `agents/` subdirectories:
     project-expert.md
 ```
 
-## Configuration
-
-This plugin requires no manual configuration. It works automatically by reading from `.agents/` directories.
-
 ### Precedence
 
 Existing config entries from `.opencode/` directories always take precedence over `.agents/` entries. The plugin only injects entries that **do not already exist**.
@@ -117,11 +114,15 @@ Within `.agents/` directories, the closest directory to your project wins. Prece
 4. `~/.config/opencode/` (global)
 5. `~/.agents/` (global)
 
+## Configuration
+
+This plugin requires no manual configuration. It works automatically by reading from `.agents/` directories.
+
 ## Troubleshooting
 
 - If commands or agents don't appear, verify your files end in `.md` and include valid YAML frontmatter
 - Confirm the directory naming is `commands/` or `command/`, `agents/` or `agent/`
-- `.opencode/` entries always take priority — remove or rename conflicts there first
+- `.opencode/` entries always take priority—remove or rename conflicts there first
 
 ## Contributing
 
@@ -135,4 +136,4 @@ Please open an issue or check for existing ones before creating a pull request.
 
 ## License
 
-[MPL-2.0](LICENSE.md)
+[MPL-2.0](LICENSE)

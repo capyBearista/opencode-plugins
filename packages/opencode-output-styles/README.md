@@ -2,10 +2,11 @@
 
 <p align="center">Reusable response styles for OpenCode sessions</p>
 <p align="center">
-  <a href="https://www.npmjs.com/package/@capybearista/opencode-output-styles"><img alt="npm" src="https://img.shields.io/npm/v/@capybearista/opencode-output-styles?style=flat-square&logo=npm" /></a>
-  <a href="https://www.npmjs.com/package/@capybearista/opencode-output-styles"><img alt="npm" src="https://img.shields.io/npm/d18m/@capybearista/opencode-output-styles?style=flat-square&logo=npm" /></a>
-  <a href="https://opencode.ai"><img alt="opencode" src="https://img.shields.io/badge/OpenCode-Plugin-blue?style=flat-square" /></a>
-  <a href="https://opensource.org/licenses/MPL-2.0"><img alt="license" src="https://img.shields.io/badge/License-MPL--2.0-blue.svg?style=flat-square" /></a>
+  <a href="https://www.npmjs.com/package/@capybearista/opencode-output-styles"><img alt="npm" src="https://img.shields.io/npm/v/@capybearista/opencode-output-styles?style=flat-square&color=8d60e6" /></a>
+  <a href="https://www.npmjs.com/package/@capybearista/opencode-output-styles"><img alt="npm" src="https://img.shields.io/npm/dm/@capybearista/opencode-output-styles?style=flat-square&color=6067e6" /></a>
+  <a href="https://opencode.ai"><img alt="opencode" src="https://img.shields.io/badge/OpenCode-Plugin-orange?style=flat-square&color=60a5e6
+  " /></a>
+  <a href="https://opensource.org/licenses/MPL-2.0"><img alt="license" src="https://img.shields.io/badge/License-MPL--2.0-blue.svg?style=flat-square&color=60dfe6" /></a>
 </p>
 
 ---
@@ -31,7 +32,7 @@ src/
 
 ## Features
 
-- Ships built-in styles inspired by Claude Code (`explanatory`, `learning`) out of the box
+- Ships built-in styles *inspired* by Claude Code (`explanatory`, `learning`) out of the box
 - Discovers global styles from `~/.config/opencode/output-styles/`
 - Discovers project-local styles from `.opencode/output-styles/`
 - Activates styles with `/output-style <id>`
@@ -102,7 +103,7 @@ For example, to override `explanatory` with a custom version, create `~/.config/
 | `/output-style <id>` | Activates the specified style |
 | `/output-style clear` | Removes the active style |
 
-## Configuration
+### Contract
 
 Style files support the following frontmatter:
 
@@ -125,11 +126,15 @@ The plugin also writes one project-local state file:
 | --- | --- |
 | `.opencode/active-style.json` | Stores the currently selected style id for the project. |
 
+## Configuration
+
+This plugin requires no manual configuration.
+
 ## Troubleshooting
 
 - If `/output-style` shows no results, confirm your style files end in `.md` and include YAML frontmatter.
 - If two styles share the same filename, the project-local version takes precedence over the global one, which takes precedence over the built-in.
-- The `/output-style` command currently uses a plugin API workaround that throws a handled error to short-circuit the command pipeline, because the plugin API does not yet expose a clean command short-circuit path.
+- The `/output-style` command currently uses a plugin API workaround that throws a handled error to short-circuit the command pipeline.
 
 ## Contributing
 
@@ -137,10 +142,10 @@ This package lives in the `opencode-plugins` monorepo.
 
 - Run `bun run build`, `bun run typecheck`, `bun run lint`, and `bun test` before opening a PR.
 - Keep the plugin focused on style discovery, persistence, and prompt appending.
-- Prefer small, direct changes over expanding the plugin into broader prompt-rewriting behavior.
+- Prefer small, direct changes.
 
 Please open an issue or check for existing ones before creating a pull request.
 
 ## License
 
-[MPL-2.0](LICENSE.md)
+[MPL-2.0](LICENSE)

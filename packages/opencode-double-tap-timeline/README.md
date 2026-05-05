@@ -2,10 +2,11 @@
 
 <p align="center">Double-tap Escape to open the timeline modal</p>
 <p align="center">
-  <a href="https://www.npmjs.com/package/@capybearista/opencode-double-tap-timeline"><img alt="npm" src="https://img.shields.io/npm/v/@capybearista/opencode-double-tap-timeline?style=flat-square&logo=npm" /></a>
-  <a href="https://www.npmjs.com/package/@capybearista/opencode-double-tap-timeline"><img alt="npm" src="https://img.shields.io/npm/dm/@capybearista/opencode-double-tap-timeline?style=flat-square&logo=npm" /></a>
-  <a href="https://opencode.ai"><img alt="opencode" src="https://img.shields.io/badge/OpenCode-Plugin-blue?style=flat-square" /></a>
-  <a href="https://opensource.org/licenses/MPL-2.0"><img alt="license" src="https://img.shields.io/badge/License-MPL--2.0-blue.svg?style=flat-square" /></a>
+  <a href="https://www.npmjs.com/package/@capybearista/opencode-double-tap-timeline"><img alt="npm" src="https://img.shields.io/npm/v/@capybearista/opencode-double-tap-timeline?style=flat-square&color=8d60e6" /></a>
+  <a href="https://www.npmjs.com/package/@capybearista/opencode-double-tap-timeline"><img alt="npm" src="https://img.shields.io/npm/dm/@capybearista/opencode-double-tap-timeline?style=flat-square&color=6067e6" /></a>
+  <a href="https://opencode.ai"><img alt="opencode" src="https://img.shields.io/badge/OpenCode-Plugin-orange?style=flat-square&color=60a5e6
+  " /></a>
+  <a href="https://opensource.org/licenses/MPL-2.0"><img alt="license" src="https://img.shields.io/badge/License-MPL--2.0-blue.svg?style=flat-square&color=60dfe6" /></a>
 </p>
 
 ---
@@ -49,13 +50,6 @@ Add the plugin to `tui.json` or `tui.jsonc`:
 }
 ```
 
-You can also install it through the CLI:
-
-```bash
-opencode plugin -g @capybearista/opencode-double-tap-timeline    # global install
-opencode plugin @capybearista/opencode-double-tap-timeline       # project-local install
-```
-
 ## Usage
 
 1. Open a session in OpenCode
@@ -70,9 +64,8 @@ This plugin requires no manual configuration.
 
 ## Troubleshooting
 
-- If double-tap doesn't work, ensure you're in a session screen (not the home screen)
-- If a dialog is open, the timeline won't trigger — close any open dialogs first
-- The plugin uses OpenTUI's `useKeyboard` hook, which requires `@opentui/solid` installed
+- If double-tap doesn't work, ensure you're in a session screen (not the home screen with the opencode logo)
+- If a dialog is open, the timeline won't trigger. Close any open dialogs first
 
 ## Contributing
 
@@ -86,4 +79,4 @@ Please open an issue or check for existing ones before creating a pull request.
 
 ## License
 
-[MPL-2.0](LICENSE.md)
+[MPL-2.0](LICENSE)
