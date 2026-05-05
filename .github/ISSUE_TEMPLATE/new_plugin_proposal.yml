@@ -23,7 +23,7 @@ body:
     attributes:
       label: Proposed plugin archetype
       description: In a few words, what problem does this plugin solve?
-      placeholder: e.g., It solves ... in one prompt
+      placeholder: e.g., It single-handedly achieves AGI...
     validations:
       required: true
   - type: textarea
