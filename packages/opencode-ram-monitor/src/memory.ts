@@ -7,11 +7,82 @@ import { promisify } from "node:util";
 const EXEC_OPTS = { timeout: 5000, windowsHide: true };
 const execAsync = promisify(exec);
 
+async function getRuntimeSessionPids(): Promise<number[]> {
+  const osPlatform = platform();
+
+  if (osPlatform === "linux" || osPlatform === "darwin") {
+    try {
+      const { stdout } = await execAsync("ps -eo pid=,args=", EXEC_OPTS);
+      const corePids: number[] = [];
+      const launcherPids: number[] = [];
+
+      for (const line of stdout.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        const firstSpace = trimmed.indexOf(" ");
+        if (firstSpace === -1) continue;
+
+        const pid = parseInt(trimmed.slice(0, firstSpace), 10);
+        if (Number.isNaN(pid)) continue;
+
+        const args = trimmed.slice(firstSpace + 1).toLowerCase();
+        if (args.includes("/bin/.opencode")) {
+          corePids.push(pid);
+        } else if (args.includes("/bin/opencode")) {
+          launcherPids.push(pid);
+        }
+      }
+
+      return corePids.length > 0 ? corePids : launcherPids;
+    } catch {
+      return [];
+    }
+  }
+
+  if (osPlatform === "win32") {
+    try {
+      const { stdout } = await execAsync(
+        "wmic process get ProcessId,CommandLine /format:csv",
+        EXEC_OPTS,
+      );
+      const corePids: number[] = [];
+      const launcherPids: number[] = [];
+
+      for (const line of stdout.replace(/\r\n/g, "\n").split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed?.includes(",")) continue;
+
+        const columns = trimmed.split(",");
+        if (columns.length < 3) continue;
+
+        const pid = parseInt(columns[columns.length - 1], 10);
+        if (Number.isNaN(pid)) continue;
+
+        const commandLine = columns.slice(1, -1).join(",").toLowerCase();
+        if (commandLine.includes("\\.opencode")) {
+          corePids.push(pid);
+        } else if (commandLine.includes("\\opencode") || commandLine.includes("/opencode")) {
+          launcherPids.push(pid);
+        }
+      }
+
+      return corePids.length > 0 ? corePids : launcherPids;
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+}
+
 export async function getActiveSessions(): Promise<number[]> {
-  const pids: number[] = [process.pid]; // Always include current process
+  const pids: number[] = [process.pid];
   const stateDirs = [
     join(homedir(), ".opencode", "state"),
-    join(homedir(), ".cache", "opencode", "state"), // Fallback
+    join(homedir(), ".cache", "opencode", "state"),
+    join(homedir(), ".local", "state", "opencode"),
+    join(homedir(), ".local", "state", "opencode", "locks"),
   ];
 
   for (const dir of stateDirs) {
@@ -26,7 +97,6 @@ export async function getActiveSessions(): Promise<number[]> {
               pids.push(data.pid);
             }
           } catch {
-            // fallback: maybe the filename has PID or the lockfile is just the PID
             const pid = parseInt(content.trim(), 10);
             if (!Number.isNaN(pid)) {
               pids.push(pid);
@@ -34,21 +104,28 @@ export async function getActiveSessions(): Promise<number[]> {
           }
         }
       }
-    } catch {
-      // Directory doesn't exist or is unreadable, ignore
-    }
+    } catch {}
   }
 
-  // Deduplicate PIDs
+  const runtimePids = await getRuntimeSessionPids();
+  pids.push(...runtimePids);
+
   return [...new Set(pids)];
 }
 
-export async function getLightweightRam(): Promise<number> {
+export interface LightweightRamResult {
+  current: number;
+  total: number;
+  count: number;
+}
+
+export async function getLightweightRam(): Promise<LightweightRamResult> {
   const pids = await getActiveSessions();
-  if (pids.length === 0) return 0;
+  if (pids.length === 0) return { current: 0, total: 0, count: 0 };
 
   const osPlatform = platform();
   let totalRss = 0;
+  let currentRss = 0;
 
   if (osPlatform === "linux") {
     // Fast path for Linux/WSL - read VmRSS from /proc/<pid>/status (kB)
@@ -57,7 +134,9 @@ export async function getLightweightRam(): Promise<number> {
         const status = await readFile(`/proc/${pid}/status`, "utf-8");
         const match = status.match(/VmRSS:\s+(\d+)\s+kB/);
         if (match) {
-          totalRss += parseInt(match[1], 10) * 1024;
+          const rss = parseInt(match[1], 10) * 1024;
+          totalRss += rss;
+          if (pid === process.pid) currentRss = rss;
         }
       } catch {
         // Process might have exited or permission denied
@@ -69,7 +148,11 @@ export async function getLightweightRam(): Promise<number> {
       try {
         const { stdout } = await execAsync(`ps -o rss= -p ${pid}`, EXEC_OPTS);
         const rssKb = parseInt(stdout.trim(), 10);
-        if (!Number.isNaN(rssKb)) totalRss += rssKb * 1024;
+        if (!Number.isNaN(rssKb)) {
+          const rss = rssKb * 1024;
+          totalRss += rss;
+          if (pid === process.pid) currentRss = rss;
+        }
       } catch {
         // Process might have exited
       }
@@ -84,7 +167,10 @@ export async function getLightweightRam(): Promise<number> {
         const lines = stdout.trim().split("\n").slice(1); // skip header
         for (const line of lines) {
           const rssBytes = parseInt(line.trim(), 10);
-          if (!Number.isNaN(rssBytes)) totalRss += rssBytes;
+          if (!Number.isNaN(rssBytes)) {
+            totalRss += rssBytes;
+            if (pid === process.pid) currentRss = rssBytes;
+          }
         }
       } catch {
         // Process might have exited
@@ -92,10 +178,19 @@ export async function getLightweightRam(): Promise<number> {
     }
   } else {
     // Fallback: just current process
-    totalRss = process.memoryUsage().rss;
+    currentRss = process.memoryUsage().rss;
+    totalRss = currentRss;
   }
 
-  return totalRss;
+  if (currentRss === 0 && totalRss > 0) {
+    currentRss = process.memoryUsage().rss;
+  }
+
+  return {
+    current: currentRss,
+    total: totalRss,
+    count: pids.length,
+  };
 }
 
 export interface ProcessNode {
