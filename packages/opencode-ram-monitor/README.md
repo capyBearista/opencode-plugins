@@ -16,15 +16,33 @@
 
 ## Philosophy: Extending OpenCode
 
-OpenCode is designed to be highly extensible. This plugin hooks into the OpenCode lifecycle to provide additional functionality seamlessly into your workflows. <!-- AGENT: ONLY WHEN THE PLUGIN IS AT V1.0.0—as per user instruction, add an additional 1-2 sentences to this paragraph. OTHERWISE, LEAVE THIS INSTRUCTION IN >
+OpenCode is designed to be highly extensible. This plugin hooks into the OpenCode lifecycle to provide additional functionality seamlessly into your workflows. By intercepting host commands and injecting UI components into the sidebar, we demonstrate the power of OpenCode's dual plugin architecture (server and TUI). It operates entirely locally and gracefully degrades if process sampling fails.
 
 ### Architecture
 
-<!-- AGENT: ONLY WHEN THE PLUGIN IS AT V1.0.0—as per user instruction, replace this comment with an ASCII tree or diagram explaining the high-level architecture or hook structure of the plugin. OTHERWISE, LEAVE THIS INSTRUCTION IN -->
+```text
+Host Architecture
+├── Server Plugin (src/server.ts)
+│   ├── command.execute.before hook
+│   │   └── Intercepts `/ram`
+│   └── Injects raw heavy process tree into the active session
+│
+└── TUI Plugin (src/sidebar.tsx)
+    ├── sidebar_content slot
+    │   └── Renders `RamWidget` in the TUI sidebar
+    ├── Poller
+    │   └── Calls `getLightweightRam()` at `refreshIntervalMs`
+    └── Process Sampler (src/memory.ts)
+        └── Discovers `opencode` PIDs via `ps`/`wmic` to get total session count
+```
 
 ## Features
 
-<!-- AGENT: ONLY WHEN THE PLUGIN IS AT V1.0.0—as per user instruction, replace this comment with a bulleted list of the plugin's main features and capabilities. OTHERWISE, LEAVE THIS INSTRUCTION IN -->
+- **Real-time Sidebar Widget**: View your current and total RAM usage natively in the OpenCode TUI sidebar.
+- **Active Session Tracking**: Automatically discovers all running OpenCode sessions and aggregates their RAM.
+- **Cross-Platform**: Uses native commands (`ps` on Unix, `wmic` on Windows) for lightweight zero-dependency metrics.
+- **`/ram` Command**: Intercepts the `/ram` command to provide a detailed, heavy process-tree breakdown of the current session right in the chat.
+- **Configurable**: Polling intervals can be customized via `.opencode/opencode.json`.
 
 ## Install
 
@@ -44,15 +62,34 @@ Also, add the plugin to `tui.json` or `tui.jsonc`:
 
 ## Usage
 
-<!-- AGENT: ONLY WHEN THE PLUGIN IS AT V1.0.0—as per user instruction, replace this comment with actual usage instructions or examples. OTHERWISE, LEAVE THIS INSTRUCTION IN -->
+Once installed, the RAM monitor will automatically appear in your OpenCode TUI sidebar, polling your system to display the memory usage of your current session and the aggregate total across all active sessions.
+
+To get a detailed heavy process tree of your current session's memory usage, simply type `/ram` in your OpenCode chat.
 
 ## Configuration
 
-<!-- AGENT: ONLY WHEN THE PLUGIN IS AT V1.0.0—as per user instruction, replace this comment with a Markdown table detailing the properties in the config JSON, their types, and descriptions. If no configuration *of the plugin itself* is needed, write in this section, "This plugin requires no manual configuration.". OTHERWISE, LEAVE THIS INSTRUCTION IN -->
+Add the following to your `.opencode/opencode.json` to configure the plugin:
+
+| Property | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `experimental.ramMonitor.refreshIntervalMs` | `number` | `5000` | Polling interval for the sidebar widget in milliseconds. Clamped between `1000` and `60000`. |
+
+Example:
+```json
+{
+  "experimental": {
+    "ramMonitor": {
+      "refreshIntervalMs": 2000
+    }
+  }
+}
+```
 
 ## Troubleshooting
 
-<!-- AGENT: ONLY WHEN THE PLUGIN IS AT V1.0.0—as per user instruction, replace this comment with actual troubleshooting tips in the form of bullet points. OTHERWISE, LEAVE THIS INSTRUCTION IN -->
+- **Widget missing from sidebar**: Ensure both the server and TUI plugins are registered in `opencode.json` and `tui.json` respectively. If `refreshIntervalMs` is configured, ensure your `opencode.json` is valid, as comments can cause the config reader to fail or fallback.
+- **Active count seems off**: The plugin tokenizes command lines to find active `opencode` processes. Deeply nested wrappers or complex invocation aliases might not be matched.
+- **Total RAM shows `0`**: If sampling fails completely (e.g. `ps` is missing), the plugin falls back to using `process.memoryUsage().rss` of the current process. Ensure standard process utilities are available.
 
 ## Contributing
 

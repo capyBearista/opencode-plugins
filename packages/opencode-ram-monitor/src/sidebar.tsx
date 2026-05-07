@@ -1,12 +1,21 @@
 /** @jsxImportSource @opentui/solid */
+
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal, onCleanup, onMount } from "solid-js";
 import { formatBytes, getLightweightRam, type LightweightRamResult } from "./memory.js";
+import {
+  getDefaultRefreshIntervalMs,
+  getErrorMessage,
+  normalizeRefreshIntervalMs,
+} from "./sidebar-config.js";
 
 function RamWidget(props: { api: TuiPluginApi }) {
   const [ram, setRam] = createSignal<LightweightRamResult>({ current: 0, total: 0, count: 0 });
   const [error, setError] = createSignal<string | null>(null);
-  const [intervalMs, setIntervalMs] = createSignal<number>(5000);
+  const [intervalMs, setIntervalMs] = createSignal<number>(getDefaultRefreshIntervalMs());
+  const [tick, setTick] = createSignal(0);
 
   let disposed = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -14,18 +23,23 @@ function RamWidget(props: { api: TuiPluginApi }) {
   // Fetch config once on mount
   const loadConfig = async () => {
     try {
-      const response = await props.api.client.config.get();
-      const rawConfig = (
-        response.data as unknown as { experimental?: { ramMonitor?: Record<string, unknown> } }
-      )?.experimental?.ramMonitor;
-      if (rawConfig?.refreshIntervalMs) {
-        setIntervalMs(Number(rawConfig.refreshIntervalMs) || 5000);
+      const worktree = props.api.state.path?.worktree || process.cwd();
+      const configPath = path.join(worktree, ".opencode", "opencode.json");
+      const configContent = await fs.readFile(configPath, "utf8");
+
+      // Basic JSON parsing. Real parser would strip comments, but since
+      // comments break strict JSON anyway, we just try parse.
+      const parsed = JSON.parse(configContent);
+      const rawConfig = parsed?.experimental?.ramMonitor;
+
+      if (rawConfig && "refreshIntervalMs" in rawConfig) {
+        const nextInterval = normalizeRefreshIntervalMs(rawConfig.refreshIntervalMs);
+        setIntervalMs(nextInterval);
       }
     } catch {
-      // fallback to 5000
+      // Keep default interval if file missing or invalid.
     }
   };
-  void loadConfig();
 
   const poll = async () => {
     try {
@@ -33,11 +47,11 @@ function RamWidget(props: { api: TuiPluginApi }) {
       if (!disposed) {
         setRam(currentRam);
         setError(null);
+        setTick((t) => t + 1);
       }
     } catch (err: unknown) {
       if (!disposed) {
-        setError((err as Error).message || "RAM error");
-        console.error("RAM Monitor Poll Error:", err);
+        setError(getErrorMessage(err));
       }
     }
 
@@ -46,7 +60,14 @@ function RamWidget(props: { api: TuiPluginApi }) {
     }
   };
 
-  void poll();
+  onMount(() => {
+    void (async () => {
+      await loadConfig();
+      if (!disposed) {
+        void poll();
+      }
+    })();
+  });
 
   onCleanup(() => {
     disposed = true;
@@ -56,7 +77,7 @@ function RamWidget(props: { api: TuiPluginApi }) {
   return (
     <box gap={0} padding={1}>
       <text fg={props.api.theme.current.text}>
-        <b>RAM Usage</b>
+        <b>RAM Usage</b> {tick() % 2 === 0 ? "●" : "○"}
       </text>
       <text fg={error() ? props.api.theme.current.error : props.api.theme.current.text}>
         {error() ? `Error: ${error()}` : `Current: ${formatBytes(ram().current)}`}
@@ -73,8 +94,6 @@ function RamWidget(props: { api: TuiPluginApi }) {
 const SIDEBAR_ORDER = 150;
 
 const tui: TuiPlugin = async (api) => {
-  console.log("RamMonitor TUI plugin loading with ID: capybearista.opencode-ram-monitor");
-
   api.slots.register({
     order: SIDEBAR_ORDER,
     slots: {
