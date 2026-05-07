@@ -1,0 +1,36 @@
+{
+  "name": "@capybearista/opencode-adversarial-review",
+  "version": "0.0.0",
+  "description": "Adversarial code review plugin",
+  "author": "capyBearista <capybearista@gmail.com>",
+  "license": "MPL-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "check": "bunx @biomejs/biome check --write .",
+    "lint": "bunx @biomejs/biome check .",
+    "ci": "bunx @biomejs/biome ci .",
+    "test": "bun test"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.14.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": ">=1.14.0",
+    "@tsconfig/node22": "^22.0.0",
+    "@types/bun": "latest",
+    "typescript": "^5.8.0"
+  }
+}
