@@ -11,6 +11,7 @@
 - [ ] opencode-agents-loader
 - [ ] opencode-double-tap-timeline
 - [ ] opencode-output-styles
+- [ ] opencode-ram-monitor
 - [ ] opencode-plugins (this monorepo itself)
 - [ ] Other: _______
 
