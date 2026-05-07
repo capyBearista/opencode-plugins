@@ -7,6 +7,76 @@ import { promisify } from "node:util";
 const EXEC_OPTS = { timeout: 5000, windowsHide: true };
 const execAsync = promisify(exec);
 
+function splitCommandTokens(commandLine: string): string[] {
+  const matches = commandLine.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
+  if (!matches) return [];
+  return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
+}
+
+function getTokenBaseName(token: string): string {
+  const parts = token
+    .toLowerCase()
+    .split(/[\\/]+/)
+    .filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : "";
+}
+
+function classifyOpencodeBinary(token: string): "core" | "launcher" | null {
+  const baseName = getTokenBaseName(token);
+  if (baseName === ".opencode" || baseName === ".opencode.exe") return "core";
+  if (baseName === "opencode" || baseName === "opencode.exe") return "launcher";
+  return null;
+}
+
+function nodeOrBunOptionConsumesNextToken(token: string): boolean {
+  if (token === "-r" || token === "--require") return true;
+  if (token === "--loader" || token === "--import") return true;
+  if (token === "-e" || token === "--eval") return true;
+  if (token === "-p" || token === "--print") return true;
+  if (token === "--env-file") return true;
+  return false;
+}
+
+export function classifyOpencodeProcess(commandLine: string): "core" | "launcher" | null {
+  const tokens = splitCommandTokens(commandLine);
+  if (tokens.length === 0) return null;
+
+  const first = getTokenBaseName(tokens[0]);
+  const firstClassification = classifyOpencodeBinary(tokens[0]);
+  if (firstClassification) return firstClassification;
+
+  if (first === "node" || first === "node.exe" || first === "bun" || first === "bun.exe") {
+    let skipNextToken = false;
+    for (let index = 1; index < tokens.length; index++) {
+      const token = tokens[index];
+      if (!token) continue;
+
+      if (skipNextToken) {
+        skipNextToken = false;
+        continue;
+      }
+
+      if (token === "--") {
+        if (index + 1 < tokens.length) {
+          return classifyOpencodeBinary(tokens[index + 1]);
+        }
+        return null;
+      }
+
+      if (token.startsWith("-")) {
+        if (nodeOrBunOptionConsumesNextToken(token)) {
+          skipNextToken = !token.includes("=");
+        }
+        continue;
+      }
+
+      return classifyOpencodeBinary(token);
+    }
+  }
+
+  return null;
+}
+
 async function getRuntimeSessionPids(): Promise<number[]> {
   const osPlatform = platform();
 
@@ -26,12 +96,10 @@ async function getRuntimeSessionPids(): Promise<number[]> {
         const pid = parseInt(trimmed.slice(0, firstSpace), 10);
         if (Number.isNaN(pid)) continue;
 
-        const args = trimmed.slice(firstSpace + 1).toLowerCase();
-        if (args.includes("/bin/.opencode")) {
-          corePids.push(pid);
-        } else if (args.includes("/bin/opencode")) {
-          launcherPids.push(pid);
-        }
+        const args = trimmed.slice(firstSpace + 1);
+        const processKind = classifyOpencodeProcess(args);
+        if (processKind === "core") corePids.push(pid);
+        if (processKind === "launcher") launcherPids.push(pid);
       }
 
       return corePids.length > 0 ? corePids : launcherPids;
@@ -43,28 +111,31 @@ async function getRuntimeSessionPids(): Promise<number[]> {
   if (osPlatform === "win32") {
     try {
       const { stdout } = await execAsync(
-        "wmic process get ProcessId,CommandLine /format:csv",
+        "wmic process get CommandLine,ProcessId /format:value",
         EXEC_OPTS,
       );
       const corePids: number[] = [];
       const launcherPids: number[] = [];
 
-      for (const line of stdout.replace(/\r\n/g, "\n").split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed?.includes(",")) continue;
+      const normalized = stdout.replace(/\r\n/g, "\n").trim();
+      const blocks = normalized.split(/\n\n+/);
+      for (const block of blocks) {
+        const lines = block.trim().split("\n");
+        const entry: Record<string, string> = {};
+        for (const line of lines) {
+          const separatorIndex = line.indexOf("=");
+          if (separatorIndex === -1) continue;
+          const key = line.slice(0, separatorIndex).trim();
+          const value = line.slice(separatorIndex + 1).trim();
+          entry[key] = value;
+        }
 
-        const columns = trimmed.split(",");
-        if (columns.length < 3) continue;
-
-        const pid = parseInt(columns[columns.length - 1], 10);
+        const pid = parseInt(entry.ProcessId, 10);
         if (Number.isNaN(pid)) continue;
 
-        const commandLine = columns.slice(1, -1).join(",").toLowerCase();
-        if (commandLine.includes("\\.opencode")) {
-          corePids.push(pid);
-        } else if (commandLine.includes("\\opencode") || commandLine.includes("/opencode")) {
-          launcherPids.push(pid);
-        }
+        const processKind = classifyOpencodeProcess(entry.CommandLine || "");
+        if (processKind === "core") corePids.push(pid);
+        if (processKind === "launcher") launcherPids.push(pid);
       }
 
       return corePids.length > 0 ? corePids : launcherPids;
@@ -126,6 +197,7 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
   const osPlatform = platform();
   let totalRss = 0;
   let currentRss = 0;
+  const sampledPids = new Set<number>();
 
   if (osPlatform === "linux") {
     // Fast path for Linux/WSL - read VmRSS from /proc/<pid>/status (kB)
@@ -136,6 +208,7 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
         if (match) {
           const rss = parseInt(match[1], 10) * 1024;
           totalRss += rss;
+          sampledPids.add(pid);
           if (pid === process.pid) currentRss = rss;
         }
       } catch {
@@ -151,6 +224,7 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
         if (!Number.isNaN(rssKb)) {
           const rss = rssKb * 1024;
           totalRss += rss;
+          sampledPids.add(pid);
           if (pid === process.pid) currentRss = rss;
         }
       } catch {
@@ -163,12 +237,14 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
       try {
         const { stdout } = await execAsync(
           `wmic process where "ProcessId=${pid}" get WorkingSetSize`,
+          EXEC_OPTS,
         );
         const lines = stdout.trim().split("\n").slice(1); // skip header
         for (const line of lines) {
           const rssBytes = parseInt(line.trim(), 10);
           if (!Number.isNaN(rssBytes)) {
             totalRss += rssBytes;
+            sampledPids.add(pid);
             if (pid === process.pid) currentRss = rssBytes;
           }
         }
@@ -180,16 +256,22 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
     // Fallback: just current process
     currentRss = process.memoryUsage().rss;
     totalRss = currentRss;
+    sampledPids.add(process.pid);
   }
 
-  if (currentRss === 0 && totalRss > 0) {
-    currentRss = process.memoryUsage().rss;
+  if (currentRss === 0) {
+    const fallbackCurrentRss = process.memoryUsage().rss;
+    currentRss = fallbackCurrentRss;
+    if (!sampledPids.has(process.pid)) {
+      totalRss += fallbackCurrentRss;
+      sampledPids.add(process.pid);
+    }
   }
 
   return {
     current: currentRss,
     total: totalRss,
-    count: pids.length,
+    count: sampledPids.size,
   };
 }
 
@@ -266,7 +348,7 @@ export async function getHeavyProcessTree(): Promise<string> {
   }
 
   for (const p of processes) {
-    if (procMap.has(p.ppid)) {
+    if (p.ppid !== p.pid && procMap.has(p.ppid)) {
       procMap.get(p.ppid)?.children.push(p);
     }
   }
@@ -285,25 +367,45 @@ export async function getHeavyProcessTree(): Promise<string> {
     return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
   };
 
-  const buildTreeString = (node: ProcessNode, prefix: string, isLast: boolean): string => {
+  const buildTreeString = (
+    node: ProcessNode,
+    prefix: string,
+    isLast: boolean,
+    visited: Set<number>,
+  ): string => {
+    if (visited.has(node.pid)) {
+      return `${prefix}${isLast ? "└──" : "├──"} [${node.command}] (PID ${node.pid}) - cycle detected\n`;
+    }
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(node.pid);
+
     let result = `${prefix}${isLast ? "└──" : "├──"} [${node.command}] (PID ${node.pid}) - ${formatSize(node.rss)}\n`;
 
     const childPrefix = prefix + (isLast ? "    " : "│   ");
     for (let i = 0; i < node.children.length; i++) {
-      result += buildTreeString(node.children[i], childPrefix, i === node.children.length - 1);
+      result += buildTreeString(
+        node.children[i],
+        childPrefix,
+        i === node.children.length - 1,
+        nextVisited,
+      );
     }
     return result;
   };
 
-  const getTreeSum = (node: ProcessNode): number => {
-    return node.rss + node.children.reduce((acc, child) => acc + getTreeSum(child), 0);
+  const getTreeSum = (node: ProcessNode, visited: Set<number>): number => {
+    if (visited.has(node.pid)) return 0;
+    const nextVisited = new Set(visited);
+    nextVisited.add(node.pid);
+    return node.rss + node.children.reduce((acc, child) => acc + getTreeSum(child, nextVisited), 0);
   };
 
   for (const root of targetRoots) {
-    const totalMem = getTreeSum(root);
+    const totalMem = getTreeSum(root, new Set<number>());
     markdown += `**Session (PID ${root.pid}) - Total: ${formatSize(totalMem)}**\n`;
     markdown += `\`\`\`text\n`;
-    markdown += buildTreeString(root, "", true);
+    markdown += buildTreeString(root, "", true, new Set<number>());
     markdown += `\`\`\`\n\n`;
   }
 

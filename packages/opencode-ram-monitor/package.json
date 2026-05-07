@@ -11,7 +11,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc --project tsconfig.build.json --emitDeclarationOnly && bun build src/server.ts --outfile=dist/server.js --target=bun --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*' && bun build src/memory.ts --outfile=dist/memory.js --target=bun && cp src/sidebar.tsx dist/sidebar.tsx",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json --emitDeclarationOnly && bun build src/server.ts --outfile=dist/server.js --target=bun --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*' && bun build src/memory.ts --outfile=dist/memory.js --target=bun && bun build src/sidebar-config.ts --outfile=dist/sidebar-config.js --target=bun && cp src/sidebar.tsx dist/sidebar.tsx",
     "typecheck": "tsc --noEmit",
     "check": "bunx @biomejs/biome check --write .",
     "lint": "bunx @biomejs/biome check .",
