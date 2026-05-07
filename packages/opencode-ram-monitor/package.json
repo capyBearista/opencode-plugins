@@ -5,13 +5,13 @@
   "author": "capyBearista <capybearista@gmail.com>",
   "license": "MPL-2.0",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc --project tsconfig.build.json --emitDeclarationOnly && bun build src/index.ts --outdir=dist --target=bun --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*' && [ -f dist/src/index.js ] && mv dist/src/index.js dist/index.js && rm -rf dist/src || true",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json --emitDeclarationOnly && bun build src/server.ts --outfile=dist/server.js --target=bun --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*' && bun build src/memory.ts --outfile=dist/memory.js --target=bun && cp src/sidebar.tsx dist/sidebar.tsx",
     "typecheck": "tsc --noEmit",
     "check": "bunx @biomejs/biome check --write .",
     "lint": "bunx @biomejs/biome check .",
@@ -20,14 +20,22 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
     },
     "./tui": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./dist/sidebar.d.ts",
+      "default": "./dist/sidebar.tsx"
     }
   },
+  "oc-plugin": [
+    "server",
+    "tui"
+  ],
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.14.24",
     "@opentui/solid": ">=0.1.103",
