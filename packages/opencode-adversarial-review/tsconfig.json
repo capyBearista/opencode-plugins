@@ -1,12 +1,8 @@
 {
-  "extends": "@tsconfig/node22/tsconfig.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
     "rootDir": "src",
-    "outDir": "dist",
-    "declaration": true,
-    "sourceMap": true
+    "outDir": "dist"
   },
   "include": ["src"],
   "exclude": ["dist", "node_modules", "src/**/*.test.ts"]
