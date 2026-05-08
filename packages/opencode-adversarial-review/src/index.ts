@@ -122,11 +122,7 @@ Target: working tree diff
 const AGENT_NAME = "adversarial-review";
 const CMD_NAME = "adversarial-review";
 
-export const AdversarialReviewPlugin: Plugin = async (ctx) => {
-  const client = ctx.client;
-  let reviewGateEnabled = false;
-  let pendingReview = false;
-
+export const AdversarialReviewPlugin: Plugin = async () => {
   return {
     config: async (cfg) => {
       try {
@@ -173,43 +169,12 @@ export const AdversarialReviewPlugin: Plugin = async (ctx) => {
         cmd.agent ??= AGENT_NAME;
         cmd.subtask ??= true;
         cmd.template ??= COMMAND_TEMPLATE;
-
-        reviewGateEnabled = (cfg as any).experimental?.reviewGate?.enabled === true;
       } catch (err) {
         console.error(
           `[${PLUGIN_ID}] Failed to register agent and command:`,
           err instanceof Error ? err.message : String(err),
         );
         throw err;
-      }
-    },
-
-    "tool.execute.after": async (input, _output) => {
-      if (!reviewGateEnabled || !client) return;
-      if (["edit", "write", "patch"].includes(input.tool)) {
-        pendingReview = true;
-      }
-    },
-
-    "chat.message": async (input, _output) => {
-      if (!reviewGateEnabled || !client) return;
-      if (input.agent === AGENT_NAME) {
-        pendingReview = false;
-        return;
-      }
-      if (!pendingReview) return;
-      pendingReview = false;
-
-      try {
-        await client.session.command({
-          path: { id: input.sessionID },
-          body: { command: CMD_NAME, arguments: "" },
-        });
-      } catch (err) {
-        console.error(
-          `[${PLUGIN_ID}] Review gate failed:`,
-          err instanceof Error ? err.message : String(err),
-        );
       }
     },
   };
