@@ -1,5 +1,11 @@
 # @capybearista/opencode-double-tap-timeline
 
+## 1.0.1
+
+### Patch Changes
+
+- 9a98d68: Fix for OpenCode v1.14.42 keymap API change
+
 ## 1.0.0
 
 ### Major Changes
