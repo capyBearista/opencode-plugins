@@ -116,7 +116,7 @@ Target: working tree diff
 !\`printf "=== Status ===\\n" && git status --short --untracked-files=all\`
 !\`printf "=== Recent Commits ===\\n" && git log --oneline -3\`
 !\`printf "=== Changed Files ===\\n" && git diff HEAD --name-only\`
-!\`printf "=== Untracked File Contents ===\\n"; git ls-files --others --exclude-standard | head -5 | while IFS= read -r f; do printf "--- %s ---\\n" "$f" && cat -- "$f" 2>/dev/null | head -c 16384 && printf "\\n"; done\`
+!\`printf "=== Untracked File Contents ===\\n"; git -c core.quotepath=false ls-files --others --exclude-standard | head -5 | while IFS= read -r f; do printf "--- %s ---\\n" "$f" && cat -- "$f" 2>/dev/null | head -c 16384 && printf "\\n"; done\`
 !\`FILES=\$(git diff HEAD --name-only | wc -l | tr -d ' '); if [ "\$FILES" -gt 0 ] && [ "\$FILES" -le 5 ]; then printf "=== Full Diff ===\\n" && git diff HEAD; else printf "=== Diff Stat ===\\n" && git diff HEAD --stat; fi\``;
 
 const AGENT_NAME = "adversarial-review";
