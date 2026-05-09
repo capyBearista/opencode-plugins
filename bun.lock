@@ -16,6 +16,19 @@
         "typescript": "^6.0.3",
       },
     },
+    "packages/opencode-adversarial-review": {
+      "name": "@capybearista/opencode-adversarial-review",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@opencode-ai/plugin": ">=1.14.0",
+        "@tsconfig/node22": "^22.0.0",
+        "@types/bun": "latest",
+        "typescript": "^6.0.3",
+      },
+      "peerDependencies": {
+        "@opencode-ai/plugin": ">=1.14.0",
+      },
+    },
     "packages/opencode-agents-loader": {
       "name": "@capybearista/opencode-agents-loader",
       "version": "1.0.0",
@@ -136,6 +149,8 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.4.14", "", { "os": "win32", "cpu": "arm64" }, "sha512-M3EH5hqOI/F/FUA2u4xcLoUgmxd218mvuj/6JL7Hv2toQvr2/AdOvKSpGkoRuWFCtQPVa+ZqkEV3Q5xBA9+XSA=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.4.14", "", { "os": "win32", "cpu": "x64" }, "sha512-WL0EG5qE+EAKomGXbf2g6VnSKJhTL3tXC0QRzWRwA5VpjxNYa6H4P7ZWfymbGE4IhZZQi1KXQ2R0YjwInmz2fA=="],
+
+    "@capybearista/opencode-adversarial-review": ["@capybearista/opencode-adversarial-review@workspace:packages/opencode-adversarial-review"],
 
     "@capybearista/opencode-agents-loader": ["@capybearista/opencode-agents-loader@workspace:packages/opencode-agents-loader"],
 
@@ -270,6 +285,8 @@
     "@simple-libs/stream-utils": ["@simple-libs/stream-utils@1.2.0", "", {}, "sha512-KxXvfapcixpz6rVEB6HPjOUZT22yN6v0vI0urQSk1L8MlEWPDFCZkhw2xmkyoTGYeFw7tWTZd7e3lVzRZRN/EA=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
+
+    "@tsconfig/node22": ["@tsconfig/node22@22.0.5", "", {}, "sha512-hLf2ld+sYN/BtOJjHUWOk568dvjFQkHnLNa6zce25GIH+vxKfvTgm3qpaH6ToF5tu/NN0IH66s+Bb5wElHrLcw=="],
 
     "@turbo/darwin-64": ["@turbo/darwin-64@2.9.8", "", { "os": "darwin", "cpu": "x64" }, "sha512-zU1P95ygDpsQ+2QHh7CVTqvYwi9UBlhKWzoIyUnP3vUoge7H9SQEzrd8dj+XcTrslAp9Db3vIBcXtMVoTEYDnA=="],
 
