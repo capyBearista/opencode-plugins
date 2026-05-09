@@ -57,6 +57,16 @@ opencode plugin -g @capybearista/opencode-output-styles@latest    # global insta
 opencode plugin @capybearista/opencode-output-styles@latest       # project-local install
 ```
 
+## Updating
+
+Simply run the following command while no active OpenCode sessions are running:
+
+```bash
+rm -rf ~/.cache/opencode/packages/'opencode-output-styles@latest'/
+```
+
+The next time you open OpenCode, the new version will be installed!
+
 ## Usage
 
 ### Built-in styles
