@@ -45,7 +45,7 @@ Add the plugin to `tui.json` or `tui.jsonc`:
 
 ```json
 {
-  "plugin": ["@capybearista/opencode-double-tap-timeline"]
+  "plugin": ["@capybearista/opencode-double-tap-timeline@latest"]
 }
 ```
 
@@ -78,4 +78,4 @@ Please open an issue or check for existing ones before creating a pull request.
 
 ## License
 
-[MPL-2.0](LICENSE)
+[MPL-2.0](./LICENSE.txt)
