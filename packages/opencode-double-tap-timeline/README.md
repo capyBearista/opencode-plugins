@@ -49,6 +49,16 @@ Add the plugin to `tui.json` or `tui.jsonc`:
 }
 ```
 
+## Updating
+
+Simply run the following command while no active OpenCode sessions are running:
+
+```bash
+rm -rf ~/.cache/opencode/packages/'opencode-double-tap-timeline@latest'/
+```
+
+The next time you open OpenCode, the new version will be installed!
+
 ## Usage
 
 1. Open a session in OpenCode

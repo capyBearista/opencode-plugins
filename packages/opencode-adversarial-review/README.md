@@ -80,6 +80,16 @@ opencode plugin -g @capybearista/opencode-adversarial-review@latest    # global 
 opencode plugin @capybearista/opencode-adversarial-review@latest    # project-local install
 ```
 
+## Updating
+
+Simply run the following command while no active OpenCode sessions are running:
+
+```bash
+rm -rf ~/.cache/opencode/packages/'opencode-adversarial-review@latest'/
+```
+
+The next time you open OpenCode, the new version will be installed!
+
 ## Usage
 
 Run a review on your current working tree changes:
