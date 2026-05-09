@@ -1,7 +1,7 @@
 {
   "name": "@capybearista/opencode-adversarial-review",
   "version": "1.0.0",
-  "description": "Adversarial code review plugin",
+  "description": "Adversarial code review for OpenCode — challenges implementation approach, finds auth gaps, race conditions, and data loss",
   "author": "capyBearista <capybearista@gmail.com>",
   "repository": {
     "type": "git",

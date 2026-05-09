@@ -1,7 +1,7 @@
 {
   "name": "@capybearista/opencode-output-styles",
   "version": "1.0.1",
-  "description": "Output styles plugin for OpenCode",
+  "description": "Persistent response style guidelines for OpenCode sessions — explanatory, learning, and custom modes that survive restarts",
   "author": "capyBearista <capybearista@github.com>",
   "repository": {
     "type": "git",
