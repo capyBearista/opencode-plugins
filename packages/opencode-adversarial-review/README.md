@@ -69,15 +69,15 @@ The plugin uses a **stateless subagent architecture**. When the command is invok
 Add the plugin to `opencode.json` or `opencode.jsonc`:
 ```json
 {
-  "plugin": ["@capybearista/opencode-adversarial-review"]
+  "plugin": ["@capybearista/opencode-adversarial-review@latest"]
 }
 ```
 
 You can also install it through the CLI:
 
 ```bash
-opencode plugin -g @capybearista/opencode-adversarial-review    # global install
-opencode plugin @capybearista/opencode-adversarial-review    # project-local install
+opencode plugin -g @capybearista/opencode-adversarial-review@latest    # global install
+opencode plugin @capybearista/opencode-adversarial-review@latest    # project-local install
 ```
 
 ## Usage
@@ -158,4 +158,4 @@ Please open an issue or check for existing ones before creating a pull request.
 
 ## License
 
-[MPL-2.0](LICENSE)
+[MPL-2.0](./LICENSE.txt)

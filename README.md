@@ -19,13 +19,21 @@
   <a href="https://deepwiki.com/capybearista/opencode-plugins"><img alt="ask deepwiki" src=".github/assets/deepwiki.svg" /></a>
 </p>
 
-A collection of plugins for the OpenCode AI coding agent. These extensions add quality-of-life improvements, user interface features, and new configuration standards.
+A collection of plugins for the OpenCode AI harness. These extensions add quality-of-life improvements, user interface features, and new configuration standards.
 
 ## Meet The Plugins
+
+### 🤺 [opencode-adversarial-review](./packages/opencode-adversarial-review/)
+
+Adversarial code review that challenges your implementation approach and design choices, not just finding bugs. Uses a clean-context subagent so the review stays unbiased by conversation history, prioritizing auth gaps, data loss, etc. Returns structured JSON findings with severity, confidence scores, and recommendations.
+
+*Inspired by Codex*
 
 ### 🗣️ [opencode-output-styles](./packages/opencode-output-styles/)
 
 Persistent response styles for OpenCode sessions. This plugin injects selected guidelines (like "explanatory" or "learning" modes) into the system prompt so they stay active across your session.
+
+*Inspired by Claude Code*
 
 ### 🛠️ [opencode-agents-loader](./packages/opencode-agents-loader/)
 
@@ -35,13 +43,15 @@ Extends command and agent discovery to the `.agents/` directory standard. This e
 
 A keyboard-driven UI extension. Double-tap the Escape key to instantly open the session timeline modal without typing commands or using a mouse.
 
+*Inspired by Claude Code*
+
 ## Installation
 
-You can install any of these plugins globally or locally using the OpenCode CLI:
+You can install any of these plugins globally or project-locally using the OpenCode CLI:
 
 ```bash
-opencode plugin add -g @capybearista/opencode-output-styles
-opencode plugin add @capybearista/opencode-output-styles
+opencode plugin add -g @capybearista/opencode-adversarial-review@latest    # global install
+opencode plugin add @capybearista/opencode-adversarial-review@latest       # project-local install
 ```
 
 Alternatively, add them directly to your `opencode.json`/`opencode.jsonc` configuration file:
@@ -49,18 +59,28 @@ Alternatively, add them directly to your `opencode.json`/`opencode.jsonc` config
 ```json
 {
   "plugin": [
-    "@capybearista/opencode-output-styles",
-    "@capybearista/opencode-agents-loader"
+    "@capybearista/opencode-adversarial-review@latest",
+    "@capybearista/opencode-output-styles@latest",
+    "@capybearista/opencode-agents-loader@latest"
   ]
 }
 ```
 
-For TUI-based plugins, add them directly to `tui.json`/`tui.jsonc`:
+For **TUI-based plugins**, add them directly to `tui.json`/`tui.jsonc`:
 
 ```json
 {
-  "plugin": ["@capybearista/opencode-double-tap-timeline"]
+  "plugin": ["@capybearista/opencode-double-tap-timeline@latest"]
 }
+```
+
+### Updating
+
+OpenCode does NOT care about the `@latest` tag after initial installation of a plugin. Instead, you must either manually set and change the tag (e.g., `@1.0.0` to `@2.0.0`) or simply run this command:
+
+```bash
+rm -rf ~/.cache/opencode/packages/<plugin-name>@latest/
+opencode plugin <plugin-name>@latest --global
 ```
 
 ## What Should I Build Next?
@@ -105,6 +125,10 @@ bun run test
 
 Please review the [contribution guidelines](./CONTRIBUTING.md) before contributing :)
 
+## Disclaimer
+
+This project is not affiliated with the anomalyco/opencode team in any way. These plugins are independently developed and maintained. I do this for the love of the game ¯\\_(ツ)_/¯
+
 ## License
 
-[MPL-2.0](./LICENSE)
+[MPL-2.0](./LICENSE.txt)

@@ -45,15 +45,15 @@ Add the plugin to `opencode.json` or `opencode.jsonc`:
 
 ```json
 {
-  "plugin": ["@capybearista/opencode-agents-loader"]
+  "plugin": ["@capybearista/opencode-agents-loader@latest"]
 }
 ```
 
 You can also install it through the CLI:
 
 ```bash
-opencode plugin -g @capybearista/opencode-agents-loader    # global install
-opencode plugin @capybearista/opencode-agents-loader       # project-local install
+opencode plugin -g @capybearista/opencode-agents-loader@latest    # global install
+opencode plugin @capybearista/opencode-agents-loader@latest       # project-local install
 ```
 
 ## Usage
@@ -135,4 +135,4 @@ Please open an issue or check for existing ones before creating a pull request.
 
 ## License
 
-[MPL-2.0](LICENSE)
+[MPL-2.0](./LICENSE.txt)
