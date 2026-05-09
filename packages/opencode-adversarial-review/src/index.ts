@@ -108,7 +108,7 @@ Before finalizing, check that each finding is:
 const COMMAND_TEMPLATE = `## Adversarial Review
 
 Arguments: $ARGUMENTS
-Target: working tree diff
+Target: code changes
 
 ## Git Context
 
