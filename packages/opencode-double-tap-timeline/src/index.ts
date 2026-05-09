@@ -32,7 +32,7 @@ export const tui: TuiPlugin = async (api) => {
             const sessionID = api.route.current.params?.sessionID as string | undefined;
             if (!sessionID) return;
 
-            api.command.trigger("session.timeline");
+            (api as any).keymap.dispatchCommand("session.timeline");
             return;
           }
 
