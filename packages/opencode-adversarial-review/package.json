@@ -3,8 +3,13 @@
   "version": "0.1.0",
   "description": "Adversarial code review plugin",
   "author": "capyBearista <capybearista@gmail.com>",
-  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/capyBearista/opencode-plugins.git",
+    "directory": "packages/opencode-adversarial-review"
+  },
   "type": "module",
+  "license": "MPL-2.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
