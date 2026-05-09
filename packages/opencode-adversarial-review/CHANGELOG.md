@@ -1,5 +1,11 @@
 # @capybearista/opencode-adversarial-review
 
+## 1.0.0
+
+### Major Changes
+
+- 65e9779: bump to v1.0.0
+
 ## 0.1.0
 
 ### Minor Changes

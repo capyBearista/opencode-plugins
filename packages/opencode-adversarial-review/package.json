@@ -1,6 +1,6 @@
 {
   "name": "@capybearista/opencode-adversarial-review",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Adversarial code review plugin",
   "author": "capyBearista <capybearista@gmail.com>",
   "repository": {
