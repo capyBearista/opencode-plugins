@@ -131,6 +131,15 @@ Review with a specific focus area:
 
 This plugin requires no manual configuration out of the box, but you can override the subagent model in your local `opencode.json`.
 
+## Permissions & Security
+
+This plugin is designed with a "least privilege" security model. The adversarial subagent is strictly sandboxed to prevent accidental or malicious modifications to your codebase:
+
+- **Edit**: Explicitly denied (`edit: deny`).
+- **Bash**: Restricted to a read-only whitelist of 12 Git patterns (e.g., `git diff`, `git log`, `git status`). All other shell commands are blocked.
+- **Read/Grep/Glob**: Allowed (read-only) to enable code inspection.
+- **Network**: Web fetch and search are disabled to ensure the review remains focused on the files at hand.
+
 ## Troubleshooting
 
 - **"No changes to review"**: Ensure you have staged or unstaged changes, or use `--base` to review a committed branch.

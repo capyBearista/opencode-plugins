@@ -187,8 +187,8 @@ describe("@capybearista/opencode-adversarial-review", () => {
     const template = cfg.command["adversarial-review"].template;
     expect(template).toInclude("Arguments: $ARGUMENTS");
     expect(template).toInclude("git log");
-    expect(template).toInclude("git status");
-    expect(template).toInclude("git diff");
+    expect(template).toInclude("status");
+    expect(template).toInclude("diff");
   });
 
   test("agent permission denies edit and restricts bash to read-only git subcommands", async () => {

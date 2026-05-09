@@ -117,3 +117,10 @@
 3. **Permission-based security**: Codex uses server-side `sandbox: "read-only"`. We use OpenCode's permission system. Both achieve the same goal.
 4. **No broker**: OpenCode manages model sessions internally.
 5. **Stateless**: No job tracking needed — OpenCode's conversation history IS the review history.
+
+---
+
+## Future Considerations
+
+> [!NOTE]
+> **Configurable Diff Threshold**: Currently, the plugin uses a hardcoded threshold (5 files) to decide between a `full diff` and a `stat-only` summary. To improve flexibility, we should consider moving this to a configuration option (e.g., `command.adversarial-review.fullDiffThreshold`). This would allow users with larger context window models to opt-in to fuller context by default.

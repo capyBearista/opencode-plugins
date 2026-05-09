@@ -112,12 +112,12 @@ Target: working tree diff
 
 ## Git Context
 
-!\`echo "=== Branch ===" && git branch --show-current\`
-!\`echo "=== Status ===" && git status --short --untracked-files=all\`
-!\`echo "=== Recent Commits ===" && git log --oneline -3\`
-!\`echo "=== Changed Files ===" && git diff HEAD --name-only\`
-!\`echo "=== Untracked File Contents ==="; git ls-files --others --exclude-standard | head -5 | while IFS= read -r f; do echo "--- $f ---" && cat -- "$f" 2>/dev/null | head -c 16384 && echo; done\`
-!\`FILES=$(git diff HEAD --name-only | wc -l); if [ "$FILES" -gt 0 ] && [ "$FILES" -le 2 ]; then echo "=== Full Diff ===" && git diff HEAD; else echo "=== Diff Stat ===" && git diff HEAD --stat; fi\``;
+!\`printf "=== Branch ===\\n" && git branch --show-current\`
+!\`printf "=== Status ===\\n" && git status --short --untracked-files=all\`
+!\`printf "=== Recent Commits ===\\n" && git log --oneline -3\`
+!\`printf "=== Changed Files ===\\n" && git diff HEAD --name-only\`
+!\`printf "=== Untracked File Contents ===\\n"; git ls-files --others --exclude-standard | head -5 | while IFS= read -r f; do printf "--- %s ---\\n" "$f" && cat -- "$f" 2>/dev/null | head -c 16384 && printf "\\n"; done\`
+!\`FILES=\$(git diff HEAD --name-only | wc -l | tr -d ' '); if [ "\$FILES" -gt 0 ] && [ "\$FILES" -le 5 ]; then printf "=== Full Diff ===\\n" && git diff HEAD; else printf "=== Diff Stat ===\\n" && git diff HEAD --stat; fi\``;
 
 const AGENT_NAME = "adversarial-review";
 const CMD_NAME = "adversarial-review";
