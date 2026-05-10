@@ -1,7 +1,7 @@
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import type { JSX } from "@opentui/solid";
 import { createElement, insert, spread } from "@opentui/solid";
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { createComponent, createSignal, onCleanup, onMount } from "solid-js";
 import { debugLog } from "./debug.js";
 import { formatBytes, getLightweightRam, type LightweightRamResult } from "./memory.js";
 import {
@@ -10,19 +10,34 @@ import {
   loadRamMonitorWidgetConfig,
 } from "./sidebar-config.js";
 
+type NodePropValue = unknown | (() => unknown);
+
+function createRenderableProps(props: Record<string, NodePropValue>): Record<string, unknown> {
+  const reactiveProps: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(props)) {
+    Object.defineProperty(reactiveProps, key, {
+      enumerable: true,
+      get: () => (typeof value === "function" ? (value as () => unknown)() : value),
+    });
+  }
+
+  return reactiveProps;
+}
+
 function createTextNode(
-  props: Record<string, unknown>,
+  props: Record<string, NodePropValue>,
   content: string | null | (() => string | null),
 ) {
   const node = createElement("text");
-  spread(node, props, true);
+  spread(node, createRenderableProps(props), true);
   insert(node, content);
   return node;
 }
 
-function createBoxNode(props: Record<string, unknown>, children: unknown[]) {
+function createBoxNode(props: Record<string, NodePropValue>, children: unknown[]) {
   const node = createElement("box");
-  spread(node, props, true);
+  spread(node, createRenderableProps(props), true);
   for (const child of children) {
     insert(node, child);
   }
@@ -95,19 +110,23 @@ function RamWidget(props: { api: TuiPluginApi }): JSX.Element {
 
   return createBoxNode({ gap: 0, padding: 1 }, [
     createTextNode(
-      { fg: props.api.theme.current.text },
+      { fg: () => props.api.theme.current.text },
       () => `RAM Usage ${tick() % 2 === 0 ? "●" : "○"}`,
     ),
     createTextNode(
-      { fg: () => (error() ? props.api.theme.current.error : props.api.theme.current.text) },
+      {
+        fg: () => (error() ? props.api.theme.current.error : props.api.theme.current.text),
+      },
       () => (error() ? `Error: ${error()}` : `Current: ${formatBytes(ram().current)}`),
     ),
-    createTextNode({ fg: props.api.theme.current.secondary }, () =>
+    createTextNode({ fg: () => props.api.theme.current.secondary }, () =>
       !error() && ram().count > 0
         ? `Total: ${formatBytes(ram().total)} (${ram().count} active)`
         : null,
     ),
-    createTextNode({ fg: props.api.theme.current.error }, () => (error() ? null : warning())),
+    createTextNode({ fg: () => props.api.theme.current.error }, () =>
+      !error() && warning() ? warning() : null,
+    ),
   ]) as JSX.Element;
 }
 
@@ -118,7 +137,7 @@ const tui: TuiPlugin = async (api) => {
     order: SIDEBAR_ORDER,
     slots: {
       sidebar_content() {
-        return RamWidget({ api });
+        return createComponent(RamWidget, { api });
       },
     },
   });

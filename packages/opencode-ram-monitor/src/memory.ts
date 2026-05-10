@@ -7,6 +7,11 @@ import { debugLog } from "./debug.js";
 
 const EXEC_OPTS = { timeout: 5000, windowsHide: true };
 const execAsync = promisify(exec);
+const BULK_SNAPSHOT_MIN_PID_COUNT = 4;
+
+export function shouldUseBulkSnapshot(pidCount: number): boolean {
+  return pidCount >= BULK_SNAPSHOT_MIN_PID_COUNT;
+}
 
 function splitCommandTokens(commandLine: string): string[] {
   const matches = commandLine.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
@@ -266,6 +271,253 @@ export interface LightweightRamResult {
   count: number;
 }
 
+function parseStrictPositiveInteger(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+export function parsePsRssSnapshot(stdout: string): Map<number, number> {
+  const rssByPid = new Map<number, number>();
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2) continue;
+    const pid = parseStrictPositiveInteger(parts[0]);
+    const rssKb = parseStrictPositiveInteger(parts[1]);
+    if (pid !== null && rssKb !== null) {
+      rssByPid.set(pid, rssKb * 1024);
+    }
+  }
+  return rssByPid;
+}
+
+export function parseWmicWorkingSetSnapshot(stdout: string): Map<number, number> {
+  const rssByPid = new Map<number, number>();
+  const normalized = stdout.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return rssByPid;
+
+  let pendingPid: number | null = null;
+  let pendingRss: number | null = null;
+
+  const flush = () => {
+    if (pendingPid !== null && pendingRss !== null) {
+      rssByPid.set(pendingPid, pendingRss);
+    }
+    pendingPid = null;
+    pendingRss = null;
+  };
+
+  for (const line of normalized.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+
+    if (key === "ProcessId") {
+      if (pendingPid !== null || pendingRss !== null) flush();
+      pendingPid = parseStrictPositiveInteger(value);
+      continue;
+    }
+
+    if (key === "WorkingSetSize") {
+      pendingRss = parseStrictPositiveInteger(value);
+      if (pendingPid !== null && pendingRss !== null) flush();
+    }
+  }
+
+  flush();
+  return rssByPid;
+}
+
+export async function sampleDarwinRssWithFallback(
+  pids: number[],
+  execFn: (command: string) => Promise<{ stdout: string }>,
+  onPidError?: (pid: number, source: string, error: unknown) => Promise<void> | void,
+  onPartialCoverage?: (missingPids: number[], source: string) => Promise<void> | void,
+): Promise<Map<number, number>> {
+  try {
+    const { stdout } = await execFn("ps -A -o pid= -o rss=");
+    const snapshot = parsePsRssSnapshot(stdout);
+    const matched = new Map<number, number>();
+    for (const pid of pids) {
+      const rss = snapshot.get(pid);
+      if (rss !== undefined) matched.set(pid, rss);
+    }
+    if (matched.size === pids.length) return matched;
+    if (matched.size > 0) {
+      const missingPids = pids.filter((pid) => !matched.has(pid));
+      if (missingPids.length > 0) {
+        await onPartialCoverage?.(missingPids, "ps");
+      }
+      const merged = new Map(matched);
+      for (const pid of missingPids) {
+        try {
+          const { stdout: pidStdout } = await execFn(`ps -o rss= -p ${pid}`);
+          const rssKb = parseStrictPositiveInteger(pidStdout.trim());
+          if (rssKb !== null) {
+            merged.set(pid, rssKb * 1024);
+          } else {
+            await onPidError?.(pid, "ps", new Error("per-pid rss parse failed"));
+          }
+        } catch (error) {
+          await onPidError?.(pid, "ps", error);
+        }
+      }
+      return merged;
+    }
+    throw new Error("darwin bulk snapshot parsed no usable RSS rows");
+  } catch {
+    const rssByPid = new Map<number, number>();
+    for (const pid of pids) {
+      try {
+        const { stdout } = await execFn(`ps -o rss= -p ${pid}`);
+        const rssKb = parseStrictPositiveInteger(stdout.trim());
+        if (rssKb !== null) {
+          rssByPid.set(pid, rssKb * 1024);
+        } else {
+          await onPidError?.(pid, "ps", new Error("per-pid rss parse failed"));
+        }
+      } catch (error) {
+        await onPidError?.(pid, "ps", error);
+      }
+    }
+    if (rssByPid.size === 0) {
+      throw new Error("darwin rss sampling failed for all candidate PIDs");
+    }
+    return rssByPid;
+  }
+}
+
+export async function sampleDarwinRssPerPid(
+  pids: number[],
+  execFn: (command: string) => Promise<{ stdout: string }>,
+  onPidError?: (pid: number, source: string, error: unknown) => Promise<void> | void,
+): Promise<Map<number, number>> {
+  const rssByPid = new Map<number, number>();
+  for (const pid of pids) {
+    try {
+      const { stdout } = await execFn(`ps -o rss= -p ${pid}`);
+      const rssKb = parseStrictPositiveInteger(stdout.trim());
+      if (rssKb !== null) {
+        rssByPid.set(pid, rssKb * 1024);
+      } else {
+        await onPidError?.(pid, "ps", new Error("per-pid rss parse failed"));
+      }
+    } catch (error) {
+      await onPidError?.(pid, "ps", error);
+    }
+  }
+  return rssByPid;
+}
+
+export async function sampleWindowsRssWithFallback(
+  pids: number[],
+  execFn: (command: string) => Promise<{ stdout: string }>,
+  onPidError?: (pid: number, source: string, error: unknown) => Promise<void> | void,
+  onPartialCoverage?: (missingPids: number[], source: string) => Promise<void> | void,
+): Promise<Map<number, number>> {
+  try {
+    const { stdout } = await execFn("wmic process get ProcessId,WorkingSetSize /format:value");
+    const snapshot = parseWmicWorkingSetSnapshot(stdout);
+    const matched = new Map<number, number>();
+    for (const pid of pids) {
+      const rss = snapshot.get(pid);
+      if (rss !== undefined) matched.set(pid, rss);
+    }
+    if (matched.size === pids.length) return matched;
+    if (matched.size > 0) {
+      const missingPids = pids.filter((pid) => !matched.has(pid));
+      if (missingPids.length > 0) {
+        await onPartialCoverage?.(missingPids, "wmic");
+      }
+      const merged = new Map(matched);
+      for (const pid of missingPids) {
+        try {
+          const { stdout: pidStdout } = await execFn(
+            `wmic process where "ProcessId=${pid}" get WorkingSetSize`,
+          );
+          const lines = pidStdout.trim().split("\n").slice(1);
+          let parsedAny = false;
+          for (const line of lines) {
+            const rssBytes = parseStrictPositiveInteger(line.trim());
+            if (rssBytes !== null) {
+              merged.set(pid, rssBytes);
+              parsedAny = true;
+            }
+          }
+          if (!parsedAny) {
+            await onPidError?.(pid, "wmic", new Error("per-pid rss parse failed"));
+          }
+        } catch (error) {
+          await onPidError?.(pid, "wmic", error);
+        }
+      }
+      return merged;
+    }
+    throw new Error("windows bulk snapshot parsed no usable RSS rows");
+  } catch {
+    const rssByPid = new Map<number, number>();
+    for (const pid of pids) {
+      try {
+        const { stdout } = await execFn(`wmic process where "ProcessId=${pid}" get WorkingSetSize`);
+        const lines = stdout.trim().split("\n").slice(1);
+        let parsedAny = false;
+        for (const line of lines) {
+          const rssBytes = parseStrictPositiveInteger(line.trim());
+          if (rssBytes !== null) {
+            rssByPid.set(pid, rssBytes);
+            parsedAny = true;
+          }
+        }
+        if (!parsedAny) {
+          await onPidError?.(pid, "wmic", new Error("per-pid rss parse failed"));
+        }
+      } catch (error) {
+        await onPidError?.(pid, "wmic", error);
+      }
+    }
+    if (rssByPid.size === 0) {
+      throw new Error("windows rss sampling failed for all candidate PIDs");
+    }
+    return rssByPid;
+  }
+}
+
+export async function sampleWindowsRssPerPid(
+  pids: number[],
+  execFn: (command: string) => Promise<{ stdout: string }>,
+  onPidError?: (pid: number, source: string, error: unknown) => Promise<void> | void,
+): Promise<Map<number, number>> {
+  const rssByPid = new Map<number, number>();
+  for (const pid of pids) {
+    try {
+      const { stdout } = await execFn(`wmic process where "ProcessId=${pid}" get WorkingSetSize`);
+      const lines = stdout.trim().split("\n").slice(1);
+      let parsedAny = false;
+      for (const line of lines) {
+        const rssBytes = parseStrictPositiveInteger(line.trim());
+        if (rssBytes !== null) {
+          rssByPid.set(pid, rssBytes);
+          parsedAny = true;
+        }
+      }
+      if (!parsedAny) {
+        await onPidError?.(pid, "wmic", new Error("per-pid rss parse failed"));
+      }
+    } catch (error) {
+      await onPidError?.(pid, "wmic", error);
+    }
+  }
+  return rssByPid;
+}
+
 export async function getLightweightRam(): Promise<LightweightRamResult> {
   const pids = await getActiveSessions();
   if (pids.length === 0) return { current: 0, total: 0, count: 0 };
@@ -296,49 +548,92 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
       }
     }
   } else if (osPlatform === "darwin") {
-    for (const pid of pids) {
-      try {
-        const { stdout } = await execAsync(`ps -o rss= -p ${pid}`, EXEC_OPTS);
-        const rssKb = parseInt(stdout.trim(), 10);
-        if (!Number.isNaN(rssKb)) {
-          const rss = rssKb * 1024;
-          totalRss += rss;
-          sampledPids.add(pid);
-          if (pid === process.pid) currentRss = rss;
-        }
-      } catch (error) {
+    try {
+      const onPidError = async (pid: number, source: string, error: unknown) => {
         await debugLog("rss-sample-failed", {
           platform: osPlatform,
           pid,
-          source: "ps",
+          source,
           error: error instanceof Error ? error.message : String(error),
         });
+      };
+      const rssByPid = shouldUseBulkSnapshot(pids.length)
+        ? await sampleDarwinRssWithFallback(
+            pids,
+            async (command) => execAsync(command, EXEC_OPTS),
+            onPidError,
+            async (missingPids, source) => {
+              await debugLog("rss-snapshot-partial", {
+                platform: osPlatform,
+                source,
+                missingPidCount: missingPids.length,
+                missingPids: missingPids.join(","),
+                totalPids: pids.length,
+              });
+            },
+          )
+        : await sampleDarwinRssPerPid(
+            pids,
+            async (command) => execAsync(command, EXEC_OPTS),
+            onPidError,
+          );
+      for (const pid of pids) {
+        const rss = rssByPid.get(pid);
+        if (rss === undefined) continue;
+        totalRss += rss;
+        sampledPids.add(pid);
+        if (pid === process.pid) currentRss = rss;
       }
+    } catch (error) {
+      await debugLog("rss-snapshot-failed", {
+        platform: osPlatform,
+        source: "ps",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   } else if (osPlatform === "win32") {
-    for (const pid of pids) {
-      try {
-        const { stdout } = await execAsync(
-          `wmic process where "ProcessId=${pid}" get WorkingSetSize`,
-          EXEC_OPTS,
-        );
-        const lines = stdout.trim().split("\n").slice(1);
-        for (const line of lines) {
-          const rssBytes = parseInt(line.trim(), 10);
-          if (!Number.isNaN(rssBytes)) {
-            totalRss += rssBytes;
-            sampledPids.add(pid);
-            if (pid === process.pid) currentRss = rssBytes;
-          }
-        }
-      } catch (error) {
+    try {
+      const onPidError = async (pid: number, source: string, error: unknown) => {
         await debugLog("rss-sample-failed", {
           platform: osPlatform,
           pid,
-          source: "wmic",
+          source,
           error: error instanceof Error ? error.message : String(error),
         });
+      };
+      const rssByPid = shouldUseBulkSnapshot(pids.length)
+        ? await sampleWindowsRssWithFallback(
+            pids,
+            async (command) => execAsync(command, EXEC_OPTS),
+            onPidError,
+            async (missingPids, source) => {
+              await debugLog("rss-snapshot-partial", {
+                platform: osPlatform,
+                source,
+                missingPidCount: missingPids.length,
+                missingPids: missingPids.join(","),
+                totalPids: pids.length,
+              });
+            },
+          )
+        : await sampleWindowsRssPerPid(
+            pids,
+            async (command) => execAsync(command, EXEC_OPTS),
+            onPidError,
+          );
+      for (const pid of pids) {
+        const rss = rssByPid.get(pid);
+        if (rss === undefined) continue;
+        totalRss += rss;
+        sampledPids.add(pid);
+        if (pid === process.pid) currentRss = rss;
       }
+    } catch (error) {
+      await debugLog("rss-snapshot-failed", {
+        platform: osPlatform,
+        source: "wmic",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   } else {
     currentRss = process.memoryUsage().rss;
