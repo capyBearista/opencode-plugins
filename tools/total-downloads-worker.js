@@ -5,6 +5,7 @@ export default {
       "@capybearista/opencode-agents-loader",
       "@capybearista/opencode-double-tap-timeline",
       "@capybearista/opencode-output-styles",
+      "@capybearista/opencode-ram-monitor",
     ];
     const results = await Promise.all(
       packages.map((p) =>

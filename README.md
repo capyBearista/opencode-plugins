@@ -29,6 +29,10 @@ Adversarial code review that challenges your implementation approach and design 
 
 *Inspired by Codex*
 
+### 🐏 [opencode-ram-monitor](./packages/opencode-ram-monitor/)
+
+Zero-dependency RAM monitoring for OpenCode sessions. Shows live session memory usage in the sidebar and adds a `/ram` command for a detailed process tree and aggregate OpenCode RAM totals.
+
 ### 🗣️ [opencode-output-styles](./packages/opencode-output-styles/)
 
 Persistent response styles for OpenCode sessions. This plugin injects selected guidelines (like "explanatory" or "learning" modes) into the system prompt so they stay active across your session.
