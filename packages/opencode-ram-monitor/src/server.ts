@@ -1,4 +1,5 @@
 import type { Plugin } from "@opencode-ai/plugin";
+import { debugLog } from "./debug.js";
 import { getHeavyProcessTree } from "./memory.js";
 
 const COMMAND_HANDLED_SENTINEL = "__RAM_COMMAND_HANDLED__";
@@ -8,7 +9,7 @@ function handled(): never {
 }
 
 const RamMonitorServer: Plugin = async ({ client }) => {
-  async function injectRawOutput(sessionID: string, output: string): Promise<void> {
+  async function injectRawOutput(sessionID: string, output: string): Promise<boolean> {
     try {
       await client.session.prompt({
         path: { id: sessionID },
@@ -17,8 +18,13 @@ const RamMonitorServer: Plugin = async ({ client }) => {
           parts: [{ type: "text", text: output, ignored: true }],
         },
       });
-    } catch {
-      // swallow prompt errors
+      return true;
+    } catch (error) {
+      await debugLog("prompt-inject-failed", {
+        sessionID,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
     }
   }
 
@@ -36,11 +42,16 @@ const RamMonitorServer: Plugin = async ({ client }) => {
       let treeText: string;
       try {
         treeText = await getHeavyProcessTree();
-      } catch {
+      } catch (error) {
+        await debugLog("heavy-tree-failed", {
+          sessionID: input.sessionID,
+          error: error instanceof Error ? error.message : String(error),
+        });
         treeText = "Unable to generate RAM usage tree. Please try again.";
       }
 
-      await injectRawOutput(input.sessionID, treeText);
+      const injected = await injectRawOutput(input.sessionID, treeText);
+      if (!injected) return;
       handled();
     },
   };

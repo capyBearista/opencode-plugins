@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { debugLog } from "./debug.js";
 
 const EXEC_OPTS = { timeout: 5000, windowsHide: true };
 const execAsync = promisify(exec);
@@ -77,14 +78,32 @@ export function classifyOpencodeProcess(commandLine: string): "core" | "launcher
   return null;
 }
 
-async function getRuntimeSessionPids(): Promise<number[]> {
+type OpenCodePidSets = {
+  core: Set<number>;
+  launcher: Set<number>;
+  all: Set<number>;
+};
+
+function parseLockfilePid(content: string): number | null {
+  try {
+    const data = JSON.parse(content);
+    if (typeof data?.pid === "number") return data.pid;
+  } catch {
+    const pid = parseInt(content.trim(), 10);
+    if (!Number.isNaN(pid)) return pid;
+  }
+
+  return null;
+}
+
+async function getLiveOpencodePidSets(): Promise<OpenCodePidSets> {
   const osPlatform = platform();
+  const core = new Set<number>();
+  const launcher = new Set<number>();
 
   if (osPlatform === "linux" || osPlatform === "darwin") {
     try {
       const { stdout } = await execAsync("ps -eo pid=,args=", EXEC_OPTS);
-      const corePids: number[] = [];
-      const launcherPids: number[] = [];
 
       for (const line of stdout.split("\n")) {
         const trimmed = line.trim();
@@ -98,13 +117,15 @@ async function getRuntimeSessionPids(): Promise<number[]> {
 
         const args = trimmed.slice(firstSpace + 1);
         const processKind = classifyOpencodeProcess(args);
-        if (processKind === "core") corePids.push(pid);
-        if (processKind === "launcher") launcherPids.push(pid);
+        if (processKind === "core") core.add(pid);
+        if (processKind === "launcher") launcher.add(pid);
       }
-
-      return corePids.length > 0 ? corePids : launcherPids;
-    } catch {
-      return [];
+    } catch (error) {
+      await debugLog("live-opencode-pids-failed", {
+        platform: osPlatform,
+        source: "ps",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -114,11 +135,10 @@ async function getRuntimeSessionPids(): Promise<number[]> {
         "wmic process get CommandLine,ProcessId /format:value",
         EXEC_OPTS,
       );
-      const corePids: number[] = [];
-      const launcherPids: number[] = [];
 
       const normalized = stdout.replace(/\r\n/g, "\n").trim();
       const blocks = normalized.split(/\n\n+/);
+
       for (const block of blocks) {
         const lines = block.trim().split("\n");
         const entry: Record<string, string> = {};
@@ -134,21 +154,46 @@ async function getRuntimeSessionPids(): Promise<number[]> {
         if (Number.isNaN(pid)) continue;
 
         const processKind = classifyOpencodeProcess(entry.CommandLine || "");
-        if (processKind === "core") corePids.push(pid);
-        if (processKind === "launcher") launcherPids.push(pid);
+        if (processKind === "core") core.add(pid);
+        if (processKind === "launcher") launcher.add(pid);
       }
-
-      return corePids.length > 0 ? corePids : launcherPids;
-    } catch {
-      return [];
+    } catch (error) {
+      await debugLog("live-opencode-pids-failed", {
+        platform: osPlatform,
+        source: "wmic",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
-  return [];
+  const all = new Set<number>([...core, ...launcher]);
+  return { core, launcher, all };
 }
 
-export async function getActiveSessions(): Promise<number[]> {
-  const pids: number[] = [process.pid];
+export function selectValidatedSessionPids(
+  candidates: number[],
+  liveOpencodePids: Set<number>,
+  currentPid: number = process.pid,
+): number[] {
+  const selected = new Set<number>();
+  selected.add(currentPid);
+
+  for (const pid of candidates) {
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    if (pid === currentPid) {
+      selected.add(pid);
+      continue;
+    }
+    if (liveOpencodePids.has(pid)) {
+      selected.add(pid);
+    }
+  }
+
+  return [...selected];
+}
+
+async function readLockfileCandidates(): Promise<number[]> {
+  const candidates: number[] = [];
   const stateDirs = [
     join(homedir(), ".opencode", "state"),
     join(homedir(), ".cache", "opencode", "state"),
@@ -160,28 +205,49 @@ export async function getActiveSessions(): Promise<number[]> {
     try {
       const files = await readdir(dir);
       for (const file of files) {
-        if (file.endsWith(".lock")) {
-          const content = await readFile(join(dir, file), "utf-8");
-          try {
-            const data = JSON.parse(content);
-            if (data.pid && typeof data.pid === "number") {
-              pids.push(data.pid);
-            }
-          } catch {
-            const pid = parseInt(content.trim(), 10);
-            if (!Number.isNaN(pid)) {
-              pids.push(pid);
-            }
-          }
+        if (!file.endsWith(".lock")) continue;
+        const filePath = join(dir, file);
+        try {
+          const content = await readFile(filePath, "utf-8");
+          const pid = parseLockfilePid(content);
+          if (pid !== null) candidates.push(pid);
+        } catch (error) {
+          await debugLog("lockfile-read-failed", {
+            file: filePath,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
-    } catch {}
+    } catch (error) {
+      await debugLog("state-dir-read-failed", {
+        dir,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
-  const runtimePids = await getRuntimeSessionPids();
-  pids.push(...runtimePids);
+  return candidates;
+}
 
-  return [...new Set(pids)];
+export async function getActiveSessions(): Promise<number[]> {
+  const [liveSets, lockfileCandidates] = await Promise.all([
+    getLiveOpencodePidSets(),
+    readLockfileCandidates(),
+  ]);
+
+  const preferredLiveSet = liveSets.core.size > 0 ? liveSets.core : liveSets.launcher;
+  const runtimeCandidates = [...preferredLiveSet];
+  const allCandidates = [process.pid, ...lockfileCandidates, ...runtimeCandidates];
+  const validated = selectValidatedSessionPids(allCandidates, preferredLiveSet, process.pid);
+
+  await debugLog("active-sessions-resolved", {
+    candidates: allCandidates.length,
+    lockfileCandidates: lockfileCandidates.length,
+    runtimeCandidates: runtimeCandidates.length,
+    validated: validated.length,
+  });
+
+  return validated;
 }
 
 export interface LightweightRamResult {
@@ -200,7 +266,6 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
   const sampledPids = new Set<number>();
 
   if (osPlatform === "linux") {
-    // Fast path for Linux/WSL - read VmRSS from /proc/<pid>/status (kB)
     for (const pid of pids) {
       try {
         const status = await readFile(`/proc/${pid}/status`, "utf-8");
@@ -211,12 +276,16 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
           sampledPids.add(pid);
           if (pid === process.pid) currentRss = rss;
         }
-      } catch {
-        // Process might have exited or permission denied
+      } catch (error) {
+        await debugLog("rss-sample-failed", {
+          platform: osPlatform,
+          pid,
+          source: "/proc",
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   } else if (osPlatform === "darwin") {
-    // macOS: query each PID individually to avoid total failure if one PID is stale
     for (const pid of pids) {
       try {
         const { stdout } = await execAsync(`ps -o rss= -p ${pid}`, EXEC_OPTS);
@@ -227,19 +296,23 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
           sampledPids.add(pid);
           if (pid === process.pid) currentRss = rss;
         }
-      } catch {
-        // Process might have exited
+      } catch (error) {
+        await debugLog("rss-sample-failed", {
+          platform: osPlatform,
+          pid,
+          source: "ps",
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   } else if (osPlatform === "win32") {
-    // Windows: query each PID individually for reliability
     for (const pid of pids) {
       try {
         const { stdout } = await execAsync(
           `wmic process where "ProcessId=${pid}" get WorkingSetSize`,
           EXEC_OPTS,
         );
-        const lines = stdout.trim().split("\n").slice(1); // skip header
+        const lines = stdout.trim().split("\n").slice(1);
         for (const line of lines) {
           const rssBytes = parseInt(line.trim(), 10);
           if (!Number.isNaN(rssBytes)) {
@@ -248,12 +321,16 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
             if (pid === process.pid) currentRss = rssBytes;
           }
         }
-      } catch {
-        // Process might have exited
+      } catch (error) {
+        await debugLog("rss-sample-failed", {
+          platform: osPlatform,
+          pid,
+          source: "wmic",
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   } else {
-    // Fallback: just current process
     currentRss = process.memoryUsage().rss;
     totalRss = currentRss;
     sampledPids.add(process.pid);
@@ -266,6 +343,10 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
       totalRss += fallbackCurrentRss;
       sampledPids.add(process.pid);
     }
+    await debugLog("current-rss-fallback-used", {
+      fallbackCurrentRss,
+      sampledCount: sampledPids.size,
+    });
   }
 
   return {
@@ -278,7 +359,7 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
 export interface ProcessNode {
   pid: number;
   ppid: number;
-  rss: number; // bytes
+  rss: number;
   command: string;
   children: ProcessNode[];
 }
@@ -291,7 +372,6 @@ export async function getHeavyProcessTree(): Promise<string> {
 
   if (osPlatform === "linux" || osPlatform === "darwin") {
     try {
-      // Get all processes to build tree
       const { stdout } = await execAsync(`ps -e -o pid=,ppid=,rss=,comm=`, EXEC_OPTS);
       const lines = stdout.trim().split("\n");
       processes = lines
@@ -299,17 +379,20 @@ export async function getHeavyProcessTree(): Promise<string> {
           const parts = line.trim().split(/\s+/);
           const pid = parseInt(parts[0], 10);
           const ppid = parseInt(parts[1], 10);
-          const rss = parseInt(parts[2], 10) * 1024; // KB to Bytes
+          const rss = parseInt(parts[2], 10) * 1024;
           const command = parts.slice(3).join(" ");
           return { pid, ppid, rss, command, children: [] };
         })
         .filter((p) => !Number.isNaN(p.pid));
-    } catch {
-      // Error running ps
+    } catch (error) {
+      await debugLog("heavy-tree-process-snapshot-failed", {
+        platform: osPlatform,
+        source: "ps",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   } else if (osPlatform === "win32") {
     try {
-      // Use VALUE format (Key=Value pairs) to avoid CSV comma issues
       const { stdout } = await execAsync(
         `wmic process get Name,ParentProcessId,ProcessId,WorkingSetSize /format:value`,
         EXEC_OPTS,
@@ -322,11 +405,10 @@ export async function getHeavyProcessTree(): Promise<string> {
         const entry: Record<string, string> = {};
         for (const line of lines) {
           const eq = line.indexOf("=");
-          if (eq !== -1) {
-            const key = line.slice(0, eq).trim();
-            const value = line.slice(eq + 1).trim();
-            entry[key] = value;
-          }
+          if (eq === -1) continue;
+          const key = line.slice(0, eq).trim();
+          const value = line.slice(eq + 1).trim();
+          entry[key] = value;
         }
         const pid = parseInt(entry.ProcessId, 10);
         const ppid = parseInt(entry.ParentProcessId, 10);
@@ -336,20 +418,23 @@ export async function getHeavyProcessTree(): Promise<string> {
           processes.push({ pid, ppid, rss, command, children: [] });
         }
       }
-    } catch {
-      // Error
+    } catch (error) {
+      await debugLog("heavy-tree-process-snapshot-failed", {
+        platform: osPlatform,
+        source: "wmic",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
-  // Build tree
   const procMap = new Map<number, ProcessNode>();
-  for (const p of processes) {
-    procMap.set(p.pid, p);
+  for (const processNode of processes) {
+    procMap.set(processNode.pid, processNode);
   }
 
-  for (const p of processes) {
-    if (p.ppid !== p.pid && procMap.has(p.ppid)) {
-      procMap.get(p.ppid)?.children.push(p);
+  for (const processNode of processes) {
+    if (processNode.ppid !== processNode.pid && procMap.has(processNode.ppid)) {
+      procMap.get(processNode.ppid)?.children.push(processNode);
     }
   }
 
@@ -357,15 +442,16 @@ export async function getHeavyProcessTree(): Promise<string> {
   const targetRoots = processes.filter((p) => rootPids.has(p.pid));
 
   if (targetRoots.length === 0) {
-    // Fallback if ps parsing failed or OS is unsupported
+    await debugLog("heavy-tree-no-target-roots", {
+      discoveredProcesses: processes.length,
+      requestedRoots: pids.length,
+      currentPid: process.pid,
+    });
     return `### OpenCode RAM Usage Tree\n\nNo detailed process tree could be generated. Current process PID is ${process.pid}.`;
   }
 
   let markdown = "### OpenCode RAM Usage Tree\n\n";
-
-  const formatSize = (bytes: number) => {
-    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-  };
+  const formatSize = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 
   const buildTreeString = (
     node: ProcessNode,
@@ -379,7 +465,6 @@ export async function getHeavyProcessTree(): Promise<string> {
 
     const nextVisited = new Set(visited);
     nextVisited.add(node.pid);
-
     let result = `${prefix}${isLast ? "└──" : "├──"} [${node.command}] (PID ${node.pid}) - ${formatSize(node.rss)}\n`;
 
     const childPrefix = prefix + (isLast ? "    " : "│   ");
@@ -404,9 +489,9 @@ export async function getHeavyProcessTree(): Promise<string> {
   for (const root of targetRoots) {
     const totalMem = getTreeSum(root, new Set<number>());
     markdown += `**Session (PID ${root.pid}) - Total: ${formatSize(totalMem)}**\n`;
-    markdown += `\`\`\`text\n`;
+    markdown += "```text\n";
     markdown += buildTreeString(root, "", true, new Set<number>());
-    markdown += `\`\`\`\n\n`;
+    markdown += "```\n\n";
   }
 
   return markdown.trim();

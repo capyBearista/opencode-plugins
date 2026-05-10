@@ -41,7 +41,7 @@ Host Architecture
 - **Real-time Sidebar Widget**: View your current and total RAM usage natively in the OpenCode TUI sidebar.
 - **Active Session Tracking**: Automatically discovers all running OpenCode sessions and aggregates their RAM.
 - **Cross-Platform**: Uses native commands (`ps` on Unix, `wmic` on Windows) for lightweight zero-dependency metrics.
-- **`/ram` Command**: Intercepts the `/ram` command to provide a detailed, heavy process-tree breakdown of the current session right in the chat.
+- **`/ram` Command**: Intercepts the `/ram` command to provide a detailed, heavy process-tree breakdown across all active OpenCode sessions right in the chat.
 - **Configurable**: Polling intervals can be customized via `.opencode/opencode.json`.
 
 ## Install
@@ -64,7 +64,7 @@ Also, add the plugin to `tui.json` or `tui.jsonc`:
 
 Once installed, the RAM monitor will automatically appear in your OpenCode TUI sidebar, polling your system to display the memory usage of your current session and the aggregate total across all active sessions.
 
-To get a detailed heavy process tree of your current session's memory usage, simply type `/ram` in your OpenCode chat.
+To get a detailed heavy process tree of memory usage across all currently active OpenCode sessions, type `/ram` in your OpenCode chat.
 
 ## Configuration
 
@@ -90,6 +90,16 @@ Example:
 - **Widget missing from sidebar**: Ensure both the server and TUI plugins are registered in `opencode.json` and `tui.json` respectively. If `refreshIntervalMs` is configured, ensure your `opencode.json` is valid, as comments can cause the config reader to fail or fallback.
 - **Active count seems off**: The plugin tokenizes command lines to find active `opencode` processes. Deeply nested wrappers or complex invocation aliases might not be matched.
 - **Total RAM shows `0`**: If sampling fails completely (e.g. `ps` is missing), the plugin falls back to using `process.memoryUsage().rss` of the current process. Ensure standard process utilities are available.
+
+## Debug Logging
+
+Debug logging is disabled by default. To enable diagnostic logs during development:
+
+```bash
+OPENCODE_RAM_MONITOR_DEBUG=1 opencode
+```
+
+When enabled, the plugin appends structured JSON log lines to `.opencode-ram-monitor.log` in the current working directory.
 
 ## Contributing
 
