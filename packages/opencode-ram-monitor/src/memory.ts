@@ -103,7 +103,7 @@ async function getLiveOpencodePidSets(): Promise<OpenCodePidSets> {
 
   if (osPlatform === "linux" || osPlatform === "darwin") {
     try {
-      const { stdout } = await execAsync("ps -eo pid=,args=", EXEC_OPTS);
+      const { stdout } = await execAsync("ps -A -o pid= -o command=", EXEC_OPTS);
 
       for (const line of stdout.split("\n")) {
         const trimmed = line.trim();
@@ -192,6 +192,18 @@ export function selectValidatedSessionPids(
   return [...selected];
 }
 
+export function resolveActiveSessionPids(
+  liveSets: OpenCodePidSets,
+  lockfileCandidates: number[],
+  currentPid: number = process.pid,
+): number[] {
+  return selectValidatedSessionPids(
+    [currentPid, ...lockfileCandidates, ...liveSets.all],
+    liveSets.all,
+    currentPid,
+  );
+}
+
 async function readLockfileCandidates(): Promise<number[]> {
   const candidates: number[] = [];
   const stateDirs = [
@@ -235,13 +247,11 @@ export async function getActiveSessions(): Promise<number[]> {
     readLockfileCandidates(),
   ]);
 
-  const preferredLiveSet = liveSets.core.size > 0 ? liveSets.core : liveSets.launcher;
-  const runtimeCandidates = [...preferredLiveSet];
-  const allCandidates = [process.pid, ...lockfileCandidates, ...runtimeCandidates];
-  const validated = selectValidatedSessionPids(allCandidates, preferredLiveSet, process.pid);
+  const runtimeCandidates = [...liveSets.all];
+  const validated = resolveActiveSessionPids(liveSets, lockfileCandidates, process.pid);
 
   await debugLog("active-sessions-resolved", {
-    candidates: allCandidates.length,
+    candidates: lockfileCandidates.length + runtimeCandidates.length + 1,
     lockfileCandidates: lockfileCandidates.length,
     runtimeCandidates: runtimeCandidates.length,
     validated: validated.length,
@@ -364,6 +374,28 @@ export interface ProcessNode {
   children: ProcessNode[];
 }
 
+export function selectTargetRoots(processes: ProcessNode[], rootPids: Set<number>): ProcessNode[] {
+  const procMap = new Map<number, ProcessNode>();
+  for (const processNode of processes) {
+    procMap.set(processNode.pid, processNode);
+  }
+
+  return processes.filter((processNode) => {
+    if (!rootPids.has(processNode.pid)) return false;
+
+    const visited = new Set<number>([processNode.pid]);
+    let parentPid = processNode.ppid;
+
+    while (parentPid !== processNode.pid && procMap.has(parentPid) && !visited.has(parentPid)) {
+      if (rootPids.has(parentPid)) return false;
+      visited.add(parentPid);
+      parentPid = procMap.get(parentPid)?.ppid ?? parentPid;
+    }
+
+    return true;
+  });
+}
+
 export async function getHeavyProcessTree(): Promise<string> {
   const pids = await getActiveSessions();
   const osPlatform = platform();
@@ -372,7 +404,7 @@ export async function getHeavyProcessTree(): Promise<string> {
 
   if (osPlatform === "linux" || osPlatform === "darwin") {
     try {
-      const { stdout } = await execAsync(`ps -e -o pid=,ppid=,rss=,comm=`, EXEC_OPTS);
+      const { stdout } = await execAsync("ps -A -o pid= -o ppid= -o rss= -o comm=", EXEC_OPTS);
       const lines = stdout.trim().split("\n");
       processes = lines
         .map((line) => {
@@ -439,7 +471,7 @@ export async function getHeavyProcessTree(): Promise<string> {
   }
 
   const rootPids = new Set(pids);
-  const targetRoots = processes.filter((p) => rootPids.has(p.pid));
+  const targetRoots = selectTargetRoots(processes, rootPids);
 
   if (targetRoots.length === 0) {
     await debugLog("heavy-tree-no-target-roots", {

@@ -42,7 +42,7 @@ Host Architecture
 - **Active Session Tracking**: Automatically discovers all running OpenCode sessions and aggregates their RAM.
 - **Cross-Platform**: Uses native commands (`ps` on Unix, `wmic` on Windows) for lightweight zero-dependency metrics.
 - **`/ram` Command**: Intercepts the `/ram` command to provide a detailed, heavy process-tree breakdown across all active OpenCode sessions right in the chat.
-- **Configurable**: Polling intervals can be customized via `.opencode/opencode.json`.
+- **Configurable**: Polling intervals can be customized via `opencode.json`, `opencode.jsonc`, `tui.json`, `tui.jsonc`, and their `.opencode/` variants.
 
 ## Install
 
@@ -68,7 +68,29 @@ To get a detailed heavy process tree of memory usage across all currently active
 
 ## Configuration
 
-Add the following to your `.opencode/opencode.json` to configure the plugin:
+Add the following to any supported OpenCode config file to configure the plugin:
+
+- `opencode.json`
+- `opencode.jsonc`
+- `.opencode/opencode.json`
+- `.opencode/opencode.jsonc`
+- `tui.json`
+- `tui.jsonc`
+- `.opencode/tui.json`
+- `.opencode/tui.jsonc`
+
+When multiple files define `experimental.ramMonitor.refreshIntervalMs`, the plugin applies them in this order and lets later files win:
+
+1. `opencode.json`
+2. `opencode.jsonc`
+3. `.opencode/opencode.json`
+4. `.opencode/opencode.jsonc`
+5. `tui.json`
+6. `tui.jsonc`
+7. `.opencode/tui.json`
+8. `.opencode/tui.jsonc`
+
+JSONC comments and trailing commas are supported.
 
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -87,7 +109,9 @@ Example:
 
 ## Troubleshooting
 
-- **Widget missing from sidebar**: Ensure both the server and TUI plugins are registered in `opencode.json` and `tui.json` respectively. If `refreshIntervalMs` is configured, ensure your `opencode.json` is valid, as comments can cause the config reader to fail or fallback.
+- **Widget missing from sidebar**: Ensure both the server and TUI plugins are registered in your OpenCode server and TUI config files.
+- **Refresh interval did not change**: The widget reads `experimental.ramMonitor.refreshIntervalMs` from all supported `opencode.*` and `tui.*` config files, including `.opencode/` variants. Later files override earlier ones.
+- **Config warning shown in the sidebar**: A supported config file could not be parsed, so the widget is using the last valid value it found or the default `5000ms` interval.
 - **Active count seems off**: The plugin tokenizes command lines to find active `opencode` processes. Deeply nested wrappers or complex invocation aliases might not be matched.
 - **Total RAM shows `0`**: If sampling fails completely (e.g. `ps` is missing), the plugin falls back to using `process.memoryUsage().rss` of the current process. Ensure standard process utilities are available.
 

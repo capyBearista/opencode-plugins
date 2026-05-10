@@ -26,7 +26,11 @@ export async function debugLog(
 
   try {
     await appendFile(getRamMonitorDebugLogPath(), `${JSON.stringify(payload)}\n`, "utf8");
-  } catch {
-    // Keep debug logging best-effort and non-disruptive.
+  } catch (error) {
+    try {
+      process.stderr.write(
+        `[opencode-ram-monitor] debug log write failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    } catch {}
   }
 }
