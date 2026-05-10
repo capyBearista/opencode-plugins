@@ -64,6 +64,7 @@ Alternatively, add them directly to your `opencode.json`/`opencode.jsonc` config
 {
   "plugin": [
     "@capybearista/opencode-adversarial-review@latest",
+    "@capybearista/opencode-ram-monitor@latest",
     "@capybearista/opencode-output-styles@latest",
     "@capybearista/opencode-agents-loader@latest"
   ]
