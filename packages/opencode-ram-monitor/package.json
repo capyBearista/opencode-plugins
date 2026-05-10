@@ -1,7 +1,7 @@
 {
   "name": "@capybearista/opencode-ram-monitor",
   "version": "1.0.0",
-  "description": "Monitor OpenCode RAM's usage in real-time, right from your sidebar.",
+  "description": "Monitor OpenCode's RAM usage in real-time, right from your sidebar.",
   "author": "capyBearista <capybearista@gmail.com>",
   "repository": {
     "type": "git",
