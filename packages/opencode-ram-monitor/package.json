@@ -1,8 +1,13 @@
 {
   "name": "@capybearista/opencode-ram-monitor",
   "version": "1.0.0",
-  "description": "Monitor RAM usage of OpenCode sessions",
+  "description": "Monitor OpenCode RAM's usage in real-time, right from your sidebar.",
   "author": "capyBearista <capybearista@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/capyBearista/opencode-plugins.git",
+    "directory": "packages/opencode-ram-monitor"
+  },
   "license": "MPL-2.0",
   "type": "module",
   "main": "./dist/server.js",
