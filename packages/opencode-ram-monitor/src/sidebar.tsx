@@ -4,6 +4,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { createSignal, onCleanup, onMount } from "solid-js";
+import { debugLog } from "./debug.js";
 import { formatBytes, getLightweightRam, type LightweightRamResult } from "./memory.js";
 import {
   getDefaultRefreshIntervalMs,
@@ -36,8 +37,16 @@ function RamWidget(props: { api: TuiPluginApi }) {
         const nextInterval = normalizeRefreshIntervalMs(rawConfig.refreshIntervalMs);
         setIntervalMs(nextInterval);
       }
-    } catch {
-      // Keep default interval if file missing or invalid.
+    } catch (error) {
+      await debugLog("sidebar-config-fallback", {
+        configPath: path.join(
+          props.api.state.path?.worktree || process.cwd(),
+          ".opencode",
+          "opencode.json",
+        ),
+        error: getErrorMessage(error),
+        fallbackIntervalMs: intervalMs(),
+      });
     }
   };
 
