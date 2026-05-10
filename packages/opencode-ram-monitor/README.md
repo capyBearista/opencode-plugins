@@ -60,6 +60,16 @@ Also, add the plugin to `tui.json` or `tui.jsonc`:
 }
 ```
 
+## Updating
+
+Simply run the following command while no active OpenCode sessions are running:
+
+```bash
+rm -rf ~/.cache/opencode/packages/'opencode-ram-monitor@latest'/
+```
+
+The next time you open OpenCode, the new version will be installed!
+
 ## Usage
 
 Once installed, the RAM monitor will automatically appear in your OpenCode TUI sidebar, polling your system to display the memory usage of your current session and the aggregate total across all active sessions.
