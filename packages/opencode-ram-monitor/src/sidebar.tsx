@@ -1,51 +1,56 @@
-/** @jsxImportSource @opentui/solid */
-
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
+import type { JSX } from "@opentui/solid";
+import { createElement, insert, spread } from "@opentui/solid";
 import { createSignal, onCleanup, onMount } from "solid-js";
 import { debugLog } from "./debug.js";
 import { formatBytes, getLightweightRam, type LightweightRamResult } from "./memory.js";
 import {
   getDefaultRefreshIntervalMs,
   getErrorMessage,
-  normalizeRefreshIntervalMs,
+  loadRamMonitorWidgetConfig,
 } from "./sidebar-config.js";
 
-function RamWidget(props: { api: TuiPluginApi }) {
+function createTextNode(
+  props: Record<string, unknown>,
+  content: string | null | (() => string | null),
+) {
+  const node = createElement("text");
+  spread(node, props, true);
+  insert(node, content);
+  return node;
+}
+
+function createBoxNode(props: Record<string, unknown>, children: unknown[]) {
+  const node = createElement("box");
+  spread(node, props, true);
+  for (const child of children) {
+    insert(node, child);
+  }
+  return node;
+}
+
+function RamWidget(props: { api: TuiPluginApi }): JSX.Element {
   const [ram, setRam] = createSignal<LightweightRamResult>({ current: 0, total: 0, count: 0 });
   const [error, setError] = createSignal<string | null>(null);
   const [intervalMs, setIntervalMs] = createSignal<number>(getDefaultRefreshIntervalMs());
   const [tick, setTick] = createSignal(0);
+  const [warning, setWarning] = createSignal<string | null>(null);
 
   let disposed = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
 
-  // Fetch config once on mount
   const loadConfig = async () => {
-    try {
-      const worktree = props.api.state.path?.worktree || process.cwd();
-      const configPath = path.join(worktree, ".opencode", "opencode.json");
-      const configContent = await fs.readFile(configPath, "utf8");
+    const worktree = props.api.state.path?.worktree || process.cwd();
+    const config = await loadRamMonitorWidgetConfig(worktree);
+    setIntervalMs(config.intervalMs);
+    setWarning(config.warning ? `Config warning: using ${config.intervalMs}ms fallback` : null);
 
-      // Basic JSON parsing. Real parser would strip comments, but since
-      // comments break strict JSON anyway, we just try parse.
-      const parsed = JSON.parse(configContent);
-      const rawConfig = parsed?.experimental?.ramMonitor;
-
-      if (rawConfig && "refreshIntervalMs" in rawConfig) {
-        const nextInterval = normalizeRefreshIntervalMs(rawConfig.refreshIntervalMs);
-        setIntervalMs(nextInterval);
-      }
-    } catch (error) {
+    if (config.warning) {
       await debugLog("sidebar-config-fallback", {
-        configPath: path.join(
-          props.api.state.path?.worktree || process.cwd(),
-          ".opencode",
-          "opencode.json",
-        ),
-        error: getErrorMessage(error),
-        fallbackIntervalMs: intervalMs(),
+        appliedConfigPath: config.sourcePath || "unknown",
+        failedConfigPath: config.warningPath || "unknown",
+        error: config.warning,
+        fallbackIntervalMs: config.intervalMs,
       });
     }
   };
@@ -59,6 +64,11 @@ function RamWidget(props: { api: TuiPluginApi }) {
         setTick((t) => t + 1);
       }
     } catch (err: unknown) {
+      await debugLog("sidebar-poll-failed", {
+        worktree: props.api.state.path?.worktree || process.cwd(),
+        intervalMs: intervalMs(),
+        error: getErrorMessage(err),
+      });
       if (!disposed) {
         setError(getErrorMessage(err));
       }
@@ -83,21 +93,22 @@ function RamWidget(props: { api: TuiPluginApi }) {
     if (timeout) clearTimeout(timeout);
   });
 
-  return (
-    <box gap={0} padding={1}>
-      <text fg={props.api.theme.current.text}>
-        <b>RAM Usage</b> {tick() % 2 === 0 ? "●" : "○"}
-      </text>
-      <text fg={error() ? props.api.theme.current.error : props.api.theme.current.text}>
-        {error() ? `Error: ${error()}` : `Current: ${formatBytes(ram().current)}`}
-      </text>
-      {!error() && ram().count > 0 && (
-        <text fg={props.api.theme.current.secondary}>
-          {`Total: ${formatBytes(ram().total)} (${ram().count} active)`}
-        </text>
-      )}
-    </box>
-  );
+  return createBoxNode({ gap: 0, padding: 1 }, [
+    createTextNode(
+      { fg: props.api.theme.current.text },
+      () => `RAM Usage ${tick() % 2 === 0 ? "●" : "○"}`,
+    ),
+    createTextNode(
+      { fg: () => (error() ? props.api.theme.current.error : props.api.theme.current.text) },
+      () => (error() ? `Error: ${error()}` : `Current: ${formatBytes(ram().current)}`),
+    ),
+    createTextNode({ fg: props.api.theme.current.secondary }, () =>
+      !error() && ram().count > 0
+        ? `Total: ${formatBytes(ram().total)} (${ram().count} active)`
+        : null,
+    ),
+    createTextNode({ fg: props.api.theme.current.error }, () => (error() ? null : warning())),
+  ]) as JSX.Element;
 }
 
 const SIDEBAR_ORDER = 150;
@@ -107,7 +118,7 @@ const tui: TuiPlugin = async (api) => {
     order: SIDEBAR_ORDER,
     slots: {
       sidebar_content() {
-        return <RamWidget api={api} />;
+        return RamWidget({ api });
       },
     },
   });

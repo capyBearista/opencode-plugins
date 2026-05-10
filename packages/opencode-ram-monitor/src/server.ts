@@ -3,6 +3,7 @@ import { debugLog } from "./debug.js";
 import { getHeavyProcessTree } from "./memory.js";
 
 const COMMAND_HANDLED_SENTINEL = "__RAM_COMMAND_HANDLED__";
+const PROMPT_INJECTION_FAILURE_MESSAGE = "Unable to display RAM usage output. Please try again.";
 
 function handled(): never {
   throw new Error(COMMAND_HANDLED_SENTINEL);
@@ -51,7 +52,9 @@ const RamMonitorServer: Plugin = async ({ client }) => {
       }
 
       const injected = await injectRawOutput(input.sessionID, treeText);
-      if (!injected) return;
+      if (!injected) {
+        throw new Error(PROMPT_INJECTION_FAILURE_MESSAGE);
+      }
       handled();
     },
   };
