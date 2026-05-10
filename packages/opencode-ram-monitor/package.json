@@ -3,11 +3,6 @@
   "version": "1.0.0",
   "description": "Monitor RAM usage of OpenCode sessions",
   "author": "capyBearista <capybearista@gmail.com>",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/capyBearista/opencode-plugins.git",
-    "directory": "packages/opencode-agents-loader"
-  },
   "license": "MPL-2.0",
   "type": "module",
   "main": "./dist/server.js",
