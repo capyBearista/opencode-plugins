@@ -1,0 +1,53 @@
+{
+  "name": "@capybearista/opencode-ram-monitor",
+  "version": "0.0.0",
+  "description": "Monitor RAM usage of OpenCode sessions",
+  "author": "capyBearista <capybearista@gmail.com>",
+  "license": "MPL-2.0",
+  "type": "module",
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc --project tsconfig.build.json --emitDeclarationOnly && bun build src/server.ts --outfile=dist/server.js --target=bun --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*' && bun build src/memory.ts --outfile=dist/memory.js --target=bun && bun build src/sidebar-config.ts --outfile=dist/sidebar-config.js --target=bun && bun build src/debug.ts --outfile=dist/debug.js --target=bun && bun build src/sidebar.tsx --outfile=dist/sidebar.js --target=bun --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*'",
+    "typecheck": "tsc --noEmit",
+    "check": "bunx @biomejs/biome check --write .",
+    "lint": "bunx @biomejs/biome check .",
+    "ci": "bunx @biomejs/biome ci .",
+    "test": "bun test"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./tui": {
+      "types": "./dist/sidebar.d.ts",
+      "default": "./dist/sidebar.js"
+    }
+  },
+  "oc-plugin": [
+    "server",
+    "tui"
+  ],
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.14.24",
+    "@opentui/solid": ">=0.1.103",
+    "solid-js": ">=1.9.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": ">=1.14.24",
+    "@opentui/core": ">=0.1.103",
+    "@opentui/solid": ">=0.1.103",
+    "@types/bun": "latest",
+    "@types/node": "^25.6.0",
+    "solid-js": ">=1.9.0",
+    "typescript": "^5.8.0"
+  }
+}

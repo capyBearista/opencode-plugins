@@ -11,6 +11,7 @@
 - [ ] opencode-agents-loader
 - [ ] opencode-double-tap-timeline
 - [ ] opencode-output-styles
+- [ ] opencode-ram-monitor
 - [ ] opencode-plugins (this monorepo itself)
 - [ ] Other: _______
 
@@ -28,6 +29,7 @@
 ## OpenCode Validation
 
 - OpenCode version tested:
+- Runtime smoke test performed:
 
 ## Quality Checklist
 
@@ -35,6 +37,9 @@
 - [ ] I ran `bun run build`
 - [ ] This is the smallest safe root-cause fix (no unnecessary logic changes)
 - [ ] I preserved behavioral invariants and added/updated tests as needed
+- [ ] For plugin/runtime changes, I verified the built module or package export that OpenCode actually loads
+- [ ] If local `.opencode` config was part of testing, I verified it points at the package root or published plugin name rather than a stale `dist/*` artifact
+- [ ] For bug fixes, I captured the root cause and why earlier symptoms/reviewer findings were misleading
 - [ ] I updated docs for user-facing changes
 - [ ] I have read the [Contributing Guidelines](../CONTRIBUTING.md)
 
