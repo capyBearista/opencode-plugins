@@ -9,6 +9,7 @@ import {
   getErrorMessage,
   loadRamMonitorWidgetConfig,
 } from "./sidebar-config.js";
+import { processSnapshotCache } from "./snapshot.js";
 
 type NodePropValue = unknown | (() => unknown);
 
@@ -44,8 +45,26 @@ function createBoxNode(props: Record<string, NodePropValue>, children: unknown[]
   return node;
 }
 
+function formatRamRow(label: string, direct: number, withTools: number): string {
+  return `${label.padEnd(4)} ${formatBytes(direct).padStart(10)} | ${formatBytes(withTools).padStart(10)}`;
+}
+
+function formatRamHeaderLeft(flash: string): string {
+  return `RAM Usage ${flash}`;
+}
+
+function formatRamHeaderRight(count: number): string {
+  return `${count} session${count === 1 ? "" : "s"}`;
+}
+
 function RamWidget(props: { api: TuiPluginApi }): JSX.Element {
-  const [ram, setRam] = createSignal<LightweightRamResult>({ current: 0, total: 0, count: 0 });
+  const [ram, setRam] = createSignal<LightweightRamResult>({
+    thisDirect: 0,
+    thisWithTools: 0,
+    allDirect: 0,
+    allWithTools: 0,
+    count: 0,
+  });
   const [error, setError] = createSignal<string | null>(null);
   const [intervalMs, setIntervalMs] = createSignal<number>(getDefaultRefreshIntervalMs());
   const [tick, setTick] = createSignal(0);
@@ -58,6 +77,7 @@ function RamWidget(props: { api: TuiPluginApi }): JSX.Element {
     const worktree = props.api.state.path?.worktree || process.cwd();
     const config = await loadRamMonitorWidgetConfig(worktree);
     setIntervalMs(config.intervalMs);
+    processSnapshotCache.setTtlMs(config.intervalMs);
     setWarning(config.warning ? `Config warning: using ${config.intervalMs}ms fallback` : null);
 
     if (config.warning) {
@@ -108,26 +128,68 @@ function RamWidget(props: { api: TuiPluginApi }): JSX.Element {
     if (timeout) clearTimeout(timeout);
   });
 
-  return createBoxNode({ gap: 0, padding: 1 }, [
-    createTextNode(
-      { fg: () => props.api.theme.current.text },
-      () => `RAM Usage ${tick() % 2 === 0 ? "●" : "○"}`,
-    ),
-    createTextNode(
-      {
-        fg: () => (error() ? props.api.theme.current.error : props.api.theme.current.text),
-      },
-      () => (error() ? `Error: ${error()}` : `Current: ${formatBytes(ram().current)}`),
-    ),
-    createTextNode({ fg: () => props.api.theme.current.secondary }, () =>
-      !error() && ram().count > 0
-        ? `Total: ${formatBytes(ram().total)} (${ram().count} active)`
-        : null,
-    ),
-    createTextNode({ fg: () => props.api.theme.current.error }, () =>
-      !error() && warning() ? warning() : null,
-    ),
-  ]) as JSX.Element;
+  return createBoxNode(
+    {
+      border: true,
+      borderStyle: "rounded",
+      borderColor: () =>
+        error()
+          ? props.api.theme.current.error
+          : warning()
+            ? props.api.theme.current.warning
+            : props.api.theme.current.borderSubtle,
+      backgroundColor: () => props.api.theme.current.backgroundElement,
+      gap: 0,
+      padding: 1,
+    },
+    [
+      createBoxNode(
+        { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+        [
+          createTextNode(
+            {
+              fg: () =>
+                error()
+                  ? props.api.theme.current.error
+                  : warning()
+                    ? props.api.theme.current.warning
+                    : props.api.theme.current.success,
+            },
+            () => formatRamHeaderLeft(tick() % 2 === 0 ? "●" : "○"),
+          ),
+          createTextNode(
+            {
+              fg: () => props.api.theme.current.secondary,
+              flexShrink: 0,
+              wrapMode: "none",
+              truncate: true,
+            },
+            () => formatRamHeaderRight(ram().count),
+          ),
+        ],
+      ),
+      createTextNode(
+        {
+          fg: () => props.api.theme.current.textMuted,
+        },
+        () => "      direct      with tools",
+      ),
+      createTextNode(
+        { fg: () => (error() ? props.api.theme.current.error : props.api.theme.current.text) },
+        () =>
+          error()
+            ? `Error: ${error()}`
+            : formatRamRow("This", ram().thisDirect, ram().thisWithTools),
+      ),
+      createTextNode(
+        { fg: () => (error() ? props.api.theme.current.error : props.api.theme.current.secondary) },
+        () => (!error() ? formatRamRow("All", ram().allDirect, ram().allWithTools) : null),
+      ),
+      createTextNode({ fg: () => props.api.theme.current.textMuted }, () =>
+        !error() ? "/ram includes tools" : warning() ? warning() : null,
+      ),
+    ],
+  ) as JSX.Element;
 }
 
 const SIDEBAR_ORDER = 150;
