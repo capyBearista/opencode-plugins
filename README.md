@@ -1,10 +1,10 @@
-<p align="center"><img src=".github/assets/capybearista-wordmark.svg" width="300" />
+<p align="center"><img src=".github/assets/capybearista-wordmark.svg" width="325" />
 <p align="center">
   <a href="https://github.com/capybearista/opencode-plugins">
     <picture>
       <source srcset=".github/assets/opencode-plugins-dark.svg" media="(prefers-color-scheme: dark)">
       <source srcset=".github/assets/opencode-plugins-light.svg" media="(prefers-color-scheme: light)">
-      <img src=".github/assets/opencode-plugins-light.svg" alt="OpenCode Plugins logo" width="700">
+      <img src=".github/assets/opencode-plugins-light.svg" alt="OpenCode Plugins logo" width="600">
     </picture>
   </a>
 </p>
