@@ -8,6 +8,8 @@
   <a href="https://opensource.org/licenses/MPL-2.0"><img alt="license" src="https://img.shields.io/badge/License-MPL--2.0-blue.svg?style=flat-square&color=60dfe6" /></a>
 </p>
 
+[![OpenCode Ram Monitor sidebar](../../.github/assets/ram-monitor-sidebar.webp)]([../../.github/assets/ram-monitor-sidebar.webp](https://github.com/capyBearista/opencode-plugins/tree/main/packages/opencode-ram-monitor))
+
 ---
 
 ## Why?
