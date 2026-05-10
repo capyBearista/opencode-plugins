@@ -1,5 +1,11 @@
 # @capybearista/opencode-ram-monitor
 
+## 1.1.0
+
+### Minor Changes
+
+- d8eb82f: Improve ram-monitor sidebar clarity with a compact card and direct vs with-tools RAM breakdown.
+
 ## 1.0.0
 
 ### Major Changes
