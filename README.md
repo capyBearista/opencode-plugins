@@ -1,4 +1,4 @@
-<p align="center"><img src=".github/assets/capybearista-wordmark.svg" width="350" />
+<p align="center"><img src=".github/assets/capybearista-wordmark.svg" width="300" />
 <p align="center">
   <a href="https://github.com/capybearista/opencode-plugins">
     <picture>
