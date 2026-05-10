@@ -7,6 +7,12 @@ import { getRamMonitorDebugLogPath, isRamMonitorDebugEnabled } from "./debug.js"
 import * as MemoryModule from "./memory.js";
 import {
   classifyOpencodeProcess,
+  computeLightweightRamBreakdown,
+  computeSessionSubtrees,
+  computeSubtreeRss,
+  countLogicalSessions,
+  formatBytes,
+  getSessionRoots,
   parsePsRssSnapshot,
   parseWmicWorkingSetSnapshot,
   sampleDarwinRssPerPid,
@@ -18,6 +24,13 @@ import {
 } from "./memory.js";
 import * as SidebarConfig from "./sidebar-config.js";
 import { getErrorMessage, normalizeRefreshIntervalMs } from "./sidebar-config.js";
+import {
+  type ProcessEntry,
+  type ProcessSnapshot,
+  ProcessSnapshotCache,
+  parsePsProcessSnapshot,
+  parseWmicProcessSnapshot,
+} from "./snapshot.js";
 
 type LoadRamMonitorWidgetConfig = (worktree: string) => Promise<{
   intervalMs: number;
@@ -35,6 +48,7 @@ type OpenCodePidSets = {
   core: Set<number>;
   launcher: Set<number>;
   all: Set<number>;
+  parentByPid?: Map<number, number>;
 };
 
 type ResolveActiveSessionPids = (
@@ -52,6 +66,14 @@ type ProcessNode = {
 };
 
 type SelectTargetRoots = (processes: ProcessNode[], rootPids: Set<number>) => ProcessNode[];
+
+function makeSnapshot(entries: ProcessEntry[]): ProcessSnapshot {
+  return {
+    entries,
+    parentByPid: new Map(entries.map((entry) => [entry.pid, entry.ppid])),
+    takenAt: Date.now(),
+  };
+}
 
 function getResolveActiveSessionPids(): ResolveActiveSessionPids {
   const module = MemoryModule as Record<string, unknown>;
@@ -135,12 +157,209 @@ describe("@capybearista/opencode-ram-monitor", () => {
     expect(selected).toEqual([currentPid, runtimeCorePid]);
   });
 
+  test("parses ps process snapshots", () => {
+    const parsed = parsePsProcessSnapshot(
+      "101 10 42 /usr/bin/node\ninvalid\n102 11 7 /usr/bin/sh -c foo\n",
+    );
+    expect(parsed).toEqual([
+      { pid: 101, ppid: 10, rss: 42 * 1024, command: "/usr/bin/node" },
+      { pid: 102, ppid: 11, rss: 7 * 1024, command: "/usr/bin/sh -c foo" },
+    ]);
+  });
+
+  test("parses wmic process snapshots", () => {
+    const parsed = parseWmicProcessSnapshot(
+      "ProcessId=101\nParentProcessId=10\nWorkingSetSize=1024\nCommandLine=opencode\n\nProcessId=102\nParentProcessId=11\nWorkingSetSize=2048\nCommandLine=.opencode\n",
+    );
+    expect(parsed).toEqual([
+      { pid: 101, ppid: 10, rss: 1024, command: "opencode" },
+      { pid: 102, ppid: 11, rss: 2048, command: ".opencode" },
+    ]);
+  });
+
+  test("derives session roots and the current visible session root", () => {
+    const snapshot = makeSnapshot([
+      { pid: 100, ppid: 1, rss: 10, command: "/usr/bin/opencode" },
+      { pid: 101, ppid: 100, rss: 20, command: "/usr/bin/.opencode" },
+      { pid: 200, ppid: 1, rss: 30, command: "/usr/bin/opencode" },
+      { pid: 201, ppid: 200, rss: 40, command: "/usr/bin/.opencode" },
+    ]);
+
+    const { roots, currentSessionRoot } = getSessionRoots(snapshot, [100, 101, 200, 201], 101);
+    expect(roots).toEqual([100, 200]);
+    expect(currentSessionRoot).toBe(100);
+  });
+
+  test("collapses a launcher-core pair even when ancestry is broken", () => {
+    const snapshot = makeSnapshot([
+      { pid: 100, ppid: 1, rss: 10, command: "/usr/bin/opencode" },
+      { pid: 101, ppid: 1, rss: 20, command: "/usr/bin/.opencode" },
+    ]);
+
+    const { roots, currentSessionRoot } = getSessionRoots(snapshot, [100, 101], 101);
+    expect(roots).toEqual([100]);
+    expect(currentSessionRoot).toBe(100);
+  });
+
+  test("computes subtree totals from session roots", () => {
+    const entries: ProcessEntry[] = [
+      { pid: 100, ppid: 1, rss: 10, command: "/usr/bin/opencode" },
+      { pid: 101, ppid: 100, rss: 20, command: "/usr/bin/.opencode" },
+      { pid: 102, ppid: 101, rss: 30, command: "serena" },
+      { pid: 200, ppid: 1, rss: 40, command: "/usr/bin/opencode" },
+      { pid: 201, ppid: 200, rss: 50, command: "/usr/bin/.opencode" },
+    ];
+
+    const subtrees = computeSessionSubtrees(entries, [100, 200]);
+    expect(subtrees.get(100)?.totalRss).toBe(60);
+    expect(subtrees.get(200)?.totalRss).toBe(90);
+    expect([...subtrees.values()].reduce((sum, item) => sum + item.totalRss, 0)).toBe(150);
+  });
+
+  test("splits direct and tool memory for a single active session", () => {
+    const snapshot = makeSnapshot([
+      { pid: 100, ppid: 1, rss: 10, command: "/usr/bin/opencode" },
+      { pid: 101, ppid: 100, rss: 20, command: "/usr/bin/.opencode" },
+      { pid: 102, ppid: 101, rss: 30, command: "serena" },
+    ]);
+
+    const { roots, currentSessionRoot } = getSessionRoots(snapshot, [100, 101], 101);
+    expect(
+      computeLightweightRamBreakdown(snapshot, [100, 101], roots, currentSessionRoot, 101),
+    ).toEqual({
+      thisDirect: 30,
+      thisWithTools: 60,
+      allDirect: 30,
+      allWithTools: 60,
+      count: 1,
+    });
+  });
+
+  test("splits direct and tool memory across sessions", () => {
+    const snapshot = makeSnapshot([
+      { pid: 100, ppid: 1, rss: 10, command: "/usr/bin/opencode" },
+      { pid: 101, ppid: 100, rss: 20, command: "/usr/bin/.opencode" },
+      { pid: 102, ppid: 101, rss: 30, command: "serena" },
+      { pid: 200, ppid: 1, rss: 40, command: "/usr/bin/opencode" },
+      { pid: 201, ppid: 200, rss: 50, command: "/usr/bin/.opencode" },
+      { pid: 202, ppid: 201, rss: 60, command: "uv" },
+    ]);
+
+    const { roots, currentSessionRoot } = getSessionRoots(snapshot, [100, 101, 200, 201], 101);
+    expect(
+      computeLightweightRamBreakdown(
+        snapshot,
+        [100, 101, 200, 201],
+        roots,
+        currentSessionRoot,
+        101,
+      ),
+    ).toEqual({
+      thisDirect: 30,
+      thisWithTools: 60,
+      allDirect: 120,
+      allWithTools: 210,
+      count: 2,
+    });
+  });
+
+  test("computes subtree totals safely through cycles", () => {
+    const rssByPid = new Map<number, number>([
+      [1, 10],
+      [2, 20],
+      [3, 30],
+    ]);
+    const childrenByPid = new Map<number, number[]>([
+      [1, [2]],
+      [2, [3]],
+      [3, [1]],
+    ]);
+
+    expect(computeSubtreeRss(1, rssByPid, childrenByPid)).toBe(60);
+  });
+
+  test("caches snapshots within ttl and deduplicates concurrent refreshes", async () => {
+    let fetchCount = 0;
+    const cache = new ProcessSnapshotCache(async () => {
+      fetchCount += 1;
+      return makeSnapshot([{ pid: 1, ppid: 0, rss: 1, command: "one" }]);
+    });
+
+    cache.setTtlMs(60_000);
+    const first = await cache.get();
+    const second = await cache.get();
+    const [third, fourth] = await Promise.all([cache.get(true), cache.get(true)]);
+
+    expect(first.entries.length).toBe(1);
+    expect(second).toBe(first);
+    expect(third.entries.length).toBe(1);
+    expect(fourth).toBe(third);
+    expect(fetchCount).toBe(2);
+  });
+
+  test("counts a launcher-core ancestry pair as one logical session", () => {
+    expect(
+      countLogicalSessions([120, 121], {
+        core: new Set([121]),
+        launcher: new Set([120]),
+        all: new Set([120, 121]),
+        parentByPid: new Map([
+          [121, 120],
+          [120, 1],
+        ]),
+      }),
+    ).toBe(1);
+  });
+
+  test("still groups a launcher-core pair when ancestry data is partial", () => {
+    expect(
+      countLogicalSessions([120, 121], {
+        core: new Set([121]),
+        launcher: new Set([120]),
+        all: new Set([120, 121]),
+        parentByPid: new Map([[120, 1]]),
+      }),
+    ).toBe(1);
+  });
+
+  test("counts separate launcher-core trees as separate logical sessions", () => {
+    expect(
+      countLogicalSessions([120, 121, 220, 221], {
+        core: new Set([121, 221]),
+        launcher: new Set([120, 220]),
+        all: new Set([120, 121, 220, 221]),
+        parentByPid: new Map([
+          [121, 120],
+          [120, 1],
+          [221, 220],
+          [220, 1],
+        ]),
+      }),
+    ).toBe(2);
+  });
+
+  test("falls back to raw pid count when ancestry data is unavailable", () => {
+    expect(
+      countLogicalSessions([120, 121], {
+        core: new Set([121]),
+        launcher: new Set([120]),
+        all: new Set([120, 121]),
+        parentByPid: new Map(),
+      }),
+    ).toBe(2);
+  });
+
   test("normalizes refresh interval to safe bounds", () => {
     expect(normalizeRefreshIntervalMs("200")).toBe(1000);
     expect(normalizeRefreshIntervalMs(0)).toBe(1000);
     expect(normalizeRefreshIntervalMs(1500)).toBe(1500);
     expect(normalizeRefreshIntervalMs(999999)).toBe(60_000);
     expect(normalizeRefreshIntervalMs("bad")).toBe(5000);
+  });
+
+  test("formats large byte counts as gigabytes", () => {
+    expect(formatBytes(0)).toBe("0 MB");
+    expect(formatBytes(1024 * 1024 * 1024)).toBe("1.00 GB");
   });
 
   test("derives stable error messages from unknown throws", () => {
@@ -217,6 +436,10 @@ describe("@capybearista/opencode-ram-monitor", () => {
           text: "white",
           secondary: "gray",
           error: "red",
+          warning: "yellow",
+          success: "green",
+          borderSubtle: "dimgray",
+          backgroundElement: "#111111",
         },
       },
       state: {
