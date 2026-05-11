@@ -33,9 +33,9 @@
     "gray-matter": "^4.0.3"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.14.0"
+    "@opencode-ai/plugin": ">=1.14.48"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": ">=1.14.0"
+    "@opencode-ai/plugin": ">=1.14.48"
   }
 }
