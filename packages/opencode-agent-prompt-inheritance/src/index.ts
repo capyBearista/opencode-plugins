@@ -1,5 +1,6 @@
 import type { Plugin, PluginModule } from "@opencode-ai/plugin";
 import { resolveInheritanceMode, stitchSystemPrompt } from "./inheritance.js";
+import { captureTransformedSystemPrompt } from "./prompt-capture.js";
 import { providerPromptForModel } from "./provider-prompt.js";
 
 export const AgentPromptInheritancePlugin: Plugin = async (ctx) => {
@@ -20,13 +21,31 @@ export const AgentPromptInheritancePlugin: Plugin = async (ctx) => {
         await ctx.client.app.agents({ query: { directory: ctx.directory } })
       ).data?.find((entry) => entry.name === agentName);
       const mode = resolveInheritanceMode(agent?.options);
-      if (!mode) return;
+      if (!mode) {
+        await captureTransformedSystemPrompt({
+          agentName,
+          mode: null,
+          modelID: input.model.api.id,
+          inherited: false,
+          sessionID: input.sessionID,
+          system: output.system,
+        });
+        return;
+      }
 
       output.system[0] = stitchSystemPrompt(
         providerPromptForModel(input.model),
         output.system[0],
         mode,
       );
+      await captureTransformedSystemPrompt({
+        agentName,
+        mode,
+        modelID: input.model.api.id,
+        inherited: true,
+        sessionID: input.sessionID,
+        system: output.system,
+      });
     },
   };
 };

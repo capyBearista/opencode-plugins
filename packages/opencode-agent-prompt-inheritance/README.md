@@ -36,6 +36,7 @@ src/
 - Treats `true` as `prepend`
 - Keeps other system prompt parts intact
 - Uses vendored upstream prompt files to mirror OpenCode provider behavior
+- Supports optional env-gated JSONL prompt capture for debugging
 
 ## Install
 
@@ -85,11 +86,32 @@ Review code for correctness, risk, and missing tests.
 | `inherit-base-prompt` | `false \| true \| prepend \| append` | Controls provider prompt inheritance |
 | `inheritBasePrompt` | `false \| true \| prepend \| append` | CamelCase alias for the same setting |
 
+## Debug Capture
+
+If you want to inspect the transformed `system` prompt after this plugin runs, set:
+
+```bash
+export OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE=/tmp/opencode-agent-prompt-inheritance.jsonl
+```
+
+When this variable is set, the plugin appends one JSON line per transformed session containing:
+
+- `timestamp`
+- `sessionID`
+- `agentName`
+- `modelID`
+- `mode`
+- `inherited`
+- `system`
+
+If the variable is unset, no capture file is written.
+
 ## Troubleshooting
 
 - If nothing changes, confirm the active agent has one of the inheritance keys and the value is valid.
 - If the active agent cannot be resolved, the hook leaves the system prompt untouched.
 - Prompt updates are synced from upstream OpenCode (`anomalyco/opencode`) via the `Sync OpenCode Prompts` workflow and opened as PRs.
+- If you are using debug capture, remember that `.jsonl` files are local artifacts and are ignored by git.
 
 ## License
 
