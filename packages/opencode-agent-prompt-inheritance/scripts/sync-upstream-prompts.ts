@@ -2,10 +2,7 @@ const owner = process.env.OPENCODE_UPSTREAM_OWNER ?? "anomalyco";
 const repo = process.env.OPENCODE_UPSTREAM_REPO ?? "opencode";
 const ref = process.env.OPENCODE_UPSTREAM_REF ?? "dev";
 
-const upstreamBase = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/packages/opencode/src/session/prompt`;
-const targetDir = `${process.cwd()}/src/prompt`;
-
-const allowedFiles = [
+export const ALLOWED_FILES = [
   "anthropic.txt",
   "beast.txt",
   "codex.txt",
@@ -17,17 +14,31 @@ const allowedFiles = [
   "trinity.txt",
 ] as const;
 
-await Bun.$`mkdir -p ${targetDir}`;
+export function buildUpstreamUrl(owner: string, repo: string, ref: string, file: string) {
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/packages/opencode/src/session/prompt/${file}`;
+}
 
-await Promise.all(
-  allowedFiles.map(async (file) => {
-    const response = await fetch(`${upstreamBase}/${file}`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch ${file}: ${response.status} ${response.statusText}`);
-    }
+export async function syncPrompts(
+  targetDir: string,
+  files: readonly string[],
+  upstreamBase: string,
+) {
+  await Bun.$`mkdir -p ${targetDir}`;
 
-    await Bun.write(`${targetDir}/${file}`, await response.text());
-  }),
-);
+  await Promise.all(
+    files.map(async (file) => {
+      const response = await fetch(`${upstreamBase}/${file}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${file}: ${response.status} ${response.statusText}`);
+      }
 
-export {};
+      await Bun.write(`${targetDir}/${file}`, await response.text());
+    }),
+  );
+}
+
+if (import.meta.path === Bun.main) {
+  const upstreamBase = buildUpstreamUrl(owner, repo, ref, "");
+  const targetDir = `${process.cwd()}/src/prompt`;
+  await syncPrompts(targetDir, ALLOWED_FILES, upstreamBase.slice(0, -1));
+}

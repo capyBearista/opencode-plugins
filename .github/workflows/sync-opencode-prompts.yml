@@ -44,6 +44,11 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         run: bun install --frozen-lockfile && bun --filter @capybearista/opencode-agent-prompt-inheritance run typecheck && bun --filter @capybearista/opencode-agent-prompt-inheritance run lint && bun --filter @capybearista/opencode-agent-prompt-inheritance run test && bun --filter @capybearista/opencode-agent-prompt-inheritance run build
 
+      - name: Run built-artifact smoke tests
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: packages/opencode-agent-prompt-inheritance
+        run: bun test src/artifact.test.ts
+
       - name: Generate changeset for prompt sync
         if: steps.changes.outputs.changed == 'true'
         run: |

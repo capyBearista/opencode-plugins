@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readdirSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { providerPromptForModel } from "./provider-prompt.js";
 
@@ -412,6 +413,36 @@ describe("@capybearista/opencode-agent-prompt-inheritance", () => {
     expect(gpt).not.toBe(codex);
   });
 
+  test("selects copilot prompt for github-copilot models", () => {
+    const copilot = providerPromptForModel({ api: { id: "gpt-4o-copilot" } });
+    const gpt = providerPromptForModel({ api: { id: "gpt-4o" } });
+
+    expect(copilot).toContain("expert AI programming assistant");
+    expect(gpt).not.toBe(copilot);
+  });
+
+  test("distinguishes copilot vs codex vs gpt in mixed-case", () => {
+    const copilot = providerPromptForModel({ api: { id: "GPT-4O-COPILOT" } });
+    const codex = providerPromptForModel({ api: { id: "GPT-CODEX" } });
+    const gpt = providerPromptForModel({ api: { id: "GPT-3.5" } });
+
+    expect(copilot).toContain("expert AI programming assistant");
+    expect(codex).toContain("## Editing constraints");
+    expect(gpt).toContain("You are OpenCode");
+    expect(copilot).not.toBe(codex);
+    expect(copilot).not.toBe(gpt);
+  });
+
+  test("compound model IDs route to the most specific prompt", () => {
+    expect(providerPromptForModel({ api: { id: "gpt-4-codex" } })).toContain(
+      "## Editing constraints",
+    );
+    expect(providerPromptForModel({ api: { id: "o3-codex" } })).toContain("## Editing constraints");
+    expect(providerPromptForModel({ api: { id: "gpt-4o" } })).toContain(
+      "THE PROBLEM CAN NOT BE SOLVED WITHOUT EXTENSIVE INTERNET RESEARCH",
+    );
+  });
+
   test("no-ops if sessionID is missing", async () => {
     const hooks = await createHooks({ "inherit-base-prompt": "prepend" });
     const output = { system: ["Custom prompt"] };
@@ -445,5 +476,26 @@ describe("@capybearista/opencode-agent-prompt-inheritance", () => {
   test("falls back to default prompt for unknown model ID", () => {
     const prompt = providerPromptForModel({ api: { id: "unknown-model-provider" } });
     expect(prompt).toContain("You are opencode, an interactive CLI tool");
+  });
+
+  test("every vendored prompt asset has an intentional runtime mapping", () => {
+    const promptDir = new URL("./prompt/", import.meta.url).pathname;
+    const files = readdirSync(promptDir).filter((f: string) => f.endsWith(".txt"));
+
+    const mappedFiles = new Set([
+      "anthropic.txt",
+      "beast.txt",
+      "codex.txt",
+      "copilot-gpt-5.txt",
+      "default.txt",
+      "gemini.txt",
+      "gpt.txt",
+      "kimi.txt",
+      "trinity.txt",
+    ]);
+
+    const unmapped = files.filter((f: string) => !mappedFiles.has(f));
+    expect(unmapped).toEqual([]);
+    expect(mappedFiles.size).toBe(files.length);
   });
 });
