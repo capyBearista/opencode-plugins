@@ -24,5 +24,9 @@ export async function captureTransformedSystemPrompt(input: CaptureInput) {
     system: input.system,
   });
 
-  await appendFile(captureFile, `${entry}\n`, "utf8");
+  try {
+    await appendFile(captureFile, `${entry}\n`, "utf8");
+  } catch {
+    // Fail open: debug feature should not break normal chat flow
+  }
 }

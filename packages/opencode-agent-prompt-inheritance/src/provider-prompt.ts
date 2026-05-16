@@ -8,14 +8,14 @@ import PROMPT_KIMI from "./prompt/kimi.txt";
 import PROMPT_TRINITY from "./prompt/trinity.txt";
 
 export function providerPromptForModel(model: { api: { id: string } }) {
-  const id = model.api.id;
+  const id = model.api.id.toLowerCase();
 
   if (id.includes("gpt-4") || id.includes("o1") || id.includes("o3")) return PROMPT_BEAST;
   if (id.includes("gpt")) return id.includes("codex") ? PROMPT_CODEX : PROMPT_GPT;
   if (id.includes("gemini-")) return PROMPT_GEMINI;
   if (id.includes("claude")) return PROMPT_ANTHROPIC;
-  if (id.toLowerCase().includes("trinity")) return PROMPT_TRINITY;
-  if (id.toLowerCase().includes("kimi")) return PROMPT_KIMI;
+  if (id.includes("trinity")) return PROMPT_TRINITY;
+  if (id.includes("kimi")) return PROMPT_KIMI;
 
   return PROMPT_DEFAULT;
 }
