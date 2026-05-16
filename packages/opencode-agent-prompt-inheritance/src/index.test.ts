@@ -301,6 +301,19 @@ describe("@capybearista/opencode-agent-prompt-inheritance", () => {
     expect(output.system).toEqual(["Custom agent prompt"]);
   });
 
+  test("fails open if session.messages returns non-array data", async () => {
+    const plugin = await loadPlugin();
+    const ctx = createCtx({ "inherit-base-prompt": "prepend" });
+    ctx.client.session.messages = async () => ({ data: { info: { agent: "reviewer" } } }) as never;
+    const hooks = await plugin.server(ctx as never);
+    const output = { system: ["Custom agent prompt"] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "session-1", model: { api: { id: "claude" } } } as never,
+      output as never,
+    );
+    expect(output.system).toEqual(["Custom agent prompt"]);
+  });
+
   test("uses the most recent agent when a session switches agents", async () => {
     const plugin = await loadPlugin();
     const ctx = createCtx({ "inherit-base-prompt": "prepend" });
@@ -359,6 +372,19 @@ describe("@capybearista/opencode-agent-prompt-inheritance", () => {
     ctx.client.app.agents = async () => {
       throw new Error("Agent lookup failure");
     };
+    const hooks = await plugin.server(ctx as never);
+    const output = { system: ["Custom agent prompt"] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "session-1", model: { api: { id: "claude" } } } as never,
+      output as never,
+    );
+    expect(output.system).toEqual(["Custom agent prompt"]);
+  });
+
+  test("fails open if app.agents returns non-array data", async () => {
+    const plugin = await loadPlugin();
+    const ctx = createCtx({ "inherit-base-prompt": "prepend" });
+    ctx.client.app.agents = async () => ({ data: { name: "reviewer" } }) as never;
     const hooks = await plugin.server(ctx as never);
     const output = { system: ["Custom agent prompt"] };
     await hooks["experimental.chat.system.transform"]?.(
