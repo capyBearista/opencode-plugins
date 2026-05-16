@@ -38,6 +38,22 @@ src/
 - Uses vendored upstream prompt files to mirror OpenCode provider behavior
 - Supports optional env-gated JSONL prompt capture for debugging
 
+## Supported Model Families
+
+The plugin selects the appropriate base prompt based on the model ID. All checks are case-insensitive.
+
+| Model ID pattern | Prompt used |
+| --- | --- |
+| `gpt-4*`, `o1*`, `o3*` | Beast prompt |
+| `*codex*` | Codex prompt |
+| `*copilot*` | Copilot GPT-5 prompt |
+| `*gpt*` | GPT prompt |
+| `*gemini-*` | Gemini prompt |
+| `*claude*` | Anthropic prompt |
+| `*trinity*` | Trinity prompt |
+| `*kimi*` | Kimi prompt |
+| (anything else) | Default prompt |
+
 ## Install
 
 Add the plugin to `opencode.json` or `opencode.jsonc`:
