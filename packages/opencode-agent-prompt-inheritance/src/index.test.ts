@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFile, rm } from "node:fs/promises";
 import { providerPromptForModel } from "./provider-prompt.js";
 
 async function loadPlugin() {
@@ -168,6 +169,67 @@ describe("@capybearista/opencode-agent-prompt-inheritance", () => {
     );
 
     expect(output.system).toEqual(["Custom agent prompt"]);
+  });
+
+  test("writes transformed system prompt capture when capture file is configured", async () => {
+    const captureFile = `/tmp/opencode-agent-prompt-inheritance-${Date.now()}.jsonl`;
+    process.env.OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE = captureFile;
+
+    try {
+      const hooks = await createHooks({ "inherit-base-prompt": "prepend" });
+      const output = { system: ["Custom agent prompt"] };
+
+      await hooks["experimental.chat.system.transform"]?.(
+        { sessionID: "session-1", model: { api: { id: "claude-sonnet-4-5" } } } as never,
+        output as never,
+      );
+
+      const contents = await readFile(captureFile, "utf8");
+      const capture = JSON.parse(contents.trim()) as {
+        agentName: string;
+        inherited: boolean;
+        mode: string;
+        system: string[];
+      };
+
+      expect(capture.agentName).toBe("reviewer");
+      expect(capture.mode).toBe("prepend");
+      expect(capture.inherited).toBeTrue();
+      expect(capture.system[0]).toContain("You are OpenCode, the best coding agent on the planet.");
+      expect(capture.system[0]).toContain("Custom agent prompt");
+    } finally {
+      delete process.env.OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE;
+      await rm(captureFile, { force: true });
+    }
+  });
+
+  test("writes skipped capture when inheritance is disabled", async () => {
+    const captureFile = `/tmp/opencode-agent-prompt-inheritance-disabled-${Date.now()}.jsonl`;
+    process.env.OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE = captureFile;
+
+    try {
+      const hooks = await createHooks({ "inherit-base-prompt": false });
+      const output = { system: ["Custom agent prompt"] };
+
+      await hooks["experimental.chat.system.transform"]?.(
+        { sessionID: "session-1", model: { api: { id: "claude-sonnet-4-5" } } } as never,
+        output as never,
+      );
+
+      const contents = await readFile(captureFile, "utf8");
+      const capture = JSON.parse(contents.trim()) as {
+        inherited: boolean;
+        mode: string | null;
+        system: string[];
+      };
+
+      expect(capture.inherited).toBeFalse();
+      expect(capture.mode).toBeNull();
+      expect(capture.system).toEqual(["Custom agent prompt"]);
+    } finally {
+      delete process.env.OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE;
+      await rm(captureFile, { force: true });
+    }
   });
 
   test("selects codex prompt for codex models", () => {
