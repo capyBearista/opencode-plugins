@@ -253,4 +253,84 @@ describe("@capybearista/opencode-agent-prompt-inheritance", () => {
       "THE PROBLEM CAN NOT BE SOLVED WITHOUT EXTENSIVE INTERNET RESEARCH.",
     );
   });
+
+  test("fails open if session.messages throws", async () => {
+    const plugin = await loadPlugin();
+    const ctx = createCtx({ "inherit-base-prompt": "prepend" });
+    ctx.client.session.messages = async () => {
+      throw new Error("Transient API error");
+    };
+    const hooks = await plugin.server(ctx as never);
+    const output = { system: ["Custom agent prompt"] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "session-1", model: { api: { id: "claude" } } } as never,
+      output as never,
+    );
+    expect(output.system).toEqual(["Custom agent prompt"]);
+  });
+
+  test("fails open if session.messages returns undefined data", async () => {
+    const plugin = await loadPlugin();
+    const ctx = createCtx({ "inherit-base-prompt": "prepend" });
+    ctx.client.session.messages = async () => ({ data: undefined }) as never;
+    const hooks = await plugin.server(ctx as never);
+    const output = { system: ["Custom agent prompt"] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "session-1", model: { api: { id: "claude" } } } as never,
+      output as never,
+    );
+    expect(output.system).toEqual(["Custom agent prompt"]);
+  });
+
+  test("uses the most recent agent when a session switches agents", async () => {
+    const plugin = await loadPlugin();
+    const ctx = createCtx({ "inherit-base-prompt": "prepend" });
+    ctx.client.session.messages = async () => ({
+      data: [
+        { info: { agent: "old-agent" } },
+        { info: { agent: "reviewer" } },
+        { info: {} }, // Some agent-less message
+      ] as never,
+    });
+    const hooks = await plugin.server(ctx as never);
+    const output = { system: ["Custom agent prompt"] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "session-1", model: { api: { id: "claude-sonnet-4-5" } } } as never,
+      output as never,
+    );
+    expect(output.system[0]).toContain("You are OpenCode");
+    expect(output.system[0]).toContain("Custom agent prompt");
+  });
+
+  test("fails open if capture file is unwritable", async () => {
+    process.env.OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE =
+      "/invalid/path/that/does/not/exist/capture.jsonl";
+    try {
+      const hooks = await createHooks({ "inherit-base-prompt": "prepend" });
+      const output = { system: ["Custom agent prompt"] };
+
+      await hooks["experimental.chat.system.transform"]?.(
+        { sessionID: "session-1", model: { api: { id: "claude-sonnet-4-5" } } } as never,
+        output as never,
+      );
+
+      // Verify that it still successfully transformed the prompt
+      expect(output.system[0]).toContain("You are OpenCode");
+      expect(output.system[0]).toContain("Custom agent prompt");
+    } finally {
+      delete process.env.OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE;
+    }
+  });
+
+  test("selects prompts ignoring case (mixed-case models)", () => {
+    expect(providerPromptForModel({ api: { id: "GPT-4.1" } })).toContain(
+      "THE PROBLEM CAN NOT BE SOLVED WITHOUT EXTENSIVE INTERNET RESEARCH.",
+    );
+    expect(providerPromptForModel({ api: { id: "Claude-Sonnet-4-5" } })).toContain(
+      "software engineering tasks",
+    );
+    expect(providerPromptForModel({ api: { id: "GEMINI-2.5-PRO" } })).toContain(
+      "software engineering tasks",
+    );
+  });
 });

@@ -8,18 +8,25 @@ export const AgentPromptInheritancePlugin: Plugin = async (ctx) => {
     "experimental.chat.system.transform": async (input, output) => {
       if (!input.sessionID || output.system.length === 0) return;
 
-      const messages = await ctx.client.session.messages({
-        path: { id: input.sessionID },
-        query: { directory: ctx.directory, limit: 20 },
-      });
-      const agentName = messages.data
-        ?.map((message) => (message.info as { agent?: string }).agent)
-        .find(Boolean);
-      if (!agentName) return;
+      let agentName: string | undefined;
+      let agent: { options?: any } | undefined;
 
-      const agent = (
-        await ctx.client.app.agents({ query: { directory: ctx.directory } })
-      ).data?.find((entry) => entry.name === agentName);
+      try {
+        const messages = await ctx.client.session.messages({
+          path: { id: input.sessionID },
+          query: { directory: ctx.directory, limit: 20 },
+        });
+        agentName = [...(messages.data || [])]
+          .reverse()
+          .map((message) => (message.info as { agent?: string })?.agent)
+          .find(Boolean);
+        if (!agentName) return;
+
+        const agentsRes = await ctx.client.app.agents({ query: { directory: ctx.directory } });
+        agent = agentsRes.data?.find((entry) => entry.name === agentName);
+      } catch {
+        return;
+      }
       const mode = resolveInheritanceMode(agent?.options);
       if (!mode) {
         await captureTransformedSystemPrompt({
