@@ -20,13 +20,20 @@ export const AgentPromptInheritancePlugin: Plugin = async (ctx) => {
           path: { id: input.sessionID },
           query: { directory: ctx.directory, limit: 20 },
         });
-        agentName = (messages.data as { info?: { agent?: string } }[] | undefined)?.findLast(
-          (m) => m.info?.agent,
-        )?.info?.agent;
+        const messageData = messages.data;
+        const normalizedMessages = Array.isArray(messageData)
+          ? (messageData as { info?: { agent?: string } }[])
+          : [];
+        agentName = normalizedMessages.findLast((m) => m.info?.agent)?.info?.agent;
         if (!agentName) return;
 
         const agentsRes = await ctx.client.app.agents({ query: { directory: ctx.directory } });
-        agent = agentsRes.data?.find((entry) => entry.name === agentName);
+        const agents = agentsRes.data;
+        agent = Array.isArray(agents)
+          ? (agents as { name: string; options?: Record<string, unknown> }[]).find(
+              (entry) => entry.name === agentName,
+            )
+          : undefined;
 
         if (!agent) {
           console.warn(
