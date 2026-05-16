@@ -184,6 +184,15 @@ describe("@capybearista/opencode-agent-prompt-inheritance", () => {
         output as never,
       );
 
+      // Wait for fire-and-forget capture
+      for (let i = 0; i < 10; i++) {
+        const stats = await readFile(captureFile, "utf8")
+          .then((s) => s.trim().split("\n"))
+          .catch(() => []);
+        if (stats.length === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
       const contents = await readFile(captureFile, "utf8");
       const capture = JSON.parse(contents.trim()) as {
         agentName: string;
@@ -215,6 +224,15 @@ describe("@capybearista/opencode-agent-prompt-inheritance", () => {
         { sessionID: "session-1", model: { api: { id: "claude-sonnet-4-5" } } } as never,
         output as never,
       );
+
+      // Wait for fire-and-forget capture
+      for (let i = 0; i < 10; i++) {
+        const stats = await readFile(captureFile, "utf8")
+          .then((s) => s.trim().split("\n"))
+          .catch(() => []);
+        if (stats.length === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
 
       const contents = await readFile(captureFile, "utf8");
       const capture = JSON.parse(contents.trim()) as {
@@ -332,5 +350,100 @@ describe("@capybearista/opencode-agent-prompt-inheritance", () => {
     expect(providerPromptForModel({ api: { id: "GEMINI-2.5-PRO" } })).toContain(
       "software engineering tasks",
     );
+  });
+
+  test("fails open if app.agents throws", async () => {
+    const plugin = await loadPlugin();
+    const ctx = createCtx({ "inherit-base-prompt": "prepend" });
+    ctx.client.app.agents = async () => {
+      throw new Error("Agent lookup failure");
+    };
+    const hooks = await plugin.server(ctx as never);
+    const output = { system: ["Custom agent prompt"] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "session-1", model: { api: { id: "claude" } } } as never,
+      output as never,
+    );
+    expect(output.system).toEqual(["Custom agent prompt"]);
+  });
+
+  test("appends multiple debug capture entries", async () => {
+    const captureFile = `/tmp/opencode-agent-prompt-inheritance-multi-${Date.now()}.jsonl`;
+    process.env.OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE = captureFile;
+
+    try {
+      const hooks = await createHooks({ "inherit-base-prompt": "prepend" });
+      const output = { system: ["Custom prompt"] };
+
+      const input = {
+        sessionID: "session-1",
+        model: { api: { id: "claude" } },
+      } as never;
+
+      await hooks["experimental.chat.system.transform"]?.(input, output as never);
+      await hooks["experimental.chat.system.transform"]?.(input, output as never);
+
+      // Wait a bit since capture is now fire-and-forget (Phase 3)
+      for (let i = 0; i < 10; i++) {
+        const stats = await readFile(captureFile, "utf8")
+          .then((s) => s.trim().split("\n"))
+          .catch(() => []);
+        if (stats.length === 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      const contents = await readFile(captureFile, "utf8");
+      const lines = contents.trim().split("\n");
+      expect(lines).toHaveLength(2);
+      expect(JSON.parse(lines[0]).inherited).toBeTrue();
+      expect(JSON.parse(lines[1]).inherited).toBeTrue();
+    } finally {
+      delete process.env.OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE;
+      await rm(captureFile, { force: true });
+    }
+  });
+
+  test("distinguishes gpt vs codex in mixed-case", () => {
+    const gpt = providerPromptForModel({ api: { id: "GPT-3.5-TURBO" } });
+    const codex = providerPromptForModel({ api: { id: "GPT-CODEX-MIXED" } });
+
+    expect(gpt).toContain("You are OpenCode, You and the user share the same workspace");
+    expect(codex).toContain("## Editing constraints");
+    expect(gpt).not.toBe(codex);
+  });
+
+  test("no-ops if sessionID is missing", async () => {
+    const hooks = await createHooks({ "inherit-base-prompt": "prepend" });
+    const output = { system: ["Custom prompt"] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "", model: { api: { id: "claude" } } } as never,
+      output as never,
+    );
+    expect(output.system).toEqual(["Custom prompt"]);
+  });
+
+  test("no-ops if output.system is empty", async () => {
+    const hooks = await createHooks({ "inherit-base-prompt": "prepend" });
+    const output = { system: [] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "session-1", model: { api: { id: "claude" } } } as never,
+      output as never,
+    );
+    expect(output.system).toEqual([]);
+  });
+
+  test("no-ops and warns if output.system[0] is not a string", async () => {
+    const hooks = await createHooks({ "inherit-base-prompt": "prepend" });
+    const output = { system: [{ type: "text", text: "Not a string" }] };
+    await hooks["experimental.chat.system.transform"]?.(
+      { sessionID: "session-1", model: { api: { id: "claude" } } } as never,
+      output as never,
+    );
+    expect(output.system[0]).toEqual({ type: "text", text: "Not a string" });
+  });
+
+  test("falls back to default prompt for unknown model ID", () => {
+    const prompt = providerPromptForModel({ api: { id: "unknown-model-provider" } });
+    expect(prompt).toContain("You are opencode, an interactive CLI tool");
   });
 });

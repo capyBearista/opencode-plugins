@@ -14,19 +14,20 @@ export async function captureTransformedSystemPrompt(input: CaptureInput) {
   const captureFile = process.env.OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE;
   if (!captureFile) return;
 
-  const entry = JSON.stringify({
-    timestamp: new Date().toISOString(),
-    sessionID: input.sessionID,
-    agentName: input.agentName,
-    modelID: input.modelID,
-    mode: input.mode,
-    inherited: input.inherited,
-    system: input.system,
-  });
-
   try {
+    const entry = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      sessionID: input.sessionID,
+      agentName: input.agentName,
+      modelID: input.modelID,
+      mode: input.mode,
+      inherited: input.inherited,
+      system: input.system,
+    });
+
     await appendFile(captureFile, `${entry}\n`, "utf8");
-  } catch {
+  } catch (error) {
     // Fail open: debug feature should not break normal chat flow
+    console.warn(`[AgentPromptInheritance] Failed to write capture file to ${captureFile}:`, error);
   }
 }
