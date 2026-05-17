@@ -1,0 +1,20 @@
+{
+  "name": "@capybearista/opencode-plugin-manager",
+  "version": "1.0.0",
+  "description": "CLI tool to manage OpenCode plugins and plugin versions",
+  "author": "capyBearista <capybearista@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/capyBearista/opencode-plugins.git",
+    "directory": "packages/opencode-plugin-manager"
+  },
+  "license": "MPL-2.0",
+  "scripts": {
+    "build": "cargo build --release",
+    "typecheck": "cargo check",
+    "check": "cargo fmt --check && cargo clippy -- -D warnings",
+    "lint": "cargo clippy",
+    "ci": "cargo fmt --check && cargo clippy -- -D warnings",
+    "test": "cargo test"
+  }
+}
