@@ -31,7 +31,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "yaml": "^2.4.5"
+    "yaml": "^2.9.0"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.15.3"
