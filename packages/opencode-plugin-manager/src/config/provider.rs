@@ -15,6 +15,7 @@ pub struct PluginEntry {
 }
 
 pub trait ConfigProvider {
+    #[allow(dead_code)]
     fn scope(&self) -> ConfigScope;
     fn config_paths(&self) -> Result<Vec<PathBuf>, CliError>;
     fn read_plugins(&self) -> Result<Vec<PluginEntry>, CliError>;

@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PluginMetadata {
     pub package_name: &'static str,
     pub alias: &'static str,
     pub display_name: &'static str,
     pub description: &'static str,
     pub category: &'static str,
+    pub docs_url: Option<String>,
+    pub homepage_url: Option<String>,
 }
 
 pub fn get_curated_metadata() -> HashMap<&'static str, PluginMetadata> {
@@ -19,6 +23,8 @@ pub fn get_curated_metadata() -> HashMap<&'static str, PluginMetadata> {
             display_name: "RAM Monitor",
             description: "Monitor OpenCode's RAM usage per session in real time.",
             category: "TUI",
+            docs_url: None,
+            homepage_url: None,
         },
     );
 
@@ -30,6 +36,8 @@ pub fn get_curated_metadata() -> HashMap<&'static str, PluginMetadata> {
             display_name: "Output Styles",
             description: "Persist reusable response styles for OpenCode sessions.",
             category: "Prompting",
+            docs_url: None,
+            homepage_url: None,
         },
     );
 
@@ -41,6 +49,8 @@ pub fn get_curated_metadata() -> HashMap<&'static str, PluginMetadata> {
             display_name: "Agents Loader",
             description: "Load custom agents and commands from local directories.",
             category: "Agents",
+            docs_url: None,
+            homepage_url: None,
         },
     );
 
@@ -52,6 +62,8 @@ pub fn get_curated_metadata() -> HashMap<&'static str, PluginMetadata> {
             display_name: "Adversarial Review",
             description: "Adversarial code review subagent to break confidence.",
             category: "Review",
+            docs_url: None,
+            homepage_url: None,
         },
     );
 
@@ -64,6 +76,8 @@ pub fn get_curated_metadata() -> HashMap<&'static str, PluginMetadata> {
             description:
                 "Preserves provider system prompts when custom agents inject instructions.",
             category: "Prompting",
+            docs_url: None,
+            homepage_url: None,
         },
     );
 
@@ -75,12 +89,15 @@ pub fn get_curated_metadata() -> HashMap<&'static str, PluginMetadata> {
             display_name: "Double Tap Timeline",
             description: "Double-tap Escape to open session timeline modal.",
             category: "TUI",
+            docs_url: None,
+            homepage_url: None,
         },
     );
 
     map
 }
 
+#[allow(dead_code)]
 pub fn resolve_alias(input: &str) -> String {
     let metadata = get_curated_metadata();
     for (_, meta) in metadata.iter() {

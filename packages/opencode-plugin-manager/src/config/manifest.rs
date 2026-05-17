@@ -2,9 +2,10 @@ use crate::errors::CliError;
 use directories::ProjectDirs;
 use serde::Deserialize;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct PackageManifest {
     pub name: String,
     pub version: String,
@@ -14,26 +15,26 @@ pub struct PackageManifest {
     pub engines: Option<Engines>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Engines {
     pub opencode: Option<String>,
 }
 
-pub fn get_installed_manifest(package_name: &str) -> Result<Option<PackageManifest>, CliError> {
-    let mut cache_dir = None;
-    if let Some(proj_dirs) = ProjectDirs::from("", "", "opencode") {
-        cache_dir = Some(proj_dirs.cache_dir().to_path_buf());
-    }
+fn installed_manifest_path(cache_dir: &Path, spec: &str, package_name: &str) -> PathBuf {
+    cache_dir
+        .join("packages")
+        .join(spec)
+        .join("node_modules")
+        .join(package_name)
+        .join("package.json")
+}
 
-    if let Some(cache) = cache_dir {
-        // OpenCode sanitizes package names for the cache directory
-        let sanitized_name = package_name.replace('/', "_").replace('@', "");
-        let package_dir = cache
-            .join("packages")
-            .join(&sanitized_name)
-            .join("node_modules")
-            .join(package_name);
-        let manifest_path = package_dir.join("package.json");
+pub fn get_installed_manifest(
+    spec: &str,
+    package_name: &str,
+) -> Result<Option<PackageManifest>, CliError> {
+    if let Some(proj_dirs) = ProjectDirs::from("", "", "opencode") {
+        let manifest_path = installed_manifest_path(proj_dirs.cache_dir(), spec, package_name);
 
         if manifest_path.exists() {
             let content = fs::read_to_string(&manifest_path)?;
@@ -44,4 +45,23 @@ pub fn get_installed_manifest(package_name: &str) -> Result<Option<PackageManife
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::installed_manifest_path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn installed_manifest_path_uses_exact_spec_and_package_name() {
+        let cache_dir = PathBuf::from("/home/test/.cache/opencode");
+        let path = installed_manifest_path(&cache_dir, "@foo/bar@latest", "@foo/bar");
+
+        assert_eq!(
+            path,
+            PathBuf::from(
+                "/home/test/.cache/opencode/packages/@foo/bar@latest/node_modules/@foo/bar/package.json"
+            )
+        );
+    }
 }
