@@ -18,12 +18,22 @@
     },
     "packages/opencode-adversarial-review": {
       "name": "@capybearista/opencode-adversarial-review",
-      "version": "0.0.0",
+      "version": "1.0.0",
       "devDependencies": {
         "@opencode-ai/plugin": ">=1.14.0",
         "@tsconfig/node22": "^22.0.0",
         "@types/bun": "latest",
         "typescript": "^6.0.3",
+      },
+      "peerDependencies": {
+        "@opencode-ai/plugin": ">=1.14.0",
+      },
+    },
+    "packages/opencode-agent-prompt-inheritance": {
+      "name": "@capybearista/opencode-agent-prompt-inheritance",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@opencode-ai/plugin": ">=1.14.0",
       },
       "peerDependencies": {
         "@opencode-ai/plugin": ">=1.14.0",
@@ -44,7 +54,7 @@
     },
     "packages/opencode-double-tap-timeline": {
       "name": "@capybearista/opencode-double-tap-timeline",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "devDependencies": {
         "@opencode-ai/plugin": ">=1.14.24",
         "@opentui/core": ">=0.1.103",
@@ -52,7 +62,7 @@
         "solid-js": ">=1.9.0",
       },
       "peerDependencies": {
-        "@opencode-ai/plugin": ">=1.14.24",
+        "@opencode-ai/plugin": ">=1.14.42",
         "@opentui/solid": ">=0.1.103",
         "solid-js": ">=1.9.0",
       },
@@ -72,19 +82,18 @@
     },
     "packages/opencode-ram-monitor": {
       "name": "@capybearista/opencode-ram-monitor",
-      "version": "0.0.0",
+      "version": "1.1.0",
       "devDependencies": {
-        "@opencode-ai/plugin": ">=1.14.0",
-        "@opentui/core": ">=0.1.0",
+        "@opencode-ai/plugin": ">=1.14.24",
+        "@opentui/core": ">=0.1.103",
         "@opentui/solid": ">=0.1.103",
-        "@tsconfig/node22": "^22.0.0",
         "@types/bun": "latest",
         "@types/node": "^25.6.0",
         "solid-js": ">=1.9.0",
         "typescript": "^5.8.0",
       },
       "peerDependencies": {
-        "@opencode-ai/plugin": ">=1.14.0",
+        "@opencode-ai/plugin": ">=1.14.24",
         "@opentui/solid": ">=0.1.103",
         "solid-js": ">=1.9.0",
       },
@@ -170,6 +179,8 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.4.14", "", { "os": "win32", "cpu": "x64" }, "sha512-WL0EG5qE+EAKomGXbf2g6VnSKJhTL3tXC0QRzWRwA5VpjxNYa6H4P7ZWfymbGE4IhZZQi1KXQ2R0YjwInmz2fA=="],
 
     "@capybearista/opencode-adversarial-review": ["@capybearista/opencode-adversarial-review@workspace:packages/opencode-adversarial-review"],
+
+    "@capybearista/opencode-agent-prompt-inheritance": ["@capybearista/opencode-agent-prompt-inheritance@workspace:packages/opencode-agent-prompt-inheritance"],
 
     "@capybearista/opencode-agents-loader": ["@capybearista/opencode-agents-loader@workspace:packages/opencode-agents-loader"],
 

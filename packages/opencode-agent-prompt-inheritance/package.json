@@ -1,0 +1,39 @@
+{
+  "name": "@capybearista/opencode-agent-prompt-inheritance",
+  "version": "0.0.0",
+  "description": "Preserve OpenCode provider system prompts when custom agents add their own instructions",
+  "author": "capyBearista <capybearista@github.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/capyBearista/opencode-plugins.git",
+    "directory": "packages/opencode-agent-prompt-inheritance"
+  },
+  "type": "module",
+  "license": "MPL-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc && mkdir -p dist/prompt && cp src/prompt/*.txt dist/prompt/",
+    "typecheck": "tsc --noEmit",
+    "lint": "bunx @biomejs/biome check .",
+    "check": "bunx @biomejs/biome check --write .",
+    "ci": "bunx @biomejs/biome ci .",
+    "test": "bun test",
+    "sync:prompts": "bun scripts/sync-upstream-prompts.ts"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.14.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": ">=1.14.0"
+  }
+}
