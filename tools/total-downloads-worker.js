@@ -2,6 +2,7 @@ export default {
   async fetch() {
     const packages = [
       "@capybearista/opencode-adversarial-review",
+      "@capybearista/opencode-agent-prompt-inheritance",
       "@capybearista/opencode-agents-loader",
       "@capybearista/opencode-double-tap-timeline",
       "@capybearista/opencode-output-styles",
