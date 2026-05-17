@@ -70,7 +70,8 @@ Alternatively, add them directly to your `opencode.json`/`opencode.jsonc` config
     "@capybearista/opencode-adversarial-review@latest",
     "@capybearista/opencode-ram-monitor@latest",
     "@capybearista/opencode-output-styles@latest",
-    "@capybearista/opencode-agents-loader@latest"
+    "@capybearista/opencode-agents-loader@latest",
+    "@capybearista/opencode-agent-prompt-inheritance@latest"
   ]
 }
 ```
@@ -79,7 +80,10 @@ For **TUI-based plugins**, add them directly to `tui.json`/`tui.jsonc`:
 
 ```json
 {
-  "plugin": ["@capybearista/opencode-double-tap-timeline@latest"]
+  "plugin": [
+    "@capybearista/opencode-double-tap-timeline@latest",
+    "@capybearista/opencode-ram-monitor@latest"
+  ]
 }
 ```
 
