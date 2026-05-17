@@ -29,15 +29,9 @@ Adversarial code review that challenges your implementation approach and design 
 
 *Inspired by Codex*
 
-### 🐏 [opencode-ram-monitor](./packages/opencode-ram-monitor/)
+### 💬 [opencode-agent-prompt-inheritance](./packages/opencode-agent-prompt-inheritance/)
 
-Zero-dependency RAM monitoring for OpenCode sessions. Shows live session memory usage in the sidebar and adds a `/ram` command for a detailed process tree and aggregate OpenCode RAM totals.
-
-### 🗣️ [opencode-output-styles](./packages/opencode-output-styles/)
-
-Persistent response styles for OpenCode sessions. This plugin injects selected guidelines (like "explanatory" or "learning" modes) into the system prompt so they stay active across your session.
-
-*Inspired by Claude Code*
+Preserves OpenCode provider system prompts when custom agents add their own instructions. Uses the `experimental.chat.system.transform` hook to stitch the base provider prompt and custom agent prompt together, preventing custom agents from discarding base model behaviors.
 
 ### 🛠️ [opencode-agents-loader](./packages/opencode-agents-loader/)
 
@@ -48,6 +42,16 @@ Extends command and agent discovery to the `.agents/` directory standard. This e
 A keyboard-driven UI extension. Double-tap the Escape key to instantly open the session timeline modal without typing commands or using a mouse.
 
 *Inspired by Claude Code*
+
+### 🗣️ [opencode-output-styles](./packages/opencode-output-styles/)
+
+Persistent response styles for OpenCode sessions. This plugin injects selected guidelines (like "explanatory" or "learning" modes) into the system prompt so they stay active across your session.
+
+*Inspired by Claude Code*
+
+### 🐏 [opencode-ram-monitor](./packages/opencode-ram-monitor/)
+
+Zero-dependency RAM monitoring for OpenCode sessions. Shows live session memory usage in the sidebar and adds a `/ram` command for a detailed process tree and aggregate OpenCode RAM totals.
 
 ## Installation
 
