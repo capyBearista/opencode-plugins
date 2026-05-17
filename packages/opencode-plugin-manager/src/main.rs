@@ -23,18 +23,35 @@ async fn main() -> anyhow::Result<()> {
             let show_global = *global || (!*project && !*global);
 
             if show_project {
-                if let Ok(cwd) = env::current_dir() {
-                    let project_provider = ProjectConfigProvider::new(cwd);
-                    if let Ok(plugins) = project_provider.read_plugins() {
-                        all_plugins.extend(plugins);
+                let cwd = env::current_dir()?;
+                let project_provider = ProjectConfigProvider::new(cwd);
+                match project_provider.read_plugins() {
+                    Ok(plugins) => all_plugins.extend(plugins),
+                    Err(e) => {
+                        if cli.json {
+                            let json_err = e.to_json();
+                            println!("{}", serde_json::to_string_pretty(&json_err).unwrap());
+                        } else {
+                            eprintln!("Error reading project config: {}", e);
+                        }
+                        std::process::exit(1);
                     }
                 }
             }
 
             if show_global {
                 let global_provider = GlobalConfigProvider::new();
-                if let Ok(plugins) = global_provider.read_plugins() {
-                    all_plugins.extend(plugins);
+                match global_provider.read_plugins() {
+                    Ok(plugins) => all_plugins.extend(plugins),
+                    Err(e) => {
+                        if cli.json {
+                            let json_err = e.to_json();
+                            println!("{}", serde_json::to_string_pretty(&json_err).unwrap());
+                        } else {
+                            eprintln!("Error reading global config: {}", e);
+                        }
+                        std::process::exit(1);
+                    }
                 }
             }
 

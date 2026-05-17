@@ -1,15 +1,17 @@
-# opencode-plugin-manager
+# oc-plugins
 
-To install dependencies:
+A lightning-fast standalone CLI to manage npm-based OpenCode plugins configured in your project or global `opencode.json(c)` files.
 
-```bash
-bun install
-```
+## Development
+
+This is a Rust package within the OpenCode monorepo.
 
 To run:
-
 ```bash
-bun run index.ts
+cargo run -- list
 ```
 
-This project was created using `bun init` in bun v1.3.12. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+To test:
+```bash
+cargo test
+```
