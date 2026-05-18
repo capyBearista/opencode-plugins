@@ -35,12 +35,12 @@
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.14.42",
-    "@opentui/solid": ">=0.2.12",
+    "@opentui/solid": ">=0.2.14",
     "solid-js": ">=1.9.13"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3",
-    "@opentui/solid": ">=0.2.12",
+    "@opencode-ai/plugin": ">=1.15.4",
+    "@opentui/solid": ">=0.2.14",
     "@opentui/core": ">=0.1.103",
     "solid-js": ">=1.9.13"
   }
