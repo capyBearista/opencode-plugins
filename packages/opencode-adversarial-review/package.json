@@ -30,10 +30,10 @@
     }
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3"
+    "@opencode-ai/plugin": ">=1.15.13"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3",
+    "@opencode-ai/plugin": ">=1.15.13",
     "@tsconfig/node22": "^22.0.0",
     "@types/bun": "latest",
     "typescript": "^6.0.3"
