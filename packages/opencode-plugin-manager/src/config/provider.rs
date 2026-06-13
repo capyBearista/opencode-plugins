@@ -1,7 +1,7 @@
 use crate::errors::CliError;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ConfigScope {
     Project,
     Global,

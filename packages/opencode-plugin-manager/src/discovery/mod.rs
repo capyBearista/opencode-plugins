@@ -1,6 +1,7 @@
 use crate::catalog::{get_curated_metadata, PluginMetadata};
 use crate::config::manifest::{get_installed_manifest, PackageManifest};
 use crate::config::provider::{ConfigScope, PluginEntry};
+use crate::errors::CliError;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -50,14 +51,12 @@ pub struct ResolvedPlugin {
 }
 
 pub fn extract_package_name(spec: &str) -> String {
-    if spec.starts_with('@') {
-        if let Some((scope, remainder)) = spec.split_once('/') {
-            if let Some((package_name, _version)) = remainder.rsplit_once('@') {
-                return format!("{scope}/{package_name}");
-            }
-
-            return spec.to_string();
+    if spec.starts_with('@') && let Some((scope, remainder)) = spec.split_once('/') {
+        if let Some((package_name, _version)) = remainder.rsplit_once('@') {
+            return format!("{scope}/{package_name}");
         }
+
+        return spec.to_string();
     }
 
     spec.rsplit_once('@')
@@ -71,7 +70,7 @@ pub fn deduplicate_plugins(entries: Vec<PluginEntry>) -> Vec<PluginEntry> {
 
     for entry in entries.into_iter().rev() {
         let package_name = extract_package_name(&entry.spec);
-        if seen.insert(package_name) {
+        if seen.insert((package_name, entry.scope.clone())) {
             deduplicated.push(entry);
         }
     }
@@ -145,17 +144,17 @@ pub fn enrich_plugin(resolved: ResolvedPlugin) -> EnrichedPlugin {
     }
 }
 
-pub fn resolve_plugins(entries: Vec<PluginEntry>) -> Vec<ResolvedPlugin> {
+pub fn resolve_plugins(entries: Vec<PluginEntry>) -> Result<Vec<ResolvedPlugin>, CliError> {
     let mut resolved = Vec::new();
 
     for entry in entries {
         let package_name = extract_package_name(&entry.spec);
-        let manifest = get_installed_manifest(&entry.spec, &package_name).unwrap_or(None);
+        let manifest = get_installed_manifest(&entry.spec, &package_name)?;
 
         resolved.push(ResolvedPlugin { entry, manifest });
     }
 
-    resolved
+    Ok(resolved)
 }
 
 #[cfg(test)]
@@ -165,9 +164,13 @@ mod tests {
     use std::path::PathBuf;
 
     fn plugin_entry(spec: &str) -> PluginEntry {
+        plugin_entry_in_scope(spec, ConfigScope::Project)
+    }
+
+    fn plugin_entry_in_scope(spec: &str, scope: ConfigScope) -> PluginEntry {
         PluginEntry {
             spec: spec.to_string(),
-            scope: ConfigScope::Project,
+            scope,
             config_path: PathBuf::from("/tmp/opencode.json"),
         }
     }
@@ -196,6 +199,20 @@ mod tests {
         assert_eq!(deduplicated.len(), 2);
         assert_eq!(deduplicated[0].spec, "@scope/plugin@latest");
         assert_eq!(deduplicated[1].spec, "plugin@2.0.0");
+    }
+
+    #[test]
+    fn deduplicate_plugins_preserves_project_and_global_entries() {
+        let entries = vec![
+            plugin_entry_in_scope("plugin@1.0.0", ConfigScope::Project),
+            plugin_entry_in_scope("plugin@2.0.0", ConfigScope::Global),
+        ];
+
+        let deduplicated = deduplicate_plugins(entries);
+
+        assert_eq!(deduplicated.len(), 2);
+        assert_eq!(deduplicated[0].scope, ConfigScope::Project);
+        assert_eq!(deduplicated[1].scope, ConfigScope::Global);
     }
 
     #[test]
@@ -232,7 +249,6 @@ mod tests {
                 name: "Custom Manifest Name".to_string(),
                 version: "1.0.0".to_string(),
                 description: Some("Manifest description".to_string()),
-                oc_plugin: None,
                 engines: None,
             }),
         };

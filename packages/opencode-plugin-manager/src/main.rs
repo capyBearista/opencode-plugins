@@ -1,5 +1,4 @@
 mod cli;
-mod doctor;
 mod config;
 mod errors;
 mod output;
@@ -20,13 +19,13 @@ use std::env;
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    if let Some(cache) = read_update_notice_cache() {
-        if should_show_startup_notice(cli.json, cli.quiet, cache.notices.len()) {
-            println!(
-                "Note: {} plugin updates available. Run `oc-plugins outdated` for details.",
-                cache.notices.len()
-            );
-        }
+    if let Some(cache) = read_update_notice_cache()
+        && should_show_startup_notice(cli.json, cli.quiet, cache.notices.len())
+    {
+        println!(
+            "Note: {} plugin updates available. Run `oc-plugins outdated` for details.",
+            cache.notices.len()
+        );
     }
 
     match &cli.command {
@@ -37,20 +36,6 @@ async fn main() -> anyhow::Result<()> {
                 output::json::print_plugins_json(&enriched_plugins);
             } else {
                 output::human::print_plugins(&enriched_plugins);
-            }
-        }
-        Commands::Doctor { project, global } => {
-            let enriched_plugins = load_enriched_plugins(cli.json, *project, *global)?;
-            let reports = doctor::build_doctor_reports(&enriched_plugins);
-
-            if cli.json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&doctor::build_doctor_output(&enriched_plugins))
-                        .unwrap()
-                );
-            } else {
-                doctor::print_doctor_reports(&reports);
             }
         }
         Commands::Outdated { project, global, refresh } => {
@@ -77,7 +62,7 @@ fn should_show_startup_notice(json: bool, quiet: bool, notice_count: usize) -> b
 fn load_enriched_plugins(json: bool, project: bool, global: bool) -> anyhow::Result<Vec<EnrichedPlugin>> {
     let all_plugins = collect_configured_plugins(json, project, global)?;
     let deduplicated = deduplicate_plugins(all_plugins);
-    Ok(resolve_plugins(deduplicated)
+    Ok(resolve_plugins(deduplicated)?
         .into_iter()
         .map(enrich_plugin)
         .collect())
@@ -86,8 +71,8 @@ fn load_enriched_plugins(json: bool, project: bool, global: bool) -> anyhow::Res
 fn collect_configured_plugins(json: bool, project: bool, global: bool) -> anyhow::Result<Vec<PluginEntry>> {
     let mut all_plugins = Vec::new();
 
-    let show_project = project || (!project && !global);
-    let show_global = global || (!project && !global);
+    let show_project = project || !global;
+    let show_global = global || !project;
 
     if show_project {
         let cwd = env::current_dir()?;

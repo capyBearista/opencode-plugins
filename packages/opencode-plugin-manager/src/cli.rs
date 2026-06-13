@@ -32,16 +32,6 @@ pub enum Commands {
         #[arg(long)]
         global: bool,
     },
-    /// Validate configured npm plugin health
-    Doctor {
-        /// Check only project plugins
-        #[arg(long)]
-        project: bool,
-
-        /// Check only global plugins
-        #[arg(long)]
-        global: bool,
-    },
     /// Compare configured plugins against npm latest
     Outdated {
         /// Check only project plugins

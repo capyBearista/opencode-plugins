@@ -91,33 +91,26 @@ impl ConfigProvider for ProjectConfigProvider {
 }
 
 fn extract_plugins_from_file(path: &Path, scope: ConfigScope) -> Result<Vec<PluginEntry>, CliError> {
-    let content = fs::read_to_string(path).map_err(|e| {
-        CliError::Io(e)
-    })?;
-    
+    let content = fs::read_to_string(path).map_err(CliError::Io)?;
+
     let ast = parse_to_ast(&content, &Default::default(), &Default::default())
-        .map_err(|e| {
-            CliError::Parse(format!("Failed to parse {}: {}", path.display(), e))
-        })?;
+        .map_err(|e| CliError::Parse(format!("Failed to parse {}: {}", path.display(), e)))?;
 
     let mut plugins = Vec::new();
 
-    if let Some(value) = ast.value {
-        if let jsonc_parser::ast::Value::Object(obj) = value {
-            if let Some(plugin_prop) = obj.properties.iter().find(|p| p.name.as_str() == "plugin") {
-                if let jsonc_parser::ast::Value::Array(arr) = &plugin_prop.value {
-                    for element in &arr.elements {
-                        if let jsonc_parser::ast::Value::StringLit(s) = element {
-                            if is_npm_spec(&s.value) {
-                                plugins.push(PluginEntry {
-                                    spec: s.value.to_string(),
-                                    scope: scope.clone(),
-                                    config_path: path.to_path_buf(),
-                                });
-                            }
-                        }
-                    }
-                }
+    if let Some(jsonc_parser::ast::Value::Object(obj)) = ast.value
+        && let Some(plugin_prop) = obj.properties.iter().find(|p| p.name.as_str() == "plugin")
+        && let jsonc_parser::ast::Value::Array(arr) = &plugin_prop.value
+    {
+        for element in &arr.elements {
+            if let jsonc_parser::ast::Value::StringLit(s) = element
+                && is_npm_spec(&s.value)
+            {
+                plugins.push(PluginEntry {
+                    spec: s.value.to_string(),
+                    scope: scope.clone(),
+                    config_path: path.to_path_buf(),
+                });
             }
         }
     }
@@ -142,7 +135,7 @@ fn is_npm_spec(spec: &str) -> bool {
     // A simple validation for npm package names
     // Might optionally contain an @scope/ and an @version
     // Must start with an alphanumeric or @
-    if !spec.starts_with('@') && !spec.chars().next().map_or(false, |c| c.is_ascii_alphanumeric()) {
+    if !spec.starts_with('@') && !spec.chars().next().is_some_and(|c| c.is_ascii_alphanumeric()) {
         return false;
     }
 
@@ -182,7 +175,8 @@ mod tests {
                 "file:../invalid-file",
                 "valid-plugin-2@latest"
             ]
-        }}"#).unwrap();
+        }}"#)
+        .unwrap();
 
         let plugins = extract_plugins_from_file(file.path(), ConfigScope::Project).unwrap();
         assert_eq!(plugins.len(), 3);

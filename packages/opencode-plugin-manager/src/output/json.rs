@@ -28,7 +28,6 @@ mod tests {
                 name: package_name.to_string(),
                 version: "1.2.3".to_string(),
                 description: Some("description".to_string()),
-                oc_plugin: Some(vec!["tool".to_string()]),
                 engines: Some(Engines {
                     opencode: Some(">=1.15.3".to_string()),
                 }),
