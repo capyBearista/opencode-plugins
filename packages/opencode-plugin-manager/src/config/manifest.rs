@@ -34,9 +34,14 @@ pub fn get_installed_manifest_from_path(
         return Ok(None);
     }
 
-    let content = fs::read_to_string(manifest_path)?;
-    let manifest: PackageManifest = serde_json::from_str(&content)
-        .map_err(|e| CliError::Parse(format!("Failed to parse package.json: {}", e)))?;
+    let content = fs::read_to_string(manifest_path).map_err(|e| CliError::Io {
+        path: manifest_path.display().to_string(),
+        source: e,
+    })?;
+    let manifest: PackageManifest =
+        serde_json::from_str(&content).map_err(|e| CliError::Parse {
+            detail: format!("Failed to parse package.json: {}", e),
+        })?;
 
     Ok(Some(manifest))
 }
@@ -104,6 +109,6 @@ mod tests {
 
         let error = get_installed_manifest_from_path(&manifest_path).unwrap_err();
 
-        assert!(matches!(error, CliError::Parse(_)));
+        assert!(matches!(error, CliError::Parse { .. }));
     }
 }

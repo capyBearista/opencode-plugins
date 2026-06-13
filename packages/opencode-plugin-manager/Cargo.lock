@@ -839,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "oc-plugins"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -848,6 +848,7 @@ dependencies = [
  "indicatif",
  "jsonc-parser",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "tempfile",

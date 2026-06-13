@@ -1,6 +1,6 @@
 [package]
 name = "oc-plugins"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
@@ -11,6 +11,7 @@ directories = "6.0.0"
 indicatif = "0.18.4"
 jsonc-parser = { version = "0.32.4", features = ["cst"] }
 reqwest = { version = "0.13.3", features = ["json"] }
+semver = "1.0.28"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"

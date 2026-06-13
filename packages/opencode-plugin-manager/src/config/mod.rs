@@ -1,3 +1,3 @@
-pub mod provider;
-pub mod parser;
 pub mod manifest;
+pub mod parser;
+pub mod provider;

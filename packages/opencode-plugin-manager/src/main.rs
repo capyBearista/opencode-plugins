@@ -1,65 +1,171 @@
+mod catalog;
 mod cli;
 mod config;
+mod discovery;
 mod errors;
 mod output;
-mod catalog;
-mod discovery;
 mod registry;
+mod version_util;
 
 use clap::Parser;
 use cli::{Cli, Commands};
 use config::parser::{GlobalConfigProvider, ProjectConfigProvider};
 use config::provider::{ConfigProvider, PluginEntry};
-use discovery::{deduplicate_plugins, enrich_plugin, resolve_plugins, EnrichedPlugin};
+use discovery::{
+    EnrichedPlugin, PluginStatus, classify_plugins, deduplicate_plugins, enrich_plugin,
+    enrich_with_latest_versions, resolve_plugins,
+};
 use errors::CliError;
-use registry::cache::read_update_notice_cache;
+use registry::cache::{UpdateNoticeCache, default_notice_cache_path, read_update_notice_cache};
+use registry::client::{DEFAULT_MAX_CONCURRENT, RegistryClient};
 use std::env;
+use std::process::ExitCode;
+use version_util::version_is_newer;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse();
 
-    if let Some(cache) = read_update_notice_cache()
-        && should_show_startup_notice(cli.json, cli.quiet, cache.notices.len())
-    {
-        println!(
-            "Note: {} plugin updates available. Run `oc-plugins outdated` for details.",
-            cache.notices.len()
-        );
+    // Cache-based notices: read once and reuse for startup banners and command
+    // enrichment. The cache is populated reactively during `outdated` registry
+    // refresh, so startup and `list` never perform network calls.
+    let notice_cache = read_update_notice_cache();
+    if let Some(cache) = notice_cache.as_ref() {
+        let outdated = cache.outdated_count();
+        if should_show_startup_notice(cli.json, cli.quiet, outdated) {
+            println!(
+                "Note: {} plugin update{} available. Run `oc-plugins outdated` for details.",
+                outdated,
+                if outdated == 1 { "" } else { "s" },
+            );
+        }
+
+        // Self-update notice: read from cache; only shown when json/quiet are
+        // false, a cached update is present, and the cached version is strictly
+        // newer than the currently running version (avoids stale-cache banners).
+        if !cli.json
+            && !cli.quiet
+            && let Some(ref cli_latest) = cache.cli_latest_version
+            && version_is_newer(cli_latest, env!("CARGO_PKG_VERSION"))
+        {
+            println!(
+                "A new version of oc-plugins (v{cli_latest}) is available. \
+                 Run `npm install -g @capybearista/opencode-plugin-manager` to update."
+            );
+        }
     }
+
+    let mut exit_code = ExitCode::SUCCESS;
 
     match &cli.command {
         Commands::List { project, global } => {
-            let enriched_plugins = load_enriched_plugins(cli.json, *project, *global)?;
+            let mut enriched_plugins = load_enriched_plugins(cli.json, *project, *global)?;
+
+            if let Some(cache) = notice_cache.as_ref() {
+                enriched_plugins = enrich_with_latest_versions(enriched_plugins, cache);
+            }
 
             if cli.json {
                 output::json::print_plugins_json(&enriched_plugins);
-            } else {
+            } else if !cli.quiet {
                 output::human::print_plugins(&enriched_plugins);
             }
         }
-        Commands::Outdated { project, global, refresh } => {
-            println!("Outdated command (project: {}, global: {}, refresh: {})", project, global, refresh);
+        Commands::Outdated {
+            project,
+            global,
+            refresh,
+        } => {
+            let mut enriched_plugins = load_enriched_plugins(cli.json, *project, *global)?;
+
+            let cache_path = default_notice_cache_path();
+            let cache: UpdateNoticeCache = if *refresh {
+                // Explicit refresh requested — fetch live regardless.
+                let client = RegistryClient::new(DEFAULT_MAX_CONCURRENT);
+                client
+                    .fetch_and_write_cache(&enriched_plugins, cache_path)
+                    .await?
+            } else if let Some(cached) = notice_cache {
+                // Cache is fresh — use it without network calls.
+                cached
+            } else {
+                // No fresh cache — fetch live.
+                let client = RegistryClient::new(DEFAULT_MAX_CONCURRENT);
+                client
+                    .fetch_and_write_cache(&enriched_plugins, cache_path)
+                    .await?
+            };
+
+            enriched_plugins = enrich_with_latest_versions(enriched_plugins, &cache);
+
+            let classified = classify_plugins(enriched_plugins);
+            let has_outdated = classified
+                .iter()
+                .any(|cp| cp.status == PluginStatus::Outdated);
+
+            if cli.json {
+                output::json::print_outdated_json(&classified);
+            } else if !cli.quiet {
+                // --quiet suppresses human output but exit status still reflects
+                // the outdated check.
+                output::human::print_outdated_human(&classified);
+            }
+
+            if has_outdated {
+                exit_code = ExitCode::from(1);
+            }
         }
-        Commands::Add { plugin, project, global, yes, dry_run } => {
-            println!("Add command (plugin: {}, project: {}, global: {}, yes: {}, dry_run: {})", plugin, project, global, yes, dry_run);
+        Commands::Add {
+            plugin,
+            project,
+            global,
+            yes,
+            dry_run,
+        } => {
+            println!(
+                "Add command (plugin: {}, project: {}, global: {}, yes: {}, dry_run: {})",
+                plugin, project, global, yes, dry_run
+            );
         }
-        Commands::Update { plugin, project, global, yes, dry_run, refresh } => {
-            println!("Update command (plugin: {:?}, project: {}, global: {}, yes: {}, dry_run: {}, refresh: {})", plugin, project, global, yes, dry_run, refresh);
+        Commands::Update {
+            plugin,
+            project,
+            global,
+            yes,
+            dry_run,
+            refresh,
+        } => {
+            println!(
+                "Update command (plugin: {:?}, project: {}, global: {}, yes: {}, dry_run: {}, refresh: {})",
+                plugin, project, global, yes, dry_run, refresh
+            );
         }
-        Commands::Remove { plugin, project, global, yes, dry_run } => {
-            println!("Remove command (plugin: {}, project: {}, global: {}, yes: {}, dry_run: {})", plugin, project, global, yes, dry_run);
+        Commands::Remove {
+            plugin,
+            project,
+            global,
+            yes,
+            dry_run,
+        } => {
+            println!(
+                "Remove command (plugin: {}, project: {}, global: {}, yes: {}, dry_run: {})",
+                plugin, project, global, yes, dry_run
+            );
         }
     }
 
-    Ok(())
+    Ok(exit_code)
 }
 
-fn should_show_startup_notice(json: bool, quiet: bool, notice_count: usize) -> bool {
-    !json && !quiet && notice_count > 0
+fn should_show_startup_notice(json: bool, quiet: bool, outdated_count: usize) -> bool {
+    !json && !quiet && outdated_count > 0
 }
 
-fn load_enriched_plugins(json: bool, project: bool, global: bool) -> anyhow::Result<Vec<EnrichedPlugin>> {
+fn load_enriched_plugins(
+    json: bool,
+    project: bool,
+    global: bool,
+) -> anyhow::Result<Vec<EnrichedPlugin>> {
     let all_plugins = collect_configured_plugins(json, project, global)?;
     let deduplicated = deduplicate_plugins(all_plugins);
     Ok(resolve_plugins(deduplicated)?
@@ -68,7 +174,11 @@ fn load_enriched_plugins(json: bool, project: bool, global: bool) -> anyhow::Res
         .collect())
 }
 
-fn collect_configured_plugins(json: bool, project: bool, global: bool) -> anyhow::Result<Vec<PluginEntry>> {
+fn collect_configured_plugins(
+    json: bool,
+    project: bool,
+    global: bool,
+) -> anyhow::Result<Vec<PluginEntry>> {
     let mut all_plugins = Vec::new();
 
     let show_project = project || !global;
@@ -94,11 +204,9 @@ fn collect_configured_plugins(json: bool, project: bool, global: bool) -> anyhow
     Ok(all_plugins)
 }
 
-fn handle_config_error(
-    json: bool,
-    scope: &str,
-    error: CliError,
-) -> ! {
+fn handle_config_error(json: bool, scope: &str, error: CliError) -> ! {
+    // Config provider failures happen before command-specific recovery is
+    // useful. Render the requested human/JSON error shape, then terminate.
     if json {
         let json_err = error.to_json();
         println!("{}", serde_json::to_string_pretty(&json_err).unwrap());
@@ -123,6 +231,12 @@ mod tests {
     #[test]
     fn shows_startup_notice_only_when_updates_exist() {
         assert!(should_show_startup_notice(false, false, 1));
+        assert!(!should_show_startup_notice(false, false, 0));
+    }
+
+    #[test]
+    fn zero_outdated_suppresses_startup_notice_even_with_cache_notices() {
+        // Even if the cache has notices, zero outdated should suppress the banner.
         assert!(!should_show_startup_notice(false, false, 0));
     }
 }

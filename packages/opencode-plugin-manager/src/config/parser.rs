@@ -60,7 +60,7 @@ impl ConfigProvider for ProjectConfigProvider {
 
     fn config_paths(&self) -> Result<Vec<PathBuf>, CliError> {
         let mut paths = Vec::new();
-        
+
         let project_root = if self.cwd.ends_with(".opencode") {
             self.cwd.parent().unwrap_or(&self.cwd).to_path_buf()
         } else {
@@ -90,11 +90,20 @@ impl ConfigProvider for ProjectConfigProvider {
     }
 }
 
-fn extract_plugins_from_file(path: &Path, scope: ConfigScope) -> Result<Vec<PluginEntry>, CliError> {
-    let content = fs::read_to_string(path).map_err(CliError::Io)?;
+fn extract_plugins_from_file(
+    path: &Path,
+    scope: ConfigScope,
+) -> Result<Vec<PluginEntry>, CliError> {
+    let content = fs::read_to_string(path).map_err(|e| CliError::Io {
+        path: path.display().to_string(),
+        source: e,
+    })?;
 
-    let ast = parse_to_ast(&content, &Default::default(), &Default::default())
-        .map_err(|e| CliError::Parse(format!("Failed to parse {}: {}", path.display(), e)))?;
+    let ast = parse_to_ast(&content, &Default::default(), &Default::default()).map_err(|e| {
+        CliError::Parse {
+            detail: format!("Failed to parse {}: {}", path.display(), e),
+        }
+    })?;
 
     let mut plugins = Vec::new();
 
@@ -120,14 +129,14 @@ fn extract_plugins_from_file(path: &Path, scope: ConfigScope) -> Result<Vec<Plug
 
 fn is_npm_spec(spec: &str) -> bool {
     // Exclude explicitly local or protocol-based specs
-    if spec.starts_with('.') 
-        || spec.starts_with('/') 
-        || spec.starts_with('~') 
-        || spec.contains("://") 
-        || spec.starts_with("file:") 
-        || spec.starts_with("github:") 
-        || spec.starts_with("git+") 
-        || spec.starts_with("bitbucket:") 
+    if spec.starts_with('.')
+        || spec.starts_with('/')
+        || spec.starts_with('~')
+        || spec.contains("://")
+        || spec.starts_with("file:")
+        || spec.starts_with("github:")
+        || spec.starts_with("git+")
+        || spec.starts_with("bitbucket:")
     {
         return false;
     }
@@ -135,7 +144,12 @@ fn is_npm_spec(spec: &str) -> bool {
     // A simple validation for npm package names
     // Might optionally contain an @scope/ and an @version
     // Must start with an alphanumeric or @
-    if !spec.starts_with('@') && !spec.chars().next().is_some_and(|c| c.is_ascii_alphanumeric()) {
+    if !spec.starts_with('@')
+        && !spec
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
+    {
         return false;
     }
 
@@ -152,7 +166,7 @@ mod tests {
         assert!(is_npm_spec("@scope/plugin"));
         assert!(is_npm_spec("@scope/plugin@1.2.3"));
         assert!(is_npm_spec("plugin@latest"));
-        
+
         assert!(!is_npm_spec("./local-plugin"));
         assert!(!is_npm_spec("../local-plugin"));
         assert!(!is_npm_spec("/absolute/path"));
@@ -167,7 +181,9 @@ mod tests {
         use tempfile::NamedTempFile;
 
         let mut file = NamedTempFile::new().unwrap();
-        writeln!(file, r#"{{
+        writeln!(
+            file,
+            r#"{{
             "plugin": [
                 "valid-plugin",
                 "@capybearista/plugin",
@@ -175,7 +191,8 @@ mod tests {
                 "file:../invalid-file",
                 "valid-plugin-2@latest"
             ]
-        }}"#)
+        }}"#
+        )
         .unwrap();
 
         let plugins = extract_plugins_from_file(file.path(), ConfigScope::Project).unwrap();
@@ -190,16 +207,28 @@ mod tests {
         let provider = ProjectConfigProvider::new(PathBuf::from("/my/project"));
         let paths = provider.config_paths().unwrap();
         assert_eq!(paths.len(), 4);
-        assert_eq!(paths[0], PathBuf::from("/my/project/.opencode/opencode.jsonc"));
-        assert_eq!(paths[1], PathBuf::from("/my/project/.opencode/opencode.json"));
+        assert_eq!(
+            paths[0],
+            PathBuf::from("/my/project/.opencode/opencode.jsonc")
+        );
+        assert_eq!(
+            paths[1],
+            PathBuf::from("/my/project/.opencode/opencode.json")
+        );
         assert_eq!(paths[2], PathBuf::from("/my/project/opencode.jsonc"));
         assert_eq!(paths[3], PathBuf::from("/my/project/opencode.json"));
 
         let provider2 = ProjectConfigProvider::new(PathBuf::from("/my/project/.opencode"));
         let paths2 = provider2.config_paths().unwrap();
         assert_eq!(paths2.len(), 4);
-        assert_eq!(paths2[0], PathBuf::from("/my/project/.opencode/opencode.jsonc"));
-        assert_eq!(paths2[1], PathBuf::from("/my/project/.opencode/opencode.json"));
+        assert_eq!(
+            paths2[0],
+            PathBuf::from("/my/project/.opencode/opencode.jsonc")
+        );
+        assert_eq!(
+            paths2[1],
+            PathBuf::from("/my/project/.opencode/opencode.json")
+        );
         assert_eq!(paths2[2], PathBuf::from("/my/project/opencode.jsonc"));
         assert_eq!(paths2[3], PathBuf::from("/my/project/opencode.json"));
     }
