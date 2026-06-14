@@ -192,6 +192,195 @@ mod tests {
         assert_eq!(unresolved[0]["packageName"], "gamma");
         assert_eq!(unresolved[0]["status"], "unresolved");
     }
+
+    #[test]
+    fn snapshot_empty_plugin_list_json_shape() {
+        let output = build_plugins_json(&[]);
+        let value = serde_json::to_value(&output).unwrap();
+        let pretty = serde_json::to_string_pretty(&value).unwrap();
+        assert_eq!(
+            pretty,
+            r#"{
+  "plugins": []
+}"#
+        );
+    }
+
+    #[test]
+    fn snapshot_single_installed_plugin_json_shape() {
+        let plugins = vec![plugin(
+            ConfigScope::Project,
+            "/tmp/opencode.json",
+            "my-plugin@latest",
+            "my-plugin",
+            true,
+        )];
+        let output = build_plugins_json(&plugins);
+        let value = serde_json::to_value(&output).unwrap();
+        let pretty = serde_json::to_string_pretty(&value).unwrap();
+        let parsed: Value = serde_json::from_str(&pretty).unwrap();
+        let p = &parsed["plugins"][0];
+        // Verify all stable field names exist and have correct types
+        assert!(p.get("requestedSpec").is_some());
+        assert!(p.get("packageName").is_some());
+        assert!(p.get("scope").is_some());
+        assert!(p.get("configPath").is_some());
+        assert!(p.get("installed").is_some());
+        assert!(p.get("installedVersion").is_some());
+        assert!(p.get("status").is_some());
+        assert!(p.get("displayName").is_some());
+        assert!(p.get("description").is_some());
+        assert!(p.get("declaredOpenCodeRange").is_some());
+        assert!(p.get("latestVersion").is_some());
+        assert!(p.get("latestDeclaredOpenCodeRange").is_some());
+        // Verify values
+        assert_eq!(p["requestedSpec"], "my-plugin@latest");
+        assert_eq!(p["packageName"], "my-plugin");
+        assert_eq!(p["scope"], "project");
+        assert_eq!(p["installed"], true);
+        assert_eq!(p["status"], "installed");
+    }
+
+    #[test]
+    fn snapshot_uninstalled_plugin_null_installed_version() {
+        let plugins = vec![plugin(
+            ConfigScope::Global,
+            "/tmp/global/opencode.json",
+            "third-party@latest",
+            "third-party",
+            false,
+        )];
+        let output = build_plugins_json(&plugins);
+        let value = serde_json::to_value(&output).unwrap();
+        let plugins_arr = value.get("plugins").and_then(Value::as_array).unwrap();
+        assert_eq!(plugins_arr.len(), 1);
+        assert_eq!(plugins_arr[0]["installed"], false);
+        assert!(plugins_arr[0]["installedVersion"].is_null());
+        assert_eq!(plugins_arr[0]["scope"], "global");
+    }
+
+    #[test]
+    fn snapshot_outdated_json_all_sections() {
+        let plugins = vec![
+            EnrichedPlugin {
+                configured_spec: "alpha@latest".to_string(),
+                package_name: "alpha".to_string(),
+                scope: ConfigScope::Project,
+                config_path: PathBuf::from("/tmp/opencode.json"),
+                manifest: Some(PackageManifest {
+                    name: "alpha".to_string(),
+                    version: "1.0.0".to_string(),
+                    description: None,
+                    engines: None,
+                }),
+                catalog_metadata: None,
+                display_name: "Alpha".to_string(),
+                description: String::new(),
+                status: InstallStatus::Installed,
+                latest_version: Some("2.0.0".to_string()),
+                declared_latest_range: None,
+            },
+            EnrichedPlugin {
+                configured_spec: "beta@latest".to_string(),
+                package_name: "beta".to_string(),
+                scope: ConfigScope::Project,
+                config_path: PathBuf::from("/tmp/opencode.json"),
+                manifest: Some(PackageManifest {
+                    name: "beta".to_string(),
+                    version: "2.0.0".to_string(),
+                    description: None,
+                    engines: None,
+                }),
+                catalog_metadata: None,
+                display_name: "Beta".to_string(),
+                description: String::new(),
+                status: InstallStatus::Installed,
+                latest_version: Some("2.0.0".to_string()),
+                declared_latest_range: None,
+            },
+            EnrichedPlugin {
+                configured_spec: "gamma@latest".to_string(),
+                package_name: "gamma".to_string(),
+                scope: ConfigScope::Project,
+                config_path: PathBuf::from("/tmp/opencode.json"),
+                manifest: None,
+                catalog_metadata: None,
+                display_name: "Gamma".to_string(),
+                description: String::new(),
+                status: InstallStatus::MissingInstall,
+                latest_version: None,
+                declared_latest_range: None,
+            },
+        ];
+        let classified = classify_plugins(plugins);
+        let output = build_outdated_json(&classified);
+        let value = serde_json::to_value(&output).unwrap();
+
+        // Verify top-level shape
+        assert!(value.get("outdated").is_some());
+        assert!(value.get("current").is_some());
+        assert!(value.get("unresolved").is_some());
+
+        let outdated = value["outdated"].as_array().unwrap();
+        let current = value["current"].as_array().unwrap();
+        let unresolved = value["unresolved"].as_array().unwrap();
+
+        assert_eq!(outdated.len(), 1);
+        assert_eq!(outdated[0]["packageName"], "alpha");
+        assert_eq!(outdated[0]["status"], "outdated");
+
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0]["packageName"], "beta");
+        assert_eq!(current[0]["status"], "current");
+
+        assert_eq!(unresolved.len(), 1);
+        assert_eq!(unresolved[0]["packageName"], "gamma");
+        assert_eq!(unresolved[0]["status"], "unresolved");
+    }
+
+    #[test]
+    fn snapshot_empty_outdated_json_all_empty() {
+        let classified = classify_plugins(vec![]);
+        let output = build_outdated_json(&classified);
+        let value = serde_json::to_value(&output).unwrap();
+        let pretty = serde_json::to_string_pretty(&value).unwrap();
+        assert_eq!(
+            pretty,
+            r#"{
+  "current": [],
+  "outdated": [],
+  "unresolved": []
+}"#
+        );
+    }
+
+    #[test]
+    fn snapshot_plugin_list_order_is_stable() {
+        let plugins = vec![
+            plugin(
+                ConfigScope::Global,
+                "/tmp/global/opencode.json",
+                "zebra@latest",
+                "zebra",
+                true,
+            ),
+            plugin(
+                ConfigScope::Project,
+                "/tmp/opencode.json",
+                "alpha@latest",
+                "alpha",
+                true,
+            ),
+        ];
+        let output = build_plugins_json(&plugins);
+        let value = serde_json::to_value(&output).unwrap();
+        let plugins_arr = value["plugins"].as_array().unwrap();
+        // sort_enriched_plugins puts project first, then global; alphabetical within scope
+        assert_eq!(plugins_arr[0]["packageName"], "alpha");
+        assert_eq!(plugins_arr[0]["scope"], "project");
+        assert_eq!(plugins_arr[1]["packageName"], "zebra");
+        assert_eq!(plugins_arr[1]["scope"], "global");
+    }
 }
 
 #[derive(Serialize)]

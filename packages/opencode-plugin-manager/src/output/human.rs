@@ -21,7 +21,7 @@ pub fn render_plugins(plugins: &[EnrichedPlugin]) -> String {
             }
 
             writeln!(output, "{}", scope_label(&plugin.scope).bold()).unwrap();
-            current_scope = Some(plugin.scope.clone());
+            current_scope = Some(plugin.scope);
         }
 
         writeln!(output, "  {}", plugin.display_name.bold()).unwrap();
@@ -470,5 +470,183 @@ mod tests {
     fn render_outdated_human_shows_none_when_empty() {
         let output = render_outdated_human(&[]);
         assert!(output.contains("No plugins found"));
+    }
+
+    // --- Snapshot-style tests ---
+
+    #[test]
+    fn snapshot_render_plugins_single_outdated() {
+        let plugins = vec![EnrichedPlugin {
+            configured_spec: "my-plugin@latest".to_string(),
+            package_name: "my-plugin".to_string(),
+            scope: ConfigScope::Project,
+            config_path: PathBuf::from("/tmp/opencode.json"),
+            manifest: Some(PackageManifest {
+                name: "my-plugin".to_string(),
+                version: "1.0.0".to_string(),
+                description: Some("A useful plugin".to_string()),
+                engines: Some(Engines {
+                    opencode: Some(">=1.15.3".to_string()),
+                }),
+            }),
+            catalog_metadata: None,
+            display_name: "my-plugin".to_string(),
+            description: "A useful plugin".to_string(),
+            status: InstallStatus::Installed,
+            latest_version: Some("2.0.0".to_string()),
+            declared_latest_range: None,
+        }];
+
+        let output = render_plugins(&plugins);
+        // Verify key structural elements
+        assert!(output.contains("my-plugin"));
+        assert!(output.contains("1.0.0"));
+        assert!(output.contains("2.0.0"));
+        assert!(output.contains("update available"));
+    }
+
+    #[test]
+    fn snapshot_render_plugins_empty_list() {
+        let output = render_plugins(&[]);
+        assert!(output.contains("No configured plugins"));
+    }
+
+    #[test]
+    fn snapshot_render_outdated_human_all_sections() {
+        let plugins = vec![
+            EnrichedPlugin {
+                configured_spec: "outdated-pkg@latest".to_string(),
+                package_name: "outdated-pkg".to_string(),
+                scope: ConfigScope::Project,
+                config_path: PathBuf::from("/tmp/opencode.json"),
+                manifest: Some(PackageManifest {
+                    name: "outdated-pkg".to_string(),
+                    version: "1.0.0".to_string(),
+                    description: None,
+                    engines: None,
+                }),
+                catalog_metadata: None,
+                display_name: "outdated-pkg".to_string(),
+                description: String::new(),
+                status: InstallStatus::Installed,
+                latest_version: Some("2.0.0".to_string()),
+                declared_latest_range: None,
+            },
+            EnrichedPlugin {
+                configured_spec: "current-pkg@latest".to_string(),
+                package_name: "current-pkg".to_string(),
+                scope: ConfigScope::Project,
+                config_path: PathBuf::from("/tmp/opencode.json"),
+                manifest: Some(PackageManifest {
+                    name: "current-pkg".to_string(),
+                    version: "2.0.0".to_string(),
+                    description: None,
+                    engines: None,
+                }),
+                catalog_metadata: None,
+                display_name: "current-pkg".to_string(),
+                description: String::new(),
+                status: InstallStatus::Installed,
+                latest_version: Some("2.0.0".to_string()),
+                declared_latest_range: None,
+            },
+            EnrichedPlugin {
+                configured_spec: "missing-pkg@latest".to_string(),
+                package_name: "missing-pkg".to_string(),
+                scope: ConfigScope::Global,
+                config_path: PathBuf::from("/tmp/global/opencode.json"),
+                manifest: None,
+                catalog_metadata: None,
+                display_name: "missing-pkg".to_string(),
+                description: String::new(),
+                status: InstallStatus::MissingInstall,
+                latest_version: Some("3.0.0".to_string()),
+                declared_latest_range: None,
+            },
+        ];
+        let classified = classify_plugins(plugins);
+        let output = render_outdated_human(&classified);
+
+        // Verify section headers exist with counts
+        assert!(output.contains("Outdated (1):"));
+        assert!(output.contains("Current (1):"));
+        assert!(output.contains("Unresolved (1):"));
+
+        // Verify version arrows for outdated
+        assert!(output.contains("v1.0.0"));
+        assert!(output.contains("v2.0.0"));
+
+        // Verify unresolved shows "not installed" and latest version
+        assert!(output.contains("missing-pkg"));
+        assert!(output.contains("not installed"));
+        assert!(output.contains("v3.0.0"));
+
+        // Verify current shows version info
+        assert!(output.contains("current-pkg"));
+    }
+
+    #[test]
+    fn snapshot_render_outdated_human_empty() {
+        let output = render_outdated_human(&[]);
+        assert!(output.contains("No plugins found"));
+        // Should not contain any section headers
+        assert!(!output.contains("Outdated"));
+        assert!(!output.contains("Current"));
+        assert!(!output.contains("Unresolved"));
+    }
+
+    #[test]
+    fn snapshot_render_plugins_curated_plugin() {
+        let plugins = vec![EnrichedPlugin {
+            configured_spec: "curated-plugin@latest".to_string(),
+            package_name: "curated-plugin".to_string(),
+            scope: ConfigScope::Project,
+            config_path: PathBuf::from("/tmp/opencode.json"),
+            manifest: Some(PackageManifest {
+                name: "curated-plugin".to_string(),
+                version: "1.5.0".to_string(),
+                description: Some("A curated plugin".to_string()),
+                engines: None,
+            }),
+            catalog_metadata: Some(PluginMetadata {
+                package_name: "curated-plugin",
+                alias: "cp",
+                display_name: "Curated Plugin",
+                description: "A curated plugin description",
+                category: "utility",
+                docs_url: None,
+                homepage_url: None,
+            }),
+            display_name: "Curated Plugin".to_string(),
+            description: "A curated plugin description".to_string(),
+            status: InstallStatus::Installed,
+            latest_version: None,
+            declared_latest_range: None,
+        }];
+
+        let output = render_plugins(&plugins);
+        assert!(output.contains("Curated Plugin"));
+        assert!(output.contains("1.5.0"));
+    }
+
+    #[test]
+    fn snapshot_render_plugins_missing_manifest() {
+        let plugins = vec![EnrichedPlugin {
+            configured_spec: "broken-plugin@latest".to_string(),
+            package_name: "broken-plugin".to_string(),
+            scope: ConfigScope::Project,
+            config_path: PathBuf::from("/tmp/opencode.json"),
+            manifest: None,
+            catalog_metadata: None,
+            display_name: "broken-plugin".to_string(),
+            description: String::new(),
+            status: InstallStatus::MissingInstall,
+            latest_version: Some("2.0.0".to_string()),
+            declared_latest_range: None,
+        }];
+
+        let output = render_plugins(&plugins);
+        assert!(output.contains("broken-plugin"));
+        assert!(output.contains("not installed"));
     }
 }

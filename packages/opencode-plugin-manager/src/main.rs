@@ -1,10 +1,12 @@
 mod catalog;
 mod cli;
+mod commands;
 mod config;
 mod discovery;
 mod errors;
 mod output;
 mod registry;
+mod safety;
 mod version_util;
 
 use clap::Parser;
@@ -122,9 +124,9 @@ async fn main() -> anyhow::Result<ExitCode> {
             yes,
             dry_run,
         } => {
-            println!(
-                "Add command (plugin: {}, project: {}, global: {}, yes: {}, dry_run: {})",
-                plugin, project, global, yes, dry_run
+            return handle_mutation_result(
+                commands::add::execute(plugin, *project, *global, *yes, *dry_run, cli.json),
+                cli.json,
             );
         }
         Commands::Update {
@@ -133,11 +135,17 @@ async fn main() -> anyhow::Result<ExitCode> {
             global,
             yes,
             dry_run,
-            refresh,
         } => {
-            println!(
-                "Update command (plugin: {:?}, project: {}, global: {}, yes: {}, dry_run: {}, refresh: {})",
-                plugin, project, global, yes, dry_run, refresh
+            return handle_mutation_result(
+                commands::update::execute(
+                    plugin.as_deref(),
+                    *project,
+                    *global,
+                    *yes,
+                    *dry_run,
+                    cli.json,
+                ),
+                cli.json,
             );
         }
         Commands::Remove {
@@ -147,14 +155,37 @@ async fn main() -> anyhow::Result<ExitCode> {
             yes,
             dry_run,
         } => {
-            println!(
-                "Remove command (plugin: {}, project: {}, global: {}, yes: {}, dry_run: {})",
-                plugin, project, global, yes, dry_run
+            return handle_mutation_result(
+                commands::remove::execute(plugin, *project, *global, *yes, *dry_run, cli.json),
+                cli.json,
             );
         }
     }
 
     Ok(exit_code)
+}
+
+/// Execute a mutation command and handle errors according to JSON mode.
+/// In JSON mode, the error is serialised as the one stdout JSON document
+/// and the process exits with a failure exit code, instead of propagating
+/// unstructured text via `anyhow`.
+fn handle_mutation_result(
+    result: Result<ExitCode, CliError>,
+    json: bool,
+) -> Result<ExitCode, anyhow::Error> {
+    match result {
+        Ok(code) => Ok(code),
+        Err(e) => {
+            if json {
+                let error_json = serde_json::to_string_pretty(&e.to_json())
+                    .unwrap_or_else(|_| r#"{"error":"INTERNAL_ERROR","message":"serialization failed"}"#.to_string());
+                println!("{error_json}");
+                Ok(ExitCode::FAILURE)
+            } else {
+                Err(anyhow::Error::from(e))
+            }
+        }
+    }
 }
 
 fn should_show_startup_notice(json: bool, quiet: bool, outdated_count: usize) -> bool {

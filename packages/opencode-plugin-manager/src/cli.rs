@@ -87,10 +87,6 @@ pub enum Commands {
         /// Preview changes without applying
         #[arg(long)]
         dry_run: bool,
-
-        /// Force refresh of cached registry data
-        #[arg(long)]
-        refresh: bool,
     },
     /// Remove a configured npm plugin entry from config
     Remove {

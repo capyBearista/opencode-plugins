@@ -117,7 +117,7 @@ fn extract_plugins_from_file(
             {
                 plugins.push(PluginEntry {
                     spec: s.value.to_string(),
-                    scope: scope.clone(),
+                    scope,
                     config_path: path.to_path_buf(),
                 });
             }

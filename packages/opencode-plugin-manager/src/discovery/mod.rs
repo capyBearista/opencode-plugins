@@ -1,5 +1,5 @@
-use crate::catalog::{PluginMetadata, get_curated_metadata};
-use crate::config::manifest::{PackageManifest, get_installed_manifest};
+use crate::catalog::{get_curated_metadata, PluginMetadata};
+use crate::config::manifest::{get_installed_manifest, PackageManifest};
 use crate::config::provider::{ConfigScope, PluginEntry};
 use crate::errors::CliError;
 use crate::registry::cache::UpdateNoticeCache;
@@ -111,20 +111,12 @@ pub struct ResolvedPlugin {
     pub manifest: Option<PackageManifest>,
 }
 
+/// Extract the package name from a spec (strips version suffix).
+///
+/// Delegates to the canonical implementation in `safety::package_name_from_spec`
+/// to avoid duplicating spec-parsing logic.
 pub fn extract_package_name(spec: &str) -> String {
-    if spec.starts_with('@')
-        && let Some((scope, remainder)) = spec.split_once('/')
-    {
-        if let Some((package_name, _version)) = remainder.rsplit_once('@') {
-            return format!("{scope}/{package_name}");
-        }
-
-        return spec.to_string();
-    }
-
-    spec.rsplit_once('@')
-        .map(|(package_name, _version)| package_name.to_string())
-        .unwrap_or_else(|| spec.to_string())
+    crate::safety::package_name_from_spec(spec)
 }
 
 pub fn deduplicate_plugins(entries: Vec<PluginEntry>) -> Vec<PluginEntry> {
@@ -133,7 +125,7 @@ pub fn deduplicate_plugins(entries: Vec<PluginEntry>) -> Vec<PluginEntry> {
 
     for entry in entries.into_iter().rev() {
         let package_name = extract_package_name(&entry.spec);
-        if seen.insert((package_name, entry.scope.clone())) {
+        if seen.insert((package_name, entry.scope)) {
             deduplicated.push(entry);
         }
     }
