@@ -1,5 +1,5 @@
 use crate::config::provider::ConfigScope;
-use crate::discovery::{sort_enriched_plugins, ClassifiedPlugin, EnrichedPlugin, PluginStatus};
+use crate::discovery::{ClassifiedPlugin, EnrichedPlugin, PluginStatus, sort_enriched_plugins};
 use serde::Serialize;
 
 #[cfg(test)]

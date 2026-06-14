@@ -18,10 +18,11 @@ use std::process::ExitCode;
 /// - Pinned plugins (`@scope/pkg@1.2.3`) require explicit approval to change config.
 /// - Unpinned plugins (`@scope/pkg`, `@scope/pkg@latest`) are already refreshable.
 /// - `--dry-run` previews changes without applying.
+/// - `--refresh` pins every managed plugin to the exact latest version from npm.
 ///
-/// Mutations are applied **per config file**: if pinned plugins are spread
-/// across multiple OpenCode config files, each file is read, patched, and
-/// written atomically.
+/// Mutations are applied **per config file**: if plugins are spread across
+/// multiple OpenCode config files, each file is read, patched, and written
+/// atomically.
 ///
 /// JSON mode contract:
 /// - Dry-run: one preview JSON object, no write.
@@ -34,11 +35,13 @@ pub fn execute(
     yes: bool,
     dry_run: bool,
     json: bool,
+    refresh_versions: Option<&HashMap<String, String>>,
 ) -> Result<ExitCode, CliError> {
     let scope = resolve_write_scope(project, global)?;
+    let refresh_active = refresh_versions.is_some();
 
     // Collect plugins for update across ALL config files in the scope.
-    let plugins_to_update = collect_plugins_for_update(scope, plugin)?;
+    let plugins_to_update = collect_plugins_for_update(scope, plugin, refresh_versions)?;
     if plugins_to_update.is_empty() {
         if json {
             let empty_result = serde_json::json!({
@@ -55,36 +58,51 @@ pub fn execute(
         return Ok(ExitCode::SUCCESS);
     }
 
-    // Separate pinned and unpinned plugins
-    let mut pinned: Vec<PluginToUpdate> = Vec::new();
-    let mut unpinned: Vec<PluginToUpdate> = Vec::new();
+    // Separate plugins that need a config write from those that don't
+    let mut needs_write: Vec<PluginToUpdate> = Vec::new();
+    let mut refresh_ready: Vec<PluginToUpdate> = Vec::new();
+    let mut up_to_date: Vec<PluginToUpdate> = Vec::new();
+    let mut skipped: Vec<PluginToUpdate> = Vec::new();
 
-    for plugin_info in plugins_to_update {
-        if is_pinned_version(&plugin_info.current_spec) {
-            pinned.push(plugin_info);
+    for p in plugins_to_update {
+        if p.needs_write {
+            needs_write.push(p);
         } else {
-            unpinned.push(plugin_info);
+            match p.no_write_reason {
+                Some(NoWriteReason::RefreshReady) => refresh_ready.push(p),
+                Some(NoWriteReason::AlreadyCurrent) | None => up_to_date.push(p),
+                Some(NoWriteReason::SkippedMissingVersion) => skipped.push(p),
+            }
         }
     }
 
-    // Group pinned by config_path (unpinned are just reported, no writes needed)
-    let mut pinned_by_path: HashMap<PathBuf, Vec<&PluginToUpdate>> = HashMap::new();
-    for p in &pinned {
-        pinned_by_path
+    // Group needs_write by config_path
+    let mut write_by_path: HashMap<PathBuf, Vec<&PluginToUpdate>> = HashMap::new();
+    for p in &needs_write {
+        write_by_path
             .entry(p.config_path.clone())
             .or_default()
             .push(p);
     }
 
     // Collect unique config paths for display
-    let mut all_paths: Vec<&PathBuf> = pinned_by_path.keys().collect();
-    all_paths.extend(unpinned.iter().map(|p| &p.config_path));
+    let mut all_paths: Vec<&PathBuf> = write_by_path.keys().collect();
+    all_paths.extend(refresh_ready.iter().map(|p| &p.config_path));
+    all_paths.extend(up_to_date.iter().map(|p| &p.config_path));
+    all_paths.extend(skipped.iter().map(|p| &p.config_path));
     all_paths.sort();
     all_paths.dedup();
 
     // --- Display (one JSON doc per invocation) ---
     if json && dry_run {
-        let preview = build_update_preview_json(&scope, &pinned, &unpinned, dry_run);
+        let preview = build_update_preview_json(
+            &scope,
+            &needs_write,
+            &refresh_ready,
+            &up_to_date,
+            &skipped,
+            dry_run,
+        );
         println!("{}", serde_json::to_string_pretty(&preview).unwrap());
         return Ok(ExitCode::SUCCESS);
     }
@@ -97,12 +115,14 @@ pub fn execute(
         }
         println!();
 
-        if !unpinned.is_empty() {
+        if !refresh_ready.is_empty() {
             println!(
                 "{}",
-                format!("Unpinned ({}):", unpinned.len()).green().bold()
+                format!("Unpinned ({}):", refresh_ready.len())
+                    .green()
+                    .bold()
             );
-            for p in &unpinned {
+            for p in &refresh_ready {
                 println!(
                     "  {} {} — will refresh on next load",
                     "✓".green(),
@@ -112,9 +132,46 @@ pub fn execute(
             println!();
         }
 
-        if !pinned.is_empty() {
-            println!("{}", format!("Pinned ({}):", pinned.len()).yellow().bold());
-            for p in &pinned {
+        if !up_to_date.is_empty() {
+            println!(
+                "{}",
+                format!("Already current ({}):", up_to_date.len())
+                    .green()
+                    .bold()
+            );
+            for p in &up_to_date {
+                println!(
+                    "  {} {} — already pinned to latest",
+                    "✓".green(),
+                    p.current_spec
+                );
+            }
+            println!();
+        }
+
+        if !skipped.is_empty() {
+            println!(
+                "{}",
+                format!("Skipped ({}):", skipped.len()).yellow().bold()
+            );
+            for p in &skipped {
+                println!(
+                    "  {} {} — latest version unavailable",
+                    "!".yellow(),
+                    p.current_spec
+                );
+            }
+            println!();
+        }
+
+        if !needs_write.is_empty() {
+            let heading = if refresh_active {
+                format!("Pinning to exact version ({}):", needs_write.len())
+            } else {
+                format!("Pinned ({}):", needs_write.len())
+            };
+            println!("{}", heading.yellow().bold());
+            for p in &needs_write {
                 println!(
                     "  {} {} → {}  [{}]",
                     "→".yellow(),
@@ -123,10 +180,12 @@ pub fn execute(
                     p.config_path.display()
                 );
             }
-            println!(
-                "{}",
-                "Pinned plugins will be updated to @latest. This changes your config.".dimmed()
-            );
+            let msg = if refresh_active {
+                "Plugins will be pinned to exact versions. This changes your config."
+            } else {
+                "Pinned plugins will be updated to @latest. This changes your config."
+            };
+            println!("{}", msg.dimmed());
             println!();
         }
     }
@@ -138,13 +197,21 @@ pub fn execute(
         return Ok(ExitCode::SUCCESS);
     }
 
-    // If there are pinned plugins, confirm the config change
-    if !pinned.is_empty() {
-        let prompt = format!(
-            "Update {} pinned plugin{} config to @latest?",
-            pinned.len(),
-            if pinned.len() == 1 { "" } else { "s" }
-        );
+    // If there are config changes, confirm
+    if !needs_write.is_empty() {
+        let prompt = if refresh_active {
+            format!(
+                "Pin {} plugin{} to exact latest version?",
+                needs_write.len(),
+                if needs_write.len() == 1 { "" } else { "s" }
+            )
+        } else {
+            format!(
+                "Update {} pinned plugin{} config to @latest?",
+                needs_write.len(),
+                if needs_write.len() == 1 { "" } else { "s" }
+            )
+        };
 
         if !confirm(&prompt, yes)? {
             if json {
@@ -164,7 +231,7 @@ pub fn execute(
     // Apply changes per config file
     let mut updated_entries: Vec<serde_json::Value> = Vec::new();
 
-    for (config_path, updates) in &pinned_by_path {
+    for (config_path, updates) in &write_by_path {
         let original_content = read_config(config_path)?;
         let mut current_content = original_content.clone();
 
@@ -191,7 +258,7 @@ pub fn execute(
 
     // Output results
     if json {
-        let refresh_ready_entries: Vec<serde_json::Value> = unpinned
+        let refresh_ready_entries: Vec<serde_json::Value> = refresh_ready
             .iter()
             .map(|p| {
                 serde_json::json!({
@@ -200,15 +267,38 @@ pub fn execute(
                 })
             })
             .collect();
+        let up_to_date_entries: Vec<serde_json::Value> = up_to_date
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "spec": p.current_spec,
+                    "packageName": p.package_name,
+                })
+            })
+            .collect();
+        let skipped_entries: Vec<serde_json::Value> = skipped
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "spec": p.current_spec,
+                    "packageName": p.package_name,
+                    "reason": "latest version unavailable",
+                })
+            })
+            .collect();
         let result = serde_json::json!({
             "success": true,
             "action": "update",
             "updated": updated_entries,
             "refreshReady": refresh_ready_entries,
+            "upToDate": up_to_date_entries,
+            "skipped": skipped_entries,
             "message": if !updated_entries.is_empty() {
                 "update applied"
             } else if !refresh_ready_entries.is_empty() {
                 "ready for refresh"
+            } else if !up_to_date_entries.is_empty() {
+                "already up to date"
             } else {
                 "no changes needed"
             },
@@ -216,19 +306,37 @@ pub fn execute(
         println!("{}", serde_json::to_string_pretty(&result).unwrap());
     } else {
         if !updated_entries.is_empty() {
-            println!(
-                "{} Updated {} pinned plugin{}",
-                "Done!".green().bold(),
-                updated_entries.len(),
-                if updated_entries.len() == 1 { "" } else { "s" }
-            );
+            if refresh_active {
+                println!(
+                    "{} Pinned {} plugin{} to exact version{}",
+                    "Done!".green().bold(),
+                    updated_entries.len(),
+                    if updated_entries.len() == 1 { "" } else { "s" },
+                    if updated_entries.len() == 1 { "" } else { "s" },
+                );
+            } else {
+                println!(
+                    "{} Updated {} pinned plugin{}",
+                    "Done!".green().bold(),
+                    updated_entries.len(),
+                    if updated_entries.len() == 1 { "" } else { "s" }
+                );
+            }
         }
-        if !unpinned.is_empty() {
+        if !refresh_ready.is_empty() {
             println!(
                 "{} {} unpinned plugin{} ready for refresh",
                 "Note:".dimmed(),
-                unpinned.len(),
-                if unpinned.len() == 1 { "" } else { "s" }
+                refresh_ready.len(),
+                if refresh_ready.len() == 1 { "" } else { "s" }
+            );
+        }
+        if !up_to_date.is_empty() {
+            println!(
+                "{} {} plugin{} already pinned to latest",
+                "Note:".dimmed(),
+                up_to_date.len(),
+                if up_to_date.len() == 1 { "" } else { "s" }
             );
         }
     }
@@ -241,6 +349,15 @@ struct PluginToUpdate {
     package_name: String,
     proposed_spec: String,
     config_path: PathBuf,
+    needs_write: bool,
+    no_write_reason: Option<NoWriteReason>,
+}
+
+#[derive(Clone, Copy)]
+enum NoWriteReason {
+    RefreshReady,
+    AlreadyCurrent,
+    SkippedMissingVersion,
 }
 
 /// Build the preview JSON object for the update command.
@@ -248,6 +365,8 @@ fn build_update_preview_json(
     scope: &ConfigScope,
     pinned: &[PluginToUpdate],
     unpinned: &[PluginToUpdate],
+    up_to_date: &[PluginToUpdate],
+    skipped: &[PluginToUpdate],
     dry_run: bool,
 ) -> serde_json::Value {
     let pinned_json: Vec<serde_json::Value> = pinned
@@ -271,6 +390,27 @@ fn build_update_preview_json(
             })
         })
         .collect();
+    let up_to_date_json: Vec<serde_json::Value> = up_to_date
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "spec": p.current_spec,
+                "packageName": p.package_name,
+                "configPath": p.config_path.display().to_string(),
+            })
+        })
+        .collect();
+    let skipped_json: Vec<serde_json::Value> = skipped
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "spec": p.current_spec,
+                "packageName": p.package_name,
+                "configPath": p.config_path.display().to_string(),
+                "reason": "latest version unavailable",
+            })
+        })
+        .collect();
     serde_json::json!({
         "action": "update",
         "scope": match scope {
@@ -279,15 +419,21 @@ fn build_update_preview_json(
         },
         "pinned": pinned_json,
         "unpinned": unpinned_json,
+        "upToDate": up_to_date_json,
+        "skipped": skipped_json,
         "dryRun": dry_run,
     })
 }
 
 /// Collect plugins that need updating from the config across **all**
 /// config files in the scope (not just a single hard-coded target path).
+///
+/// When `refresh_versions` is provided, every matching plugin is proposed
+/// to be pinned to the exact latest version from npm.
 fn collect_plugins_for_update(
     scope: ConfigScope,
     filter_plugin: Option<&str>,
+    refresh_versions: Option<&HashMap<String, String>>,
 ) -> Result<Vec<PluginToUpdate>, CliError> {
     let provider: Box<dyn ConfigProvider> = match scope {
         ConfigScope::Project => {
@@ -304,7 +450,8 @@ fn collect_plugins_for_update(
     let mut result = Vec::new();
 
     for entry in &plugins {
-        let pkg_name = package_name_from_spec(&entry.spec);
+        let resolved_spec = resolve_alias(&entry.spec);
+        let pkg_name = package_name_from_spec(&resolved_spec);
 
         // Filter to specific plugin if requested
         if let Some(filter) = filter_plugin {
@@ -315,14 +462,31 @@ fn collect_plugins_for_update(
             }
         }
 
-        // For unpinned plugins, they don't need a config change
-        // (they refresh via OpenCode automatically)
-        // For pinned plugins, propose changing to @latest
-        let proposed_spec = if is_pinned_version(&entry.spec) {
-            format!("{pkg_name}@latest")
+        let pinned = is_pinned_version(&entry.spec);
+
+        // Determine proposed spec and whether a config write is needed
+        let (proposed_spec, needs_write, no_write_reason) = if let Some(versions) = refresh_versions
+        {
+            if let Some(version) = versions.get(&pkg_name) {
+                // --refresh: pin to exact version
+                let exact = format!("{pkg_name}@{version}");
+                let needs_write = exact != entry.spec;
+                let reason = (!needs_write).then_some(NoWriteReason::AlreadyCurrent);
+                (exact, needs_write, reason)
+            } else {
+                // Missing registry data should never loosen a pin to @latest.
+                (
+                    entry.spec.clone(),
+                    false,
+                    Some(NoWriteReason::SkippedMissingVersion),
+                )
+            }
+        } else if pinned {
+            // Existing pinned: propose @latest, needs write
+            (format!("{pkg_name}@latest"), true, None)
         } else {
-            // Unpinned — no config change needed, but include for reporting
-            entry.spec.clone()
+            // Unpinned, no refresh: keep as-is, no write needed
+            (entry.spec.clone(), false, Some(NoWriteReason::RefreshReady))
         };
 
         result.push(PluginToUpdate {
@@ -330,6 +494,8 @@ fn collect_plugins_for_update(
             package_name: pkg_name,
             proposed_spec,
             config_path: entry.config_path.clone(),
+            needs_write,
+            no_write_reason,
         });
     }
 
@@ -428,7 +594,11 @@ mod tests {
                 package_name: "@scope/pkg".into(),
                 proposed_spec: "@scope/pkg@latest".into(),
                 config_path: PathBuf::from("/tmp/opencode.json"),
+                needs_write: true,
+                no_write_reason: None,
             }],
+            &[],
+            &[],
             &[],
             true,
         );
@@ -465,7 +635,7 @@ mod tests {
     #[test]
     fn json_empty_preview_has_refresh_ready_not_refreshed() {
         // Exercise the real builder with empty lists to verify field name.
-        let preview = build_update_preview_json(&ConfigScope::Project, &[], &[], true);
+        let preview = build_update_preview_json(&ConfigScope::Project, &[], &[], &[], &[], true);
         assert!(
             preview.get("refreshReady").is_none(),
             "refreshReady should not appear when empty"
@@ -543,7 +713,7 @@ mod tests {
         let original_cwd = std::env::current_dir().ok();
         std::env::set_current_dir(dir.path()).unwrap();
 
-        let plugins = collect_plugins_for_update(ConfigScope::Project, None).unwrap();
+        let plugins = collect_plugins_for_update(ConfigScope::Project, None, None).unwrap();
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].current_spec, "@scope/pkg@1.0.0");
         assert_eq!(plugins[0].config_path, root_config);
@@ -562,7 +732,7 @@ mod tests {
         let original_cwd = std::env::current_dir().ok();
         std::env::set_current_dir(dir.path()).unwrap();
 
-        let plugins = collect_plugins_for_update(ConfigScope::Project, None).unwrap();
+        let plugins = collect_plugins_for_update(ConfigScope::Project, None, None).unwrap();
         assert_eq!(plugins[0].config_path, root_config);
 
         if let Some(cwd) = original_cwd {
@@ -577,8 +747,203 @@ mod tests {
         let original_cwd = std::env::current_dir().ok();
         std::env::set_current_dir(dir.path()).unwrap();
 
-        let result = collect_plugins_for_update(ConfigScope::Project, Some("nonexistent"));
+        let result = collect_plugins_for_update(ConfigScope::Project, Some("nonexistent"), None);
         assert!(result.is_err());
+
+        if let Some(cwd) = original_cwd {
+            std::env::set_current_dir(cwd).unwrap();
+        }
+    }
+
+    // --- Refresh tests (no network) ---
+
+    #[test]
+    fn refresh_pins_unpinned_plugins_to_exact_version() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("opencode.json");
+        fs::write(
+            &config_path,
+            r#"{"plugin": ["unpinned-plugin", "@scope/unpinned@latest"]}"#,
+        )
+        .unwrap();
+
+        let original_cwd = std::env::current_dir().ok();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let mut versions = HashMap::new();
+        versions.insert("unpinned-plugin".to_string(), "2.0.0".to_string());
+        versions.insert("@scope/unpinned".to_string(), "3.1.4".to_string());
+
+        let plugins =
+            collect_plugins_for_update(ConfigScope::Project, None, Some(&versions)).unwrap();
+
+        assert_eq!(plugins.len(), 2);
+        // Unpinned plugins get exact pinned version
+        assert_eq!(plugins[0].proposed_spec, "unpinned-plugin@2.0.0");
+        assert!(
+            plugins[0].needs_write,
+            "unpinned should become pinned with --refresh"
+        );
+        assert_ne!(
+            plugins[0].current_spec, plugins[0].proposed_spec,
+            "proposed should differ from current for unpinned"
+        );
+        // @scope/unpinned@latest → @scope/unpinned@3.1.4
+        assert_eq!(plugins[1].proposed_spec, "@scope/unpinned@3.1.4");
+        assert!(plugins[1].needs_write);
+
+        if let Some(cwd) = original_cwd {
+            std::env::set_current_dir(cwd).unwrap();
+        }
+    }
+
+    #[test]
+    fn refresh_bumps_pinned_plugins_to_exact_latest() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("opencode.json");
+        fs::write(
+            &config_path,
+            r#"{"plugin": ["@scope/pkg@1.0.0", "other@0.5.0"]}"#,
+        )
+        .unwrap();
+
+        let original_cwd = std::env::current_dir().ok();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let mut versions = HashMap::new();
+        versions.insert("@scope/pkg".to_string(), "2.0.0".to_string());
+        versions.insert("other".to_string(), "1.0.0".to_string());
+
+        let plugins =
+            collect_plugins_for_update(ConfigScope::Project, None, Some(&versions)).unwrap();
+
+        assert_eq!(plugins.len(), 2);
+        assert_eq!(plugins[0].proposed_spec, "@scope/pkg@2.0.0");
+        assert_eq!(plugins[1].proposed_spec, "other@1.0.0");
+        assert!(plugins[0].needs_write);
+
+        if let Some(cwd) = original_cwd {
+            std::env::set_current_dir(cwd).unwrap();
+        }
+    }
+
+    #[test]
+    fn refresh_skips_plugins_already_at_exact_version() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("opencode.json");
+        // Already pinned to the version that would be fetched
+        fs::write(&config_path, r#"{"plugin": ["@scope/pkg@1.0.0"]}"#).unwrap();
+
+        let original_cwd = std::env::current_dir().ok();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let mut versions = HashMap::new();
+        versions.insert("@scope/pkg".to_string(), "1.0.0".to_string());
+
+        let plugins =
+            collect_plugins_for_update(ConfigScope::Project, None, Some(&versions)).unwrap();
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].proposed_spec, "@scope/pkg@1.0.0");
+        // Needs no write since it's already at the target version
+        assert!(!plugins[0].needs_write);
+        assert!(matches!(
+            plugins[0].no_write_reason,
+            Some(NoWriteReason::AlreadyCurrent)
+        ));
+
+        if let Some(cwd) = original_cwd {
+            std::env::set_current_dir(cwd).unwrap();
+        }
+    }
+
+    #[test]
+    fn refresh_missing_version_does_not_loosen_existing_pin() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("opencode.json");
+        fs::write(&config_path, r#"{"plugin": ["@scope/pkg@1.0.0"]}"#).unwrap();
+
+        let original_cwd = std::env::current_dir().ok();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let versions = HashMap::new();
+        let plugins =
+            collect_plugins_for_update(ConfigScope::Project, None, Some(&versions)).unwrap();
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].current_spec, "@scope/pkg@1.0.0");
+        assert_eq!(plugins[0].proposed_spec, "@scope/pkg@1.0.0");
+        assert!(!plugins[0].needs_write);
+        assert!(matches!(
+            plugins[0].no_write_reason,
+            Some(NoWriteReason::SkippedMissingVersion)
+        ));
+
+        if let Some(cwd) = original_cwd {
+            std::env::set_current_dir(cwd).unwrap();
+        }
+    }
+
+    #[test]
+    fn refresh_filters_to_specific_plugin_when_requested() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("opencode.json");
+        fs::write(
+            &config_path,
+            r#"{"plugin": ["plugin-a@1.0.0", "plugin-b@0.5.0"]}"#,
+        )
+        .unwrap();
+
+        let original_cwd = std::env::current_dir().ok();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let mut versions = HashMap::new();
+        versions.insert("plugin-a".to_string(), "2.0.0".to_string());
+        versions.insert("plugin-b".to_string(), "1.0.0".to_string());
+
+        let plugins =
+            collect_plugins_for_update(ConfigScope::Project, Some("plugin-a"), Some(&versions))
+                .unwrap();
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].package_name, "plugin-a");
+        assert_eq!(plugins[0].proposed_spec, "plugin-a@2.0.0");
+
+        if let Some(cwd) = original_cwd {
+            std::env::set_current_dir(cwd).unwrap();
+        }
+    }
+
+    #[test]
+    fn refresh_resolves_alias_config_entries_before_pin() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("opencode.json");
+        fs::write(&config_path, r#"{"plugin": ["ram-monitor"]}"#).unwrap();
+
+        let original_cwd = std::env::current_dir().ok();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let mut versions = HashMap::new();
+        versions.insert(
+            "@capybearista/opencode-ram-monitor".to_string(),
+            "1.2.3".to_string(),
+        );
+
+        let plugins =
+            collect_plugins_for_update(ConfigScope::Project, Some("ram-monitor"), Some(&versions))
+                .unwrap();
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].current_spec, "ram-monitor");
+        assert_eq!(
+            plugins[0].package_name,
+            "@capybearista/opencode-ram-monitor"
+        );
+        assert_eq!(
+            plugins[0].proposed_spec,
+            "@capybearista/opencode-ram-monitor@1.2.3"
+        );
+        assert!(plugins[0].needs_write);
 
         if let Some(cwd) = original_cwd {
             std::env::set_current_dir(cwd).unwrap();

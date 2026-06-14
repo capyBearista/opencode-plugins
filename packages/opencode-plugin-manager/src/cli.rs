@@ -87,6 +87,10 @@ pub enum Commands {
         /// Preview changes without applying
         #[arg(long)]
         dry_run: bool,
+
+        /// Fetch latest from npm and pin config to exact version
+        #[arg(long)]
+        refresh: bool,
     },
     /// Remove a configured npm plugin entry from config
     Remove {
@@ -109,4 +113,17 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+}
+
+impl Commands {
+    /// Short label for telemetry / logging.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Commands::List { .. } => "list",
+            Commands::Outdated { .. } => "outdated",
+            Commands::Add { .. } => "add",
+            Commands::Update { .. } => "update",
+            Commands::Remove { .. } => "remove",
+        }
+    }
 }

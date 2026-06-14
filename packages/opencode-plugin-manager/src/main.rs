@@ -7,12 +7,13 @@ mod errors;
 mod output;
 mod registry;
 mod safety;
+mod telemetry;
 mod version_util;
 
 use clap::Parser;
 use cli::{Cli, Commands};
 use config::parser::{GlobalConfigProvider, ProjectConfigProvider};
-use config::provider::{ConfigProvider, PluginEntry};
+use config::provider::{ConfigProvider, ConfigScope, PluginEntry};
 use discovery::{
     EnrichedPlugin, PluginStatus, classify_plugins, deduplicate_plugins, enrich_plugin,
     enrich_with_latest_versions, resolve_plugins,
@@ -20,13 +21,17 @@ use discovery::{
 use errors::CliError;
 use registry::cache::{UpdateNoticeCache, default_notice_cache_path, read_update_notice_cache};
 use registry::client::{DEFAULT_MAX_CONCURRENT, RegistryClient};
+use safety::{package_name_from_spec, resolve_write_scope};
+use std::collections::HashMap;
 use std::env;
 use std::process::ExitCode;
+use std::time::Instant;
 use version_util::version_is_newer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse();
+    let start = Instant::now();
 
     // Cache-based notices: read once and reuse for startup banners and command
     // enrichment. The cache is populated reactively during `outdated` registry
@@ -57,18 +62,21 @@ async fn main() -> anyhow::Result<ExitCode> {
         }
     }
 
-    let mut exit_code = ExitCode::SUCCESS;
+    let command_label = cli.command.label();
+    let notice_count = notice_cache.as_ref().map(|c| c.outdated_count());
 
-    match &cli.command {
+    // Resolve the command into a Result<ExitCode, anyhow::Error>
+    let result: Result<ExitCode, anyhow::Error> = async {
+        match &cli.command {
         Commands::List { project, global } => {
-            let mut enriched_plugins = load_enriched_plugins(cli.json, *project, *global)?;
+            let mut enriched = load_enriched_plugins(cli.json, *project, *global)?;
 
             if let Some(cache) = notice_cache.as_ref() {
-                enriched_plugins = enrich_with_latest_versions(enriched_plugins, cache);
+                enriched = enrich_with_latest_versions(enriched, cache);
             }
 
             if cli.json {
-                output::json::print_plugins_json(&enriched_plugins);
+                output::json::print_plugins_json(&enriched);
             } else if !cli.quiet {
                 if cli.verbose {
                     if let Some(cache) = notice_cache.as_ref() {
@@ -91,37 +99,30 @@ async fn main() -> anyhow::Result<ExitCode> {
                         println!("(no cache — run `outdated --refresh` to populate)");
                     }
                 }
-                output::human::print_plugins(&enriched_plugins, cli.verbose);
+                output::human::print_plugins(&enriched, cli.verbose);
             }
+            Ok(ExitCode::SUCCESS)
         }
         Commands::Outdated {
             project,
             global,
             refresh,
         } => {
-            let mut enriched_plugins = load_enriched_plugins(cli.json, *project, *global)?;
+            let enriched = load_enriched_plugins(cli.json, *project, *global)?;
 
             let cache_path = default_notice_cache_path();
             let cache: UpdateNoticeCache = if *refresh {
-                // Explicit refresh requested — fetch live regardless.
                 let client = RegistryClient::new(DEFAULT_MAX_CONCURRENT);
-                client
-                    .fetch_and_write_cache(&enriched_plugins, cache_path)
-                    .await?
-            } else if let Some(cached) = notice_cache {
-                // Cache is fresh — use it without network calls.
-                cached
+                client.fetch_and_write_cache(&enriched, cache_path).await?
+            } else if let Some(ref cached) = notice_cache {
+                cached.clone()
             } else {
-                // No fresh cache — fetch live.
                 let client = RegistryClient::new(DEFAULT_MAX_CONCURRENT);
-                client
-                    .fetch_and_write_cache(&enriched_plugins, cache_path)
-                    .await?
+                client.fetch_and_write_cache(&enriched, cache_path).await?
             };
 
-            enriched_plugins = enrich_with_latest_versions(enriched_plugins, &cache);
-
-            let classified = classify_plugins(enriched_plugins);
+            let enriched = enrich_with_latest_versions(enriched, &cache);
+            let classified = classify_plugins(enriched);
             let has_outdated = classified
                 .iter()
                 .any(|cp| cp.status == PluginStatus::Outdated);
@@ -129,14 +130,15 @@ async fn main() -> anyhow::Result<ExitCode> {
             if cli.json {
                 output::json::print_outdated_json(&classified);
             } else if !cli.quiet {
-                // --quiet suppresses human output but exit status still reflects
-                // the outdated check.
                 output::human::print_outdated_human(&classified, cli.verbose);
             }
 
-            if has_outdated {
-                exit_code = ExitCode::from(1);
-            }
+            let code = if has_outdated {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            };
+            Ok(code)
         }
         Commands::Add {
             plugin,
@@ -144,30 +146,35 @@ async fn main() -> anyhow::Result<ExitCode> {
             global,
             yes,
             dry_run,
-        } => {
-            return handle_mutation_result(
-                commands::add::execute(plugin, *project, *global, *yes, *dry_run, cli.json),
-                cli.json,
-            );
-        }
+        } => handle_mutation_result(
+            commands::add::execute(plugin, *project, *global, *yes, *dry_run, cli.json),
+            cli.json,
+        ),
         Commands::Update {
             plugin,
             project,
             global,
             yes,
             dry_run,
+            refresh,
         } => {
-            return handle_mutation_result(
-                commands::update::execute(
-                    plugin.as_deref(),
-                    *project,
-                    *global,
-                    *yes,
-                    *dry_run,
+            match load_update_refresh_versions(plugin.as_deref(), *project, *global, *refresh)
+                .await
+            {
+                Ok(refresh_versions) => handle_mutation_result(
+                    commands::update::execute(
+                        plugin.as_deref(),
+                        *project,
+                        *global,
+                        *yes,
+                        *dry_run,
+                        cli.json,
+                        refresh_versions.as_ref(),
+                    ),
                     cli.json,
                 ),
-                cli.json,
-            );
+                Err(e) => handle_mutation_result(Err(e), cli.json),
+            }
         }
         Commands::Remove {
             plugin,
@@ -175,15 +182,87 @@ async fn main() -> anyhow::Result<ExitCode> {
             global,
             yes,
             dry_run,
-        } => {
-            return handle_mutation_result(
-                commands::remove::execute(plugin, *project, *global, *yes, *dry_run, cli.json),
-                cli.json,
-            );
+        } => handle_mutation_result(
+            commands::remove::execute(plugin, *project, *global, *yes, *dry_run, cli.json),
+            cli.json,
+        ),
+        }
+    }
+    .await;
+
+    telemetry::record_command(
+        command_label,
+        result.is_ok(),
+        start.elapsed(),
+        None,
+        notice_count,
+        None,
+        cli.json,
+        cli.quiet,
+    )
+    .await;
+
+    result
+}
+
+async fn load_update_refresh_versions(
+    plugin: Option<&str>,
+    project: bool,
+    global: bool,
+    refresh: bool,
+) -> Result<Option<HashMap<String, String>>, CliError> {
+    if !refresh {
+        return Ok(None);
+    }
+
+    let scope = resolve_write_scope(project, global)?;
+    let provider: Box<dyn ConfigProvider> = match scope {
+        ConfigScope::Project => {
+            let cwd = env::current_dir().map_err(|e| CliError::Io {
+                path: ".".to_string(),
+                source: e,
+            })?;
+            Box::new(ProjectConfigProvider::new(cwd))
+        }
+        ConfigScope::Global => Box::new(GlobalConfigProvider::new()),
+    };
+
+    let filter_pkg = plugin.map(|p| package_name_from_spec(&crate::catalog::resolve_alias(p)));
+    let mut package_names: Vec<String> = provider
+        .read_plugins()?
+        .iter()
+        .map(|entry| package_name_from_spec(&crate::catalog::resolve_alias(&entry.spec)))
+        .filter(|name| filter_pkg.as_ref().is_none_or(|filter| name == filter))
+        .collect();
+    package_names.sort();
+    package_names.dedup();
+
+    if package_names.is_empty() {
+        return Ok(Some(HashMap::new()));
+    }
+
+    let client = RegistryClient::new(DEFAULT_MAX_CONCURRENT);
+    let results = client.fetch_latest_versions(&package_names).await;
+    let mut versions = HashMap::new();
+    let mut failures = Vec::new();
+    for (pkg, result) in results {
+        match result {
+            Ok(meta) => {
+                versions.insert(pkg, meta.version);
+            }
+            Err(err) => failures.push(format!("{pkg}: {err}")),
         }
     }
 
-    Ok(exit_code)
+    if !failures.is_empty() {
+        return Err(CliError::Validation(format!(
+            "could not fetch latest version{} for: {}",
+            if failures.len() == 1 { "" } else { "s" },
+            failures.join("; ")
+        )));
+    }
+
+    Ok(Some(versions))
 }
 
 /// Execute a mutation command and handle errors according to JSON mode.

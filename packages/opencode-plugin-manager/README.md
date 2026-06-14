@@ -36,7 +36,7 @@ A lightning-fast standalone CLI for managing npm-based OpenCode plugins configur
 | `--global` | all | Scope to global config only |
 | `--dry-run` | `add`, `update`, `remove` | Preview changes without applying |
 | `-y`, `--yes` | `add`, `update`, `remove` | Skip confirmation prompt |
-| `--refresh` | `outdated` | Force refresh of cached registry data |
+| `--refresh` | `outdated`, `update` | For `outdated`, force refresh of cached registry data; for `update`, fetch npm latest and pin every managed plugin to the exact latest version |
 
 ## Usage Examples
 
@@ -68,6 +68,8 @@ oc-plugins add ram-monitor --project --yes      # Skip confirmation
 oc-plugins update --project                # Update all project plugins
 oc-plugins update ram-monitor --global     # Update specific plugin
 oc-plugins update --project --dry-run      # Preview updates
+oc-plugins update --project --refresh      # Pin all project plugins to exact latest versions
+oc-plugins update ram-monitor --global --refresh  # Pin specific plugin to exact latest
 ```
 
 ### Remove a plugin
@@ -201,6 +203,35 @@ bun --filter @capybearista/opencode-plugin-manager check && \
 bun --filter @capybearista/opencode-plugin-manager test && \
 bun --filter @capybearista/opencode-plugin-manager build
 ```
+
+## Telemetry
+
+`oc-plugins` collects minimal, privacy-light operational telemetry to help
+improve the tool. **No identity, file path, project path, location, IP-derived
+data, or machine fingerprint is collected.**
+
+### What is collected
+
+Per command: command name, success/failure, duration bucket (`fast`,
+`moderate`, `slow`, `very_slow`), and tool version.
+
+### Opt-out
+
+Telemetry is disabled automatically when any of these are set to a non-empty
+value:
+
+- `DISABLE_TELEMETRY`
+- `DO_NOT_TRACK`
+- `CI`
+
+Telemetry is also suppressed in `--json` and `--quiet` modes to preserve
+script discipline.
+
+### Endpoint
+
+Telemetry is sent via an HTTP POST with a short timeout to the URL configured
+in the `OC_PLUGINS_TELEMETRY_URL` environment variable. If this variable is
+unset or empty, no data is sent.
 
 ## License
 

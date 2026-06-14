@@ -1,5 +1,5 @@
 use crate::config::provider::ConfigScope;
-use crate::discovery::{sort_enriched_plugins, ClassifiedPlugin, EnrichedPlugin, PluginStatus};
+use crate::discovery::{ClassifiedPlugin, EnrichedPlugin, PluginStatus, sort_enriched_plugins};
 use crate::version_util::versions_equal;
 use colored::*;
 use std::fmt::Write;
@@ -287,8 +287,8 @@ mod tests {
     use super::*;
     use crate::catalog::PluginMetadata;
     use crate::config::manifest::{Engines, PackageManifest};
-    use crate::discovery::classify_plugins;
     use crate::discovery::InstallStatus;
+    use crate::discovery::classify_plugins;
     use std::path::PathBuf;
 
     /// Disable colored output so snapshot strings are deterministic regardless

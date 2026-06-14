@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UpdateNoticeCache {
     pub checked_at: u64,
     pub notices: Vec<UpdateNotice>,
@@ -43,7 +43,7 @@ impl UpdateNoticeCache {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UpdateNotice {
     pub package_name: String,
     pub latest_version: String,
