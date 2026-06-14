@@ -1,4 +1,5 @@
-//! End-to-end CLI smoke tests for the `oc-plugins` binary.
+//! End-to-end CLI smoke tests for the `ocp` binary (with `oc-plugins` as a
+//! compatibility alias).
 //!
 //! These tests invoke the compiled binary with temp config fixtures and
 //! verify JSON stdout contracts, dry-run no-write guarantees, and
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 
 /// Assert that a `Command` output is a successful exit with valid JSON on stdout.
 fn assert_ok_json(cmd: &mut Command) -> serde_json::Value {
-    let output = cmd.output().expect("execute oc-plugins");
+    let output = cmd.output().expect("execute ocp");
     assert!(
         output.status.success(),
         "expected success, got status: {}",
@@ -30,7 +31,7 @@ fn assert_ok_json(cmd: &mut Command) -> serde_json::Value {
 
 /// Assert that a `Command` output is a failure with valid JSON error on stdout.
 fn assert_err_json(cmd: &mut Command) -> serde_json::Value {
-    let output = cmd.output().expect("execute oc-plugins");
+    let output = cmd.output().expect("execute ocp");
     assert!(!output.status.success(), "expected failure, got success");
     let stdout = String::from_utf8(output.stdout).expect("stdout is not valid UTF-8");
     let parsed: serde_json::Value =
@@ -55,8 +56,16 @@ fn with_config(content: &str) -> (tempfile::TempDir, PathBuf) {
     (dir, config_path)
 }
 
-/// Build a Command for oc-plugins, rooted at the given temp directory.
-fn oc_plugins(root: &std::path::Path) -> Command {
+/// Build a Command for ocp, rooted at the given temp directory.
+fn ocp(root: &std::path::Path) -> Command {
+    let mut cmd = Command::cargo_bin("ocp").expect("find ocp binary");
+    cmd.current_dir(root);
+    cmd
+}
+
+/// Build a Command for oc-plugins (compatibility alias), rooted at the given
+/// temp directory.
+fn oc_plugins_compat(root: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("oc-plugins").expect("find oc-plugins binary");
     cmd.current_dir(root);
     cmd
@@ -71,7 +80,7 @@ fn test_json_list_empty_project() {
     let (dir, _) = with_config(r#"{"plugin": []}"#);
     let root = dir.path();
 
-    let json = assert_ok_json(oc_plugins(root).args(["--json", "list", "--project"]));
+    let json = assert_ok_json(ocp(root).args(["--json", "list", "--project"]));
     let plugins = json.get("plugins").and_then(|v| v.as_array()).unwrap();
     assert_eq!(
         plugins.len(),
@@ -86,7 +95,7 @@ fn test_json_list_with_plugins() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let json = assert_ok_json(oc_plugins(root).args(["--json", "list", "--project"]));
+    let json = assert_ok_json(ocp(root).args(["--json", "list", "--project"]));
     let plugins = json.get("plugins").and_then(|v| v.as_array()).unwrap();
     assert_eq!(plugins.len(), 2, "should list 2 plugins");
     assert_eq!(plugins[0]["requestedSpec"], "@scope/pkg@1.0.0");
@@ -102,7 +111,7 @@ fn test_json_add_dry_run_does_not_write() {
     // Capture the file content before
     let before = std::fs::read_to_string(&config_path).ok();
 
-    let json = assert_ok_json(oc_plugins(root).args([
+    let json = assert_ok_json(ocp(root).args([
         "--json",
         "add",
         "new-plugin",
@@ -128,8 +137,7 @@ fn test_json_remove_not_found_error() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let json =
-        assert_err_json(oc_plugins(root).args(["--json", "remove", "nonexistent", "--project"]));
+    let json = assert_err_json(ocp(root).args(["--json", "remove", "nonexistent", "--project"]));
     assert_eq!(json["error"], "NOT_FOUND");
 }
 
@@ -139,7 +147,7 @@ fn test_json_add_duplicate_error() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let json = assert_err_json(oc_plugins(root).args(["--json", "add", "my-plugin", "--project"]));
+    let json = assert_err_json(ocp(root).args(["--json", "add", "my-plugin", "--project"]));
     assert_eq!(json["error"], "VALIDATION_ERROR");
 }
 
@@ -150,7 +158,7 @@ fn test_json_add_real_mode_writes_file() {
     let root = dir.path();
 
     // --yes skips the interactive prompt
-    let mut cmd = oc_plugins(root);
+    let mut cmd = ocp(root);
     cmd.args(["--json", "add", "new-plugin", "--project", "--yes"]);
 
     let output = cmd.output().expect("execute oc-plugins");
@@ -189,7 +197,7 @@ fn test_quiet_list_produces_no_stdout() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["--quiet", "list", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -211,7 +219,7 @@ fn test_quiet_outdated_produces_no_stdout() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["--quiet", "outdated", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -273,7 +281,7 @@ fn test_quiet_outdated_suppresses_human_output_when_classified() {
     .expect("write notice cache");
 
     // Run --quiet outdated with XDG_CACHE_HOME pointing into our temp dir
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .env("XDG_CACHE_HOME", &xdg_cache)
         .args(["--quiet", "outdated", "--project"])
         .output()
@@ -301,7 +309,7 @@ fn test_json_list_output_is_single_json_object() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["--json", "list", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -324,7 +332,7 @@ fn test_human_list_output_has_header() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["list", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -342,7 +350,7 @@ fn test_human_list_empty_shows_no_plugins() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["list", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -360,7 +368,7 @@ fn test_json_error_shape_for_not_found() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["--json", "remove", "nonexistent", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -381,7 +389,7 @@ fn test_human_list_verbose_shows_config_path() {
     let (dir, config_path) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["--verbose", "list", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -400,7 +408,7 @@ fn test_human_list_nonverbose_hides_config_path() {
     let (dir, config_path) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["list", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -418,7 +426,7 @@ fn test_human_add_dry_run_shows_preview() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["add", "new-plugin", "--project", "--dry-run", "--yes"])
         .output()
         .expect("execute oc-plugins");
@@ -443,7 +451,7 @@ fn test_human_remove_not_found_shows_error() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["remove", "nonexistent", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -465,7 +473,7 @@ fn test_human_add_duplicate_shows_error() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["add", "my-plugin", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -487,7 +495,7 @@ fn test_json_outdated_empty_produces_valid_shape() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["--json", "outdated", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -520,7 +528,7 @@ fn test_json_takes_precedence_over_quiet_list() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["--quiet", "--json", "list", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -553,7 +561,7 @@ fn test_json_takes_precedence_over_quiet_outdated() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["--quiet", "--json", "outdated", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -586,7 +594,7 @@ fn test_json_verbose_list_produces_single_json_object() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["--json", "--verbose", "list", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -615,7 +623,7 @@ fn test_json_verbose_outdated_produces_valid_shape() {
     let (dir, _) = with_config(content);
     let root = dir.path();
 
-    let output = oc_plugins(root)
+    let output = ocp(root)
         .args(["--json", "--verbose", "outdated", "--project"])
         .output()
         .expect("execute oc-plugins");
@@ -639,5 +647,67 @@ fn test_json_verbose_outdated_produces_valid_shape() {
     assert!(
         parsed.get("unresolved").is_some(),
         "must have 'unresolved' array"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Help output tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_ocp_help_shows_ocp_usage() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = ocp(dir.path())
+        .args(["--help"])
+        .output()
+        .expect("execute ocp --help");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("valid UTF-8");
+    assert!(
+        stdout.contains("Usage: ocp"),
+        "ocp --help must show 'Usage: ocp', got: {stdout:?}"
+    );
+}
+
+#[test]
+fn test_oc_plugins_help_shows_oc_plugins_usage() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = oc_plugins_compat(dir.path())
+        .args(["--help"])
+        .output()
+        .expect("execute oc-plugins --help");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("valid UTF-8");
+    assert!(
+        stdout.contains("Usage: oc-plugins"),
+        "oc-plugins --help must show 'Usage: oc-plugins', got: {stdout:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Compatibility alias test
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_oc_plugins_compat_binary_works() {
+    // Verify that the oc-plugins binary (compatibility alias) still works
+    // for basic commands.
+    let content = r#"{"plugin": ["my-plugin"]}"#;
+    let (dir, _) = with_config(content);
+    let root = dir.path();
+
+    let output = oc_plugins_compat(root)
+        .args(["list", "--project"])
+        .output()
+        .expect("execute oc-plugins compat binary");
+    assert!(
+        output.status.success(),
+        "oc-plugins compat binary should succeed for list, got status: {}",
+        output.status
+    );
+    let stdout = String::from_utf8(output.stdout).expect("valid UTF-8");
+    assert!(
+        stdout.contains("Configured OpenCode plugins"),
+        "oc-plugins compat binary should show header"
     );
 }

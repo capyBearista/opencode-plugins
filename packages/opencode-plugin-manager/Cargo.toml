@@ -3,6 +3,14 @@ name = "oc-plugins"
 version = "1.0.0"
 edition = "2024"
 
+[[bin]]
+name = "ocp"
+path = "src/main.rs"
+
+[[bin]]
+name = "oc-plugins"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }

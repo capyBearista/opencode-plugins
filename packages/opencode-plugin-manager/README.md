@@ -1,6 +1,8 @@
-# oc-plugins
+# ocp — OpenCode Plugin Manager
 
 A lightning-fast standalone CLI for managing npm-based OpenCode plugins configured in your project or global `opencode.json(c)` files.
+
+> **CLI name:** `ocp` (primary), `oc-plugins` (compatibility alias — both binaries are installed).
 
 ## Features
 
@@ -14,11 +16,13 @@ A lightning-fast standalone CLI for managing npm-based OpenCode plugins configur
 
 | Command | Description |
 |---------|-------------|
-| `oc-plugins list` | List configured OpenCode plugins |
-| `oc-plugins outdated` | Compare configured plugins against npm latest |
-| `oc-plugins add <plugin>` | Add a plugin to config |
-| `oc-plugins update [plugin]` | Update one or all configured plugins |
-| `oc-plugins remove <plugin>` | Remove a plugin from config |
+| `ocp list` | List configured OpenCode plugins |
+| `ocp outdated` | Compare configured plugins against npm latest |
+| `ocp add <plugin>` | Add a plugin to config |
+| `ocp update [plugin]` | Update one or all configured plugins |
+| `ocp remove <plugin>` | Remove a plugin from config |
+
+> `oc-plugins` is also available as a compatibility alias. Both binaries accept identical flags and subcommands.
 
 ## Global Flags
 
@@ -42,40 +46,40 @@ A lightning-fast standalone CLI for managing npm-based OpenCode plugins configur
 
 ### List plugins
 ```bash
-oc-plugins list                    # Human-readable list
-oc-plugins list --json             # JSON output for scripting
-oc-plugins list --project          # Project plugins only
-oc-plugins list --verbose          # Show config paths and cache info
+ocp list                    # Human-readable list
+ocp list --json             # JSON output for scripting
+ocp list --project          # Project plugins only
+ocp list --verbose          # Show config paths and cache info
 ```
 
 ### Check for updates
 ```bash
-oc-plugins outdated                # Compare against npm latest
-oc-plugins outdated --refresh      # Force fresh registry check
-oc-plugins outdated --json         # Machine-readable output
+ocp outdated                # Compare against npm latest
+ocp outdated --refresh      # Force fresh registry check
+ocp outdated --json         # Machine-readable output
 ```
 
 ### Add a plugin
 ```bash
-oc-plugins add ram-monitor --project          # Add by alias to project config
-oc-plugins add @capybearista/opencode-ram-monitor --global  # Add by full name
-oc-plugins add ram-monitor --project --dry-run  # Preview without applying
-oc-plugins add ram-monitor --project --yes      # Skip confirmation
+ocp add ram-monitor --project          # Add by alias to project config
+ocp add @capybearista/opencode-ram-monitor --global  # Add by full name
+ocp add ram-monitor --project --dry-run  # Preview without applying
+ocp add ram-monitor --project --yes      # Skip confirmation
 ```
 
 ### Update plugins
 ```bash
-oc-plugins update --project                # Update all project plugins
-oc-plugins update ram-monitor --global     # Update specific plugin
-oc-plugins update --project --dry-run      # Preview updates
-oc-plugins update --project --refresh      # Pin all project plugins to exact latest versions
-oc-plugins update ram-monitor --global --refresh  # Pin specific plugin to exact latest
+ocp update --project                # Update all project plugins
+ocp update ram-monitor --global     # Update specific plugin
+ocp update --project --dry-run      # Preview updates
+ocp update --project --refresh      # Pin all project plugins to exact latest versions
+ocp update ram-monitor --global --refresh  # Pin specific plugin to exact latest
 ```
 
 ### Remove a plugin
 ```bash
-oc-plugins remove ram-monitor --project    # Remove by alias
-oc-plugins remove ram-monitor --global     # Remove from global config
+ocp remove ram-monitor --project    # Remove by alias
+ocp remove ram-monitor --global     # Remove from global config
 ```
 
 ## Output Modes
@@ -206,7 +210,7 @@ bun --filter @capybearista/opencode-plugin-manager build
 
 ## Telemetry
 
-`oc-plugins` collects minimal, privacy-light operational telemetry to help
+`ocp` collects minimal, privacy-light operational telemetry to help
 improve the tool. **No identity, file path, project path, location, IP-derived
 data, or machine fingerprint is collected.**
 

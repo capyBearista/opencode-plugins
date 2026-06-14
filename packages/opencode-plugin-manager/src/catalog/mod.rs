@@ -100,10 +100,40 @@ pub fn get_curated_metadata() -> HashMap<&'static str, PluginMetadata> {
 }
 
 pub fn resolve_alias(input: &str) -> String {
+    // Extract the base package name by stripping any @version suffix.
+    // For scoped names, the scope is part of the package name (e.g. "@scope/name").
+    // For unscoped names, split on the last @ (e.g. "alias@latest" -> "alias").
+    let (base, version_suffix) = if input.starts_with('@') {
+        // Scoped: "@scope/name@version" -> scope/name is the base
+        if let Some((scope_rest, _)) = input.split_once('/') {
+            if let Some((_, rest)) = input.split_once('/') {
+                if let Some((name, suffix)) = rest.rsplit_once('@') {
+                    (format!("{}/{}", scope_rest, name), Some(suffix))
+                } else {
+                    (input.to_string(), None)
+                }
+            } else {
+                (input.to_string(), None)
+            }
+        } else {
+            (input.to_string(), None)
+        }
+    } else {
+        // Unscoped: "alias@version" or just "alias"
+        if let Some((name, suffix)) = input.rsplit_once('@') {
+            (name.to_string(), Some(suffix))
+        } else {
+            (input.to_string(), None)
+        }
+    };
+
     let metadata = get_curated_metadata();
     for (_, meta) in metadata.iter() {
-        if meta.alias == input {
-            return meta.package_name.to_string();
+        if meta.alias == base {
+            return match version_suffix {
+                Some(suffix) => format!("{}@{}", meta.package_name, suffix),
+                None => meta.package_name.to_string(),
+            };
         }
     }
     input.to_string()
@@ -149,6 +179,40 @@ mod tests {
             "@capybearista/opencode-ram-monitor"
         );
         assert_eq!(resolve_alias(""), "");
+    }
+
+    #[test]
+    fn resolve_alias_preserves_version_suffix() {
+        assert_eq!(
+            resolve_alias("ram-monitor@latest"),
+            "@capybearista/opencode-ram-monitor@latest"
+        );
+        assert_eq!(
+            resolve_alias("ram-monitor@1.2.3"),
+            "@capybearista/opencode-ram-monitor@1.2.3"
+        );
+        assert_eq!(
+            resolve_alias("output-styles@0.1.0"),
+            "@capybearista/opencode-output-styles@0.1.0"
+        );
+        assert_eq!(
+            resolve_alias("adversarial-review@beta"),
+            "@capybearista/opencode-adversarial-review@beta"
+        );
+    }
+
+    #[test]
+    fn resolve_alias_unknown_with_version_returns_unchanged() {
+        assert_eq!(
+            resolve_alias("unknown-plugin@latest"),
+            "unknown-plugin@latest"
+        );
+        assert_eq!(resolve_alias("unknown@1.0.0"), "unknown@1.0.0");
+        // Canonical package names with versions should pass through unchanged
+        assert_eq!(
+            resolve_alias("@capybearista/opencode-ram-monitor@latest"),
+            "@capybearista/opencode-ram-monitor@latest"
+        );
     }
 
     #[test]

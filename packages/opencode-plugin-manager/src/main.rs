@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<ExitCode> {
         let outdated = cache.outdated_count();
         if should_show_startup_notice(cli.json, cli.quiet, outdated) {
             println!(
-                "Note: {} plugin update{} available. Run `oc-plugins outdated` for details.",
+                "Note: {} plugin update{} available. Run `ocp outdated` for details.",
                 outdated,
                 if outdated == 1 { "" } else { "s" },
             );
@@ -56,7 +56,7 @@ async fn main() -> anyhow::Result<ExitCode> {
             && version_is_newer(cli_latest, env!("CARGO_PKG_VERSION"))
         {
             println!(
-                "A new version of oc-plugins (v{cli_latest}) is available. \
+                "A new version of ocp (v{cli_latest}) is available. \
                  Run `npm install -g @capybearista/opencode-plugin-manager` to update."
             );
         }

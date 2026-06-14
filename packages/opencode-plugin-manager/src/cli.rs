@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "oc-plugins")]
+#[command(name = "ocp")]
 #[command(about = "CLI tool to manage OpenCode plugins and plugin versions", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]

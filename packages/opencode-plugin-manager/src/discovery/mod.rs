@@ -1,5 +1,5 @@
-use crate::catalog::{PluginMetadata, get_curated_metadata};
-use crate::config::manifest::{PackageManifest, get_installed_manifest};
+use crate::catalog::{get_curated_metadata, resolve_alias, PluginMetadata};
+use crate::config::manifest::{get_installed_manifest, PackageManifest};
 use crate::config::provider::{ConfigScope, PluginEntry};
 use crate::errors::CliError;
 use crate::registry::cache::UpdateNoticeCache;
@@ -153,7 +153,11 @@ fn scope_rank(scope: &ConfigScope) -> u8 {
 }
 
 pub fn enrich_plugin(resolved: ResolvedPlugin) -> EnrichedPlugin {
-    let package_name = extract_package_name(&resolved.entry.spec);
+    // Resolve aliases before computing package name so curated plugin aliases
+    // (e.g. "ram-monitor", "ram-monitor@latest") map to the canonical package
+    // name for catalog metadata lookup, display, and JSON output.
+    let resolved_spec = resolve_alias(&resolved.entry.spec);
+    let package_name = extract_package_name(&resolved_spec);
     let catalog_metadata = get_curated_metadata().get(package_name.as_str()).cloned();
     let manifest = resolved.manifest;
 
@@ -198,8 +202,11 @@ pub fn resolve_plugins(entries: Vec<PluginEntry>) -> Result<Vec<ResolvedPlugin>,
     let mut resolved = Vec::new();
 
     for entry in entries {
-        let package_name = extract_package_name(&entry.spec);
-        let manifest = get_installed_manifest(&entry.spec, &package_name)?;
+        // Resolve aliases before manifest lookup so that alias-configured
+        // plugins (e.g. "ram-monitor") resolve to the canonical cache path.
+        let resolved_spec = resolve_alias(&entry.spec);
+        let package_name = extract_package_name(&resolved_spec);
+        let manifest = get_installed_manifest(&resolved_spec, &package_name)?;
 
         resolved.push(ResolvedPlugin { entry, manifest });
     }
@@ -492,5 +499,55 @@ mod tests {
 
         let classified = classify_plugins(plugins);
         assert_eq!(classified[0].status, PluginStatus::Unresolved);
+    }
+
+    #[test]
+    fn enrich_plugin_resolves_alias_to_canonical_package_name() {
+        // When the configured spec is a curated alias, enrich_plugin should
+        // resolve it to the canonical package name and pick up catalog metadata.
+        let resolved = ResolvedPlugin {
+            entry: plugin_entry("ram-monitor"),
+            manifest: None,
+        };
+
+        let enriched = enrich_plugin(resolved);
+
+        assert_eq!(enriched.configured_spec, "ram-monitor");
+        assert_eq!(enriched.package_name, "@capybearista/opencode-ram-monitor");
+        assert!(enriched.catalog_metadata.is_some());
+        assert_eq!(enriched.display_name, "RAM Monitor");
+        assert_eq!(
+            enriched.description,
+            "Monitor OpenCode's RAM usage per session in real time."
+        );
+    }
+
+    #[test]
+    fn enrich_plugin_resolves_alias_with_version_suffix() {
+        let resolved = ResolvedPlugin {
+            entry: plugin_entry("ram-monitor@latest"),
+            manifest: None,
+        };
+
+        let enriched = enrich_plugin(resolved);
+
+        assert_eq!(enriched.configured_spec, "ram-monitor@latest");
+        assert_eq!(enriched.package_name, "@capybearista/opencode-ram-monitor");
+        assert!(enriched.catalog_metadata.is_some());
+        assert_eq!(enriched.display_name, "RAM Monitor");
+    }
+
+    #[test]
+    fn enrich_plugin_leaves_unknown_spec_unchanged() {
+        let resolved = ResolvedPlugin {
+            entry: plugin_entry("unknown-plugin@latest"),
+            manifest: None,
+        };
+
+        let enriched = enrich_plugin(resolved);
+
+        assert_eq!(enriched.configured_spec, "unknown-plugin@latest");
+        assert_eq!(enriched.package_name, "unknown-plugin");
+        assert!(enriched.catalog_metadata.is_none());
     }
 }
