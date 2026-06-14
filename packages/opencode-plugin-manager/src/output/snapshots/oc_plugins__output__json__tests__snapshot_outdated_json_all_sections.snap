@@ -1,0 +1,57 @@
+---
+source: src/output/json.rs
+expression: "&pretty"
+---
+{
+  "current": [
+    {
+      "configPath": "/tmp/opencode.json",
+      "declaredOpenCodeRange": null,
+      "description": "",
+      "displayName": "Beta",
+      "installStatus": "installed",
+      "installed": true,
+      "installedVersion": "2.0.0",
+      "latestDeclaredOpenCodeRange": null,
+      "latestVersion": "2.0.0",
+      "packageName": "beta",
+      "requestedSpec": "beta@latest",
+      "scope": "project",
+      "status": "current"
+    }
+  ],
+  "outdated": [
+    {
+      "configPath": "/tmp/opencode.json",
+      "declaredOpenCodeRange": null,
+      "description": "",
+      "displayName": "Alpha",
+      "installStatus": "installed",
+      "installed": true,
+      "installedVersion": "1.0.0",
+      "latestDeclaredOpenCodeRange": null,
+      "latestVersion": "2.0.0",
+      "packageName": "alpha",
+      "requestedSpec": "alpha@latest",
+      "scope": "project",
+      "status": "outdated"
+    }
+  ],
+  "unresolved": [
+    {
+      "configPath": "/tmp/opencode.json",
+      "declaredOpenCodeRange": null,
+      "description": "",
+      "displayName": "Gamma",
+      "installStatus": "missing_install",
+      "installed": false,
+      "installedVersion": null,
+      "latestDeclaredOpenCodeRange": null,
+      "latestVersion": null,
+      "packageName": "gamma",
+      "requestedSpec": "gamma@latest",
+      "scope": "project",
+      "status": "unresolved"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
-use crate::catalog::{get_curated_metadata, PluginMetadata};
-use crate::config::manifest::{get_installed_manifest, PackageManifest};
+use crate::catalog::{PluginMetadata, get_curated_metadata};
+use crate::config::manifest::{PackageManifest, get_installed_manifest};
 use crate::config::provider::{ConfigScope, PluginEntry};
 use crate::errors::CliError;
 use crate::registry::cache::UpdateNoticeCache;
@@ -14,13 +14,6 @@ pub enum InstallStatus {
 }
 
 impl InstallStatus {
-    pub fn as_human_label(&self) -> &'static str {
-        match self {
-            InstallStatus::Installed => "installed",
-            InstallStatus::MissingInstall => "missing install",
-        }
-    }
-
     pub fn as_json_label(&self) -> &'static str {
         match self {
             InstallStatus::Installed => "installed",

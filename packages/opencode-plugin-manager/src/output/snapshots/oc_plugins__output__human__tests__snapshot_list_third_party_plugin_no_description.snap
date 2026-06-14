@@ -1,0 +1,10 @@
+---
+source: src/output/human.rs
+expression: "&output"
+---
+Configured OpenCode plugins
+
+Global
+  some-third-party
+  some-third-party
+  1.0.0

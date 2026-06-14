@@ -1,0 +1,11 @@
+---
+source: src/output/human.rs
+expression: "&output"
+---
+Configured OpenCode plugins
+
+Project
+  Curated Plugin  (cp)
+  A curated plugin description
+  curated-plugin
+  1.5.0

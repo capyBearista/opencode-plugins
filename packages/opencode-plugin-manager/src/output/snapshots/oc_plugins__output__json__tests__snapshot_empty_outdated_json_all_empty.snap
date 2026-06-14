@@ -1,0 +1,9 @@
+---
+source: src/output/json.rs
+expression: "&pretty"
+---
+{
+  "current": [],
+  "outdated": [],
+  "unresolved": []
+}

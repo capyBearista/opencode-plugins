@@ -70,7 +70,10 @@ pub fn execute(
     // Group pinned by config_path (unpinned are just reported, no writes needed)
     let mut pinned_by_path: HashMap<PathBuf, Vec<&PluginToUpdate>> = HashMap::new();
     for p in &pinned {
-        pinned_by_path.entry(p.config_path.clone()).or_default().push(p);
+        pinned_by_path
+            .entry(p.config_path.clone())
+            .or_default()
+            .push(p);
     }
 
     // Collect unique config paths for display
@@ -126,7 +129,6 @@ pub fn execute(
             );
             println!();
         }
-
     }
 
     if dry_run {
@@ -454,14 +456,20 @@ mod tests {
         assert!(empty["updated"].as_array().unwrap().is_empty());
         assert!(empty["refreshReady"].as_array().unwrap().is_empty());
         // The "refreshed" field should NOT be present
-        assert!(empty.get("refreshed").is_none(), "must use refreshReady, not refreshed");
+        assert!(
+            empty.get("refreshed").is_none(),
+            "must use refreshReady, not refreshed"
+        );
     }
 
     #[test]
     fn json_empty_preview_has_refresh_ready_not_refreshed() {
         // Exercise the real builder with empty lists to verify field name.
         let preview = build_update_preview_json(&ConfigScope::Project, &[], &[], true);
-        assert!(preview.get("refreshReady").is_none(), "refreshReady should not appear when empty");
+        assert!(
+            preview.get("refreshReady").is_none(),
+            "refreshReady should not appear when empty"
+        );
         assert!(preview.get("pinned").is_some());
         assert!(preview.get("unpinned").is_some());
     }
@@ -530,11 +538,7 @@ mod tests {
         let dir = tempdir().unwrap();
         // Root-level opencode.json
         let root_config = dir.path().join("opencode.json");
-        fs::write(
-            &root_config,
-            r#"{"plugin": ["@scope/pkg@1.0.0"]}"#,
-        )
-        .unwrap();
+        fs::write(&root_config, r#"{"plugin": ["@scope/pkg@1.0.0"]}"#).unwrap();
 
         let original_cwd = std::env::current_dir().ok();
         std::env::set_current_dir(dir.path()).unwrap();
@@ -553,11 +557,7 @@ mod tests {
     fn update_preserves_config_path_when_pinned_plugin_in_root_config() {
         let dir = tempdir().unwrap();
         let root_config = dir.path().join("opencode.json");
-        fs::write(
-            &root_config,
-            r#"{"plugin": ["@scope/pkg@1.0.0"]}"#,
-        )
-        .unwrap();
+        fs::write(&root_config, r#"{"plugin": ["@scope/pkg@1.0.0"]}"#).unwrap();
 
         let original_cwd = std::env::current_dir().ok();
         std::env::set_current_dir(dir.path()).unwrap();

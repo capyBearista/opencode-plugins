@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct PluginMetadata {
     pub package_name: &'static str,
     pub alias: &'static str,
     pub display_name: &'static str,
     pub description: &'static str,
+    #[allow(dead_code)]
     pub category: &'static str,
+    #[allow(dead_code)]
     pub docs_url: Option<String>,
+    #[allow(dead_code)]
     pub homepage_url: Option<String>,
 }
 
@@ -97,7 +99,6 @@ pub fn get_curated_metadata() -> HashMap<&'static str, PluginMetadata> {
     map
 }
 
-#[allow(dead_code)]
 pub fn resolve_alias(input: &str) -> String {
     let metadata = get_curated_metadata();
     for (_, meta) in metadata.iter() {
@@ -106,4 +107,59 @@ pub fn resolve_alias(input: &str) -> String {
         }
     }
     input.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_alias_returns_canonical_name_for_known_alias() {
+        assert_eq!(
+            resolve_alias("ram-monitor"),
+            "@capybearista/opencode-ram-monitor"
+        );
+        assert_eq!(
+            resolve_alias("output-styles"),
+            "@capybearista/opencode-output-styles"
+        );
+        assert_eq!(
+            resolve_alias("agents-loader"),
+            "@capybearista/opencode-agents-loader"
+        );
+        assert_eq!(
+            resolve_alias("adversarial-review"),
+            "@capybearista/opencode-adversarial-review"
+        );
+        assert_eq!(
+            resolve_alias("agent-prompt-inheritance"),
+            "@capybearista/opencode-agent-prompt-inheritance"
+        );
+        assert_eq!(
+            resolve_alias("double-tap-timeline"),
+            "@capybearista/opencode-double-tap-timeline"
+        );
+    }
+
+    #[test]
+    fn resolve_alias_returns_input_for_unknown_alias() {
+        assert_eq!(resolve_alias("unknown-plugin"), "unknown-plugin");
+        assert_eq!(
+            resolve_alias("@capybearista/opencode-ram-monitor"),
+            "@capybearista/opencode-ram-monitor"
+        );
+        assert_eq!(resolve_alias(""), "");
+    }
+
+    #[test]
+    fn get_curated_metadata_has_expected_entries() {
+        let metadata = get_curated_metadata();
+        assert_eq!(metadata.len(), 6);
+        assert!(metadata.contains_key("@capybearista/opencode-ram-monitor"));
+        assert!(metadata.contains_key("@capybearista/opencode-output-styles"));
+        assert!(metadata.contains_key("@capybearista/opencode-agents-loader"));
+        assert!(metadata.contains_key("@capybearista/opencode-adversarial-review"));
+        assert!(metadata.contains_key("@capybearista/opencode-agent-prompt-inheritance"));
+        assert!(metadata.contains_key("@capybearista/opencode-double-tap-timeline"));
+    }
 }

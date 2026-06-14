@@ -1,0 +1,11 @@
+---
+source: src/output/human.rs
+expression: "&output"
+---
+Configured OpenCode plugins
+
+Project
+  my-plugin
+  A useful plugin
+  my-plugin
+  1.0.0   latest 2.0.0   update available

@@ -4,7 +4,7 @@ use crate::config::parser::{GlobalConfigProvider, ProjectConfigProvider};
 use crate::config::provider::{ConfigProvider, ConfigScope};
 use crate::errors::CliError;
 use crate::safety::transaction::{
-    new_config_with_plugin, patch_plugin_array, read_config, write_config, PluginArrayModification,
+    PluginArrayModification, new_config_with_plugin, patch_plugin_array, read_config, write_config,
 };
 use crate::safety::{get_write_target, package_name_from_spec, resolve_write_scope};
 use colored::*;

@@ -1,0 +1,7 @@
+---
+source: src/output/json.rs
+expression: "&pretty"
+---
+{
+  "plugins": []
+}

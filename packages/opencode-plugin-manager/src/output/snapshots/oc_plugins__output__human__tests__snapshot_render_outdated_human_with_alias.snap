@@ -1,0 +1,7 @@
+---
+source: src/output/human.rs
+assertion_line: 1126
+expression: "&output"
+---
+Outdated (1):
+  Curated Pkg  (my-alias)  v1.0.0 → v2.0.0

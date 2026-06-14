@@ -1,0 +1,12 @@
+---
+source: src/output/human.rs
+expression: "&output"
+---
+Outdated (1):
+  outdated-pkg  v1.0.0 → v2.0.0
+
+Current (1):
+  current-pkg  v2.0.0
+
+Unresolved (1):
+  missing-pkg  not installed (latest: v3.0.0)

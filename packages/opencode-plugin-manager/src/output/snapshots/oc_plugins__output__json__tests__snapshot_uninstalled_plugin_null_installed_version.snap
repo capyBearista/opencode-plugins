@@ -1,0 +1,22 @@
+---
+source: src/output/json.rs
+expression: "&pretty"
+---
+{
+  "plugins": [
+    {
+      "configPath": "/tmp/global/opencode.json",
+      "declaredOpenCodeRange": null,
+      "description": "description",
+      "displayName": "Display Name",
+      "installed": false,
+      "installedVersion": null,
+      "latestDeclaredOpenCodeRange": null,
+      "latestVersion": null,
+      "packageName": "third-party",
+      "requestedSpec": "third-party@latest",
+      "scope": "global",
+      "status": "missing_install"
+    }
+  ]
+}

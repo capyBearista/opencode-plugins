@@ -1,5 +1,5 @@
 use crate::config::provider::ConfigScope;
-use crate::discovery::{ClassifiedPlugin, EnrichedPlugin, PluginStatus, sort_enriched_plugins};
+use crate::discovery::{sort_enriched_plugins, ClassifiedPlugin, EnrichedPlugin, PluginStatus};
 use serde::Serialize;
 
 #[cfg(test)]
@@ -198,12 +198,7 @@ mod tests {
         let output = build_plugins_json(&[]);
         let value = serde_json::to_value(&output).unwrap();
         let pretty = serde_json::to_string_pretty(&value).unwrap();
-        assert_eq!(
-            pretty,
-            r#"{
-  "plugins": []
-}"#
-        );
+        insta::assert_snapshot!(&pretty);
     }
 
     #[test]
@@ -218,27 +213,7 @@ mod tests {
         let output = build_plugins_json(&plugins);
         let value = serde_json::to_value(&output).unwrap();
         let pretty = serde_json::to_string_pretty(&value).unwrap();
-        let parsed: Value = serde_json::from_str(&pretty).unwrap();
-        let p = &parsed["plugins"][0];
-        // Verify all stable field names exist and have correct types
-        assert!(p.get("requestedSpec").is_some());
-        assert!(p.get("packageName").is_some());
-        assert!(p.get("scope").is_some());
-        assert!(p.get("configPath").is_some());
-        assert!(p.get("installed").is_some());
-        assert!(p.get("installedVersion").is_some());
-        assert!(p.get("status").is_some());
-        assert!(p.get("displayName").is_some());
-        assert!(p.get("description").is_some());
-        assert!(p.get("declaredOpenCodeRange").is_some());
-        assert!(p.get("latestVersion").is_some());
-        assert!(p.get("latestDeclaredOpenCodeRange").is_some());
-        // Verify values
-        assert_eq!(p["requestedSpec"], "my-plugin@latest");
-        assert_eq!(p["packageName"], "my-plugin");
-        assert_eq!(p["scope"], "project");
-        assert_eq!(p["installed"], true);
-        assert_eq!(p["status"], "installed");
+        insta::assert_snapshot!(&pretty);
     }
 
     #[test]
@@ -252,11 +227,8 @@ mod tests {
         )];
         let output = build_plugins_json(&plugins);
         let value = serde_json::to_value(&output).unwrap();
-        let plugins_arr = value.get("plugins").and_then(Value::as_array).unwrap();
-        assert_eq!(plugins_arr.len(), 1);
-        assert_eq!(plugins_arr[0]["installed"], false);
-        assert!(plugins_arr[0]["installedVersion"].is_null());
-        assert_eq!(plugins_arr[0]["scope"], "global");
+        let pretty = serde_json::to_string_pretty(&value).unwrap();
+        insta::assert_snapshot!(&pretty);
     }
 
     #[test]
@@ -315,27 +287,8 @@ mod tests {
         let classified = classify_plugins(plugins);
         let output = build_outdated_json(&classified);
         let value = serde_json::to_value(&output).unwrap();
-
-        // Verify top-level shape
-        assert!(value.get("outdated").is_some());
-        assert!(value.get("current").is_some());
-        assert!(value.get("unresolved").is_some());
-
-        let outdated = value["outdated"].as_array().unwrap();
-        let current = value["current"].as_array().unwrap();
-        let unresolved = value["unresolved"].as_array().unwrap();
-
-        assert_eq!(outdated.len(), 1);
-        assert_eq!(outdated[0]["packageName"], "alpha");
-        assert_eq!(outdated[0]["status"], "outdated");
-
-        assert_eq!(current.len(), 1);
-        assert_eq!(current[0]["packageName"], "beta");
-        assert_eq!(current[0]["status"], "current");
-
-        assert_eq!(unresolved.len(), 1);
-        assert_eq!(unresolved[0]["packageName"], "gamma");
-        assert_eq!(unresolved[0]["status"], "unresolved");
+        let pretty = serde_json::to_string_pretty(&value).unwrap();
+        insta::assert_snapshot!(&pretty);
     }
 
     #[test]
@@ -344,14 +297,7 @@ mod tests {
         let output = build_outdated_json(&classified);
         let value = serde_json::to_value(&output).unwrap();
         let pretty = serde_json::to_string_pretty(&value).unwrap();
-        assert_eq!(
-            pretty,
-            r#"{
-  "current": [],
-  "outdated": [],
-  "unresolved": []
-}"#
-        );
+        insta::assert_snapshot!(&pretty);
     }
 
     #[test]
@@ -374,12 +320,8 @@ mod tests {
         ];
         let output = build_plugins_json(&plugins);
         let value = serde_json::to_value(&output).unwrap();
-        let plugins_arr = value["plugins"].as_array().unwrap();
-        // sort_enriched_plugins puts project first, then global; alphabetical within scope
-        assert_eq!(plugins_arr[0]["packageName"], "alpha");
-        assert_eq!(plugins_arr[0]["scope"], "project");
-        assert_eq!(plugins_arr[1]["packageName"], "zebra");
-        assert_eq!(plugins_arr[1]["scope"], "global");
+        let pretty = serde_json::to_string_pretty(&value).unwrap();
+        insta::assert_snapshot!(&pretty);
     }
 }
 

@@ -70,7 +70,28 @@ async fn main() -> anyhow::Result<ExitCode> {
             if cli.json {
                 output::json::print_plugins_json(&enriched_plugins);
             } else if !cli.quiet {
-                output::human::print_plugins(&enriched_plugins);
+                if cli.verbose {
+                    if let Some(cache) = notice_cache.as_ref() {
+                        let age_secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs()
+                            .saturating_sub(cache.checked_at);
+                        if age_secs < 3600 {
+                            println!("(cache: fresh, {}m old)", age_secs / 60);
+                        } else if age_secs < 86400 {
+                            println!("(cache: {}h old)", age_secs / 3600);
+                        } else {
+                            println!(
+                                "(cache: stale, {}d old — run `outdated --refresh` to populate)",
+                                age_secs / 86400
+                            );
+                        }
+                    } else {
+                        println!("(no cache — run `outdated --refresh` to populate)");
+                    }
+                }
+                output::human::print_plugins(&enriched_plugins, cli.verbose);
             }
         }
         Commands::Outdated {
@@ -110,7 +131,7 @@ async fn main() -> anyhow::Result<ExitCode> {
             } else if !cli.quiet {
                 // --quiet suppresses human output but exit status still reflects
                 // the outdated check.
-                output::human::print_outdated_human(&classified);
+                output::human::print_outdated_human(&classified, cli.verbose);
             }
 
             if has_outdated {
@@ -177,8 +198,9 @@ fn handle_mutation_result(
         Ok(code) => Ok(code),
         Err(e) => {
             if json {
-                let error_json = serde_json::to_string_pretty(&e.to_json())
-                    .unwrap_or_else(|_| r#"{"error":"INTERNAL_ERROR","message":"serialization failed"}"#.to_string());
+                let error_json = serde_json::to_string_pretty(&e.to_json()).unwrap_or_else(|_| {
+                    r#"{"error":"INTERNAL_ERROR","message":"serialization failed"}"#.to_string()
+                });
                 println!("{error_json}");
                 Ok(ExitCode::FAILURE)
             } else {

@@ -2,7 +2,6 @@ use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-#[allow(dead_code)]
 pub enum CliError {
     #[error("Configuration error: {0}")]
     Config(String),

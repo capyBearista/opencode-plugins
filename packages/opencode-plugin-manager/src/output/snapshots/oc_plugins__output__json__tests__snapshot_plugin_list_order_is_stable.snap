@@ -1,0 +1,36 @@
+---
+source: src/output/json.rs
+expression: "&pretty"
+---
+{
+  "plugins": [
+    {
+      "configPath": "/tmp/opencode.json",
+      "declaredOpenCodeRange": ">=1.15.3",
+      "description": "description",
+      "displayName": "Display Name",
+      "installed": true,
+      "installedVersion": "1.2.3",
+      "latestDeclaredOpenCodeRange": null,
+      "latestVersion": null,
+      "packageName": "alpha",
+      "requestedSpec": "alpha@latest",
+      "scope": "project",
+      "status": "installed"
+    },
+    {
+      "configPath": "/tmp/global/opencode.json",
+      "declaredOpenCodeRange": ">=1.15.3",
+      "description": "description",
+      "displayName": "Display Name",
+      "installed": true,
+      "installedVersion": "1.2.3",
+      "latestDeclaredOpenCodeRange": null,
+      "latestVersion": null,
+      "packageName": "zebra",
+      "requestedSpec": "zebra@latest",
+      "scope": "global",
+      "status": "installed"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+---
+source: src/output/human.rs
+expression: "&output"
+---
+Configured OpenCode plugins
+
+Project
+  RAM Monitor  (ram-monitor)
+  Monitor OpenCode's RAM usage per session in real time.
+  @capybearista/opencode-ram-monitor
+  0.2.1   latest 0.3.0   update available

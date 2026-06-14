@@ -1,0 +1,11 @@
+---
+source: src/output/human.rs
+expression: "&output"
+---
+Configured OpenCode plugins
+
+Project
+  Output Styles  (output-styles)
+  Persist reusable response styles for OpenCode sessions.
+  @capybearista/opencode-output-styles
+  0.1.4   latest 0.1.4   current

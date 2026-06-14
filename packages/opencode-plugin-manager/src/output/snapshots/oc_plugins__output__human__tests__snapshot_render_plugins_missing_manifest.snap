@@ -1,0 +1,10 @@
+---
+source: src/output/human.rs
+expression: "&output"
+---
+Configured OpenCode plugins
+
+Project
+  broken-plugin
+  broken-plugin
+  —   latest 2.0.0   not installed
