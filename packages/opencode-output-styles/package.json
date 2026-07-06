@@ -34,9 +34,9 @@
     "yaml": "^2.9.0"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3"
+    "@opencode-ai/plugin": ">=1.17.13"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3"
+    "@opencode-ai/plugin": ">=1.17.13"
   }
 }
