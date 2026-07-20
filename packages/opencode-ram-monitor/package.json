@@ -42,17 +42,17 @@
     "tui"
   ],
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3",
-    "@opentui/solid": ">=0.2.12",
-    "solid-js": ">=1.9.13"
+    "@opencode-ai/plugin": ">=1.18.3",
+    "@opentui/solid": ">=0.4.5",
+    "solid-js": ">=1.9.14"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3",
+    "@opencode-ai/plugin": ">=1.18.3",
     "@opentui/core": ">=0.1.103",
-    "@opentui/solid": ">=0.2.12",
+    "@opentui/solid": ">=0.4.5",
     "@types/bun": "latest",
     "@types/node": "^25.8.0",
-    "solid-js": ">=1.9.13",
+    "solid-js": ">=1.9.14",
     "typescript": "^5.8.0"
   }
 }

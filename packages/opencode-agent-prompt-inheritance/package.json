@@ -31,9 +31,9 @@
     "sync:prompts": "bun scripts/sync-upstream-prompts.ts"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3"
+    "@opencode-ai/plugin": ">=1.18.3"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3"
+    "@opencode-ai/plugin": ">=1.18.3"
   }
 }
