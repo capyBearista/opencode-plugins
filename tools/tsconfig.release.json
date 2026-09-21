@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "types": ["bun", "node"]
+  },
+  "include": ["release-channel-guard.ts", "release-channel-guard.test.ts", "release-channels.json"]
+}

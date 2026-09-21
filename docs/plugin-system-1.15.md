@@ -1,5 +1,7 @@
 # OpenCode 1.15.x Plugin System Architecture
 
+> Scoped snapshot: this guide covers the OpenCode 1.15.x Effect-native internals. It is historical reference, not install or compatibility advice. See [README.md](./README.md) for the doc map and [v1-plugins.md](./v1-plugins.md) for V1 install and compatibility.
+
 **Target Audience:** Internal Team & External Contributors
 
 The OpenCode 1.15.x release line introduces a massive architectural shift in how the plugin and extension system operates internally. While the external `@opencode-ai/plugin` SDK interface remains largely stable, the internal plumbing has been completely overhauled to embrace a pure **Effect-native architecture**.

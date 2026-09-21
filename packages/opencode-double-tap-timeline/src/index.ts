@@ -1,59 +1,42 @@
-import type { TuiPlugin, TuiPluginModule } from "@opencode-ai/plugin/tui";
+import { Plugin } from "@opencode/plugin/tui";
 import { useKeyboard } from "@opentui/solid";
+import { onCleanup } from "solid-js";
+import { createEscapeDetector } from "./escape-detector.js";
 
-const DOUBLE_PRESS_TIMEOUT_MS = 800;
+const plugin = Plugin.define({
+  id: "capybearista.opencode-double-tap-timeline",
+  setup(context) {
+    const activeDetectors = new Set<ReturnType<typeof createEscapeDetector>>();
+    let disposed = false;
+    const unregister = context.ui.slot({
+      append: "app",
+      render() {
+        if (disposed) return null;
 
-export const tui: TuiPlugin = async (api) => {
-  let lastEscPress = 0;
-  let pendingDoubleTap = false;
-  let doubleTapTimeout: ReturnType<typeof setTimeout> | undefined;
-
-  api.lifecycle.onDispose(() => {
-    if (doubleTapTimeout) clearTimeout(doubleTapTimeout);
-  });
-
-  api.slots.register({
-    slots: {
-      app() {
-        useKeyboard((evt) => {
-          if (evt.name !== "escape") return;
-
-          const now = Date.now();
-          const timeSinceLastPress = now - lastEscPress;
-
-          if (timeSinceLastPress <= DOUBLE_PRESS_TIMEOUT_MS && pendingDoubleTap) {
-            pendingDoubleTap = false;
-            clearTimeout(doubleTapTimeout);
-            lastEscPress = 0;
-
-            if (api.ui.dialog.open) return;
-            if (api.route.current.name !== "session") return;
-
-            const sessionID = api.route.current.params?.sessionID as string | undefined;
-            if (!sessionID) return;
-
-            (api as any).keymap.dispatchCommand("session.timeline");
-            return;
-          }
-
-          pendingDoubleTap = true;
-          lastEscPress = now;
-
-          if (doubleTapTimeout) clearTimeout(doubleTapTimeout);
-          doubleTapTimeout = setTimeout(() => {
-            pendingDoubleTap = false;
-          }, DOUBLE_PRESS_TIMEOUT_MS);
+        const detector = createEscapeDetector({
+          isModal: () => context.keymap.mode.current() === "modal",
+          currentRoute: () => context.ui.router.current(),
+          dispatchTimeline: () => context.keymap.dispatch("session.timeline"),
         });
 
+        activeDetectors.add(detector);
+        useKeyboard(detector.handle);
+        onCleanup(() => {
+          detector.dispose();
+          activeDetectors.delete(detector);
+        });
         return null;
       },
-    },
-  });
-};
+    });
 
-const plugin: TuiPluginModule & { id: string } = {
-  id: "capybearista.opencode-double-tap-timeline",
-  tui,
-};
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      for (const detector of activeDetectors) detector.dispose();
+      activeDetectors.clear();
+      unregister();
+    };
+  },
+});
 
 export default plugin;

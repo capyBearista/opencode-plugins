@@ -12,6 +12,8 @@
 - [ ] opencode-double-tap-timeline
 - [ ] opencode-output-styles
 - [ ] opencode-ram-monitor
+- [ ] opencode-agent-prompt-inheritance
+- [ ] opencode-adversarial-review
 - [ ] opencode-plugins (this monorepo itself)
 - [ ] Other: _______
 

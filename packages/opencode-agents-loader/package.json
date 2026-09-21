@@ -1,7 +1,7 @@
 {
   "name": "@capybearista/opencode-agents-loader",
-  "version": "1.0.0",
-  "description": "OpenCode plugin that extends command and agent discovery to ~/.agents/ and .agents/ directories",
+  "version": "2.0.0",
+  "description": "OpenCode V2 plugin that extends command and agent discovery to ~/.agents/ and .agents/ directories",
   "author": "capyBearista <capybearista@github.com>",
   "repository": {
     "type": "git",
@@ -19,7 +19,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "server.js"
   ],
   "scripts": {
     "build": "tsc",
@@ -33,9 +34,9 @@
     "gray-matter": "^4.0.3"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3"
+    "@opencode/plugin": "2.0.2"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3"
+    "@opencode/plugin": "2.0.2"
   }
 }
