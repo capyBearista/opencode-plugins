@@ -1,5 +1,7 @@
 # OpenCode 1.15.x Plugin Migration Guide
 
+> Scoped snapshot: this guide covers the OpenCode 1.15.x Effect-native migration. It is historical reference, not install or compatibility advice. See [README.md](./README.md) for the doc map and [v1-plugins.md](./v1-plugins.md) for V1 install and compatibility.
+
 **Target Audience:** Internal Team & External Contributors
 
 This guide details the necessary steps to migrate legacy OpenCode plugins to the new 1.15.x Effect-native architecture.

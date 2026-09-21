@@ -6,4 +6,4 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 *.toml text eol=lf
-bun.lockb binary
+bun.lock text

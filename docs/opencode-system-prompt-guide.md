@@ -1,5 +1,7 @@
 # OpenCode System Prompt Architecture Guide
 
+> V1 reference: this guide describes how OpenCode V1 assembles its system prompt and where the `experimental.chat.system.transform` hook fits. A custom prompt replacing the base template is the behavior the prompt-inheritance plugin builds on, not a defect. V2 prompt inheritance is discontinued. See [README.md](./README.md) for the doc map and [v1-plugins.md](./v1-plugins.md) for V1 install and compatibility.
+
 This guide provides a detailed technical overview of how OpenCode constructs and manages its system prompts. It is intended for plugin contributors who need to understand the underlying mechanisms for prompt manipulation.
 
 ## 1. The Prompt Assembly Pipeline
