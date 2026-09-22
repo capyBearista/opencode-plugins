@@ -11,10 +11,9 @@
 
 ## Release status
 
-This README describes the V2 release candidate. Its planned package release is **2.0.0**;
-it has not been published. The existing V1 `latest` release is **1.0.1** and is frozen. The
-`@opencode/plugin` **2.0.0** dependency is the V2 host API version, not proof that this package's
-planned release is already on npm.
+Version **2.0.0** is published on the **`opencode2`** channel for OpenCode V2.
+The V1 `latest` release remains frozen at **1.0.1**. The `@opencode/plugin` **2.0.0**
+dependency identifies the SDK version, independently of this plugin's package version.
 
 See the [V1 plugin guide](../../docs/v1-plugins.md) for the frozen V1 setup and the
 [documentation index](../../docs/README.md) for repository-wide scope notes.
@@ -52,9 +51,9 @@ src/index.ts
 
 ## Install
 
-The V2 registry release is not available yet. `@latest` currently identifies the V1 line, and
-`@v2` is a semver range rather than a channel. The local recipe below is for an isolated V2
-profile only.
+Use `@opencode2` or the exact `@2.0.0` version for V2. `@latest` identifies the frozen V1
+line, and `@v2` is a semver range rather than a channel. The local recipe below is for
+development in an isolated V2 profile.
 
 ### Local V2 directory
 
@@ -79,10 +78,10 @@ server profile, while this package intentionally has no server entrypoint. The n
 resolves to `dist/index.js`; it does not replace the root `tui.js` wrapper for local directory
 resolution.
 
-### Registry release, after publication
+### Registry installation
 
-After the planned `2.0.0` release is published, the V2 TUI profile
-`~/.config/opencode/cli.json` may contain the timeline under the plural `plugins` key:
+The V2 TUI profile `~/.config/opencode/cli.json` may contain the timeline under the
+plural `plugins` key:
 
 ```json
 {

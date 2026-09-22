@@ -2,14 +2,14 @@
 
 For anyone running these plugins on an OpenCode V1 host.
 
-The package READMEs for `opencode-agents-loader` and `opencode-double-tap-timeline` describe the V2 implementation. Their V2 releases are not published yet. This guide retains the setup instructions for the frozen V1 versions.
+The package READMEs for `opencode-agents-loader` and `opencode-double-tap-timeline` describe their published V2 releases. This guide retains setup instructions for the frozen V1 versions.
 
 ## Status
 
 | Package | V1 version shown here | Release policy |
 | --- | --- | --- |
-| `opencode-agents-loader` | 1.0.0, frozen | V2 port in preparation, unpublished. No further 1.x from this line. |
-| `opencode-double-tap-timeline` | 1.0.1, frozen | V2 port in preparation, unpublished. No further 1.x from this line. |
+| `opencode-agents-loader` | 1.0.0, frozen | V2 2.0.0 uses `opencode2`. No further 1.x from this line. |
+| `opencode-double-tap-timeline` | 1.0.1, frozen | V2 2.0.0 uses `opencode2`. No further 1.x from this line. |
 | `opencode-adversarial-review` | 1.0.0 | Active V1 releases use `latest`. |
 | `opencode-agent-prompt-inheritance` | 1.0.0 | Active V1 releases use `latest`; upstream prompt sync remains enabled. No V2 port. |
 | `opencode-output-styles` | 1.0.1 | Active V1 releases use `latest`. |
@@ -47,6 +47,6 @@ Restarting OpenCode does not fetch a newer release for an already cached target.
 
 ## V2 boundary
 
-The two V2 ports use the plural `"plugins"` key: loader belongs in server `opencode.json`, while timeline belongs in TUI `cli.json`. Local directory loading uses `server.js` and `tui.js`, respectively. Both planned `2.0.0` releases will use the `opencode2` tag; neither V2 release nor that channel is published yet.
+The two V2 ports use the plural `"plugins"` key: loader belongs in server `opencode.json`, while timeline belongs in TUI `cli.json`. Local directory loading uses `server.js` and `tui.js`, respectively. Both `2.0.0` releases are published under the `opencode2` tag.
 
 Keep the lines apart: V1 and V2 may share a default configuration directory, and these plugin releases do not migrate it for you. Use separate profiles for side-by-side testing. V2 provides explicit plugin `check` and `update` actions; a restart alone does not upgrade a cached target, and exact pins stay fixed.
