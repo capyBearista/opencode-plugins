@@ -55,9 +55,8 @@ Zero-dependency RAM monitoring for OpenCode sessions. Shows live session memory 
 
 ## Compatibility and release status
 
-This checkout prepares exactly two V2 package releases: `opencode-agents-loader` and
-`opencode-double-tap-timeline`. Their planned V2 package version is **2.0.0**; neither V2
-package has been published yet. After publication, the V2 channel is **`opencode2`**. Do not
+The OpenCode V2 releases of `opencode-agents-loader` and `opencode-double-tap-timeline`
+are available as **2.0.0** on the **`opencode2`** channel. Do not
 use `@v2`: npm parses that literal as a semver range, not as the intended channel.
 
 The V1 lines remain separate. The V1 `latest` tag is frozen at `1.0.0` for the loader and
@@ -68,8 +67,8 @@ The V1 lines remain separate. The V1 `latest` tag is frozen at `1.0.0` for the l
 | --- | --- | --- |
 | `opencode-adversarial-review` | V1 `1.0.0`; server `opencode.json`, singular `plugin` | V1 only |
 | `opencode-agent-prompt-inheritance` | V1 `1.0.0`; server `opencode.json`, singular `plugin` | V2 port discontinued |
-| `opencode-agents-loader` | V1 `1.0.0`, frozen; server `opencode.json`, singular `plugin` | Planned `2.0.0`, unpublished; server `opencode.json`, plural `plugins`, channel `opencode2` after publication |
-| `opencode-double-tap-timeline` | V1 `1.0.1`, frozen; TUI `tui.json`, singular `plugin` | Planned `2.0.0`, unpublished; TUI `cli.json`, plural `plugins`, channel `opencode2` after publication |
+| `opencode-agents-loader` | V1 `1.0.0`, frozen; server `opencode.json`, singular `plugin` | `2.0.0`; server `opencode.json`, plural `plugins`, channel `opencode2` |
+| `opencode-double-tap-timeline` | V1 `1.0.1`, frozen; TUI `tui.json`, singular `plugin` | `2.0.0`; TUI `cli.json`, plural `plugins`, channel `opencode2` |
 | `opencode-output-styles` | V1 `1.0.1`; server `opencode.json`, singular `plugin` | V1 only |
 | `opencode-ram-monitor` | V1 `1.1.0`; server and TUI (`opencode.json` and `tui.json`), singular `plugin` | V1 only |
 
@@ -111,11 +110,10 @@ For V1 TUI plugins, use `tui.json` or `tui.jsonc` and the same singular key:
 }
 ```
 
-### V2 release, after publication
+### V2 releases
 
-The following examples are future instructions only. They do not install anything today because
-the two `2.0.0` packages and the `opencode2` tag are not published yet. V2 uses plural
-`"plugins"` and separates server and TUI configuration.
+V2 uses plural `"plugins"` and separates server and TUI configuration. Use the `opencode2`
+channel or pin `2.0.0` explicitly; `latest` remains on the frozen V1 versions.
 
 V2 server profile, `~/.config/opencode/opencode.json`, contains the loader only:
 

@@ -11,10 +11,8 @@
 
 ## Release status
 
-This README describes the V2 release candidate. Its planned package release is **2.0.0**;
-it has not been published. The existing V1 `latest` release is **1.0.0** and is frozen. Do not
-install this V2 candidate in a V1 host, and do not treat the existing V1 package version as a V2
-release indicator.
+Version **2.0.0** is published on the **`opencode2`** channel for OpenCode V2.
+The V1 `latest` release remains frozen at **1.0.0**. Do not install the V2 package in a V1 host.
 
 See the [V1 plugin guide](../../docs/v1-plugins.md) for the frozen V1 setup and the
 [documentation index](../../docs/README.md) for repository-wide scope notes.
@@ -22,7 +20,7 @@ See the [V1 plugin guide](../../docs/v1-plugins.md) for the frozen V1 setup and 
 ## V2-only
 
 This package targets the V2 Promise plugin API (`@opencode/plugin` **2.0.2**). That is the host API
-dependency, not a claim about this package's unpublished release version. It exports a default
+dependency, separate from this plugin's package version. It exports a default
 `Plugin.define({ id, setup })` definition and is not compatible with the V1 `server`/`config` hook
 shape. Install it in an OpenCode V2 host; use the frozen V1 package for a V1 host.
 
@@ -71,9 +69,9 @@ agent-source.ts
 
 ## Install
 
-The V2 registry release is not available yet. `@latest` currently identifies the V1 line, and
-`@v2` is a semver range rather than a channel. The local recipe below is for an isolated V2
-profile only.
+Use `@opencode2` or the exact `@2.0.0` version for V2. `@latest` identifies the frozen V1
+line, and `@v2` is a semver range rather than a channel. The local recipe below is for
+development in an isolated V2 profile.
 
 ### Local V2 directory
 
@@ -97,10 +95,10 @@ from `dist/index.js`. Because the wrapper imports that built file, a build is re
 filesystem-local package root. Do not configure `server.js` or `dist/index.js` directly; use the
 directory so the host can apply its local-entrypoint rules.
 
-### Registry release, after publication
+### Registry installation
 
-After the planned `2.0.0` release is published, the V2 server profile
-`~/.config/opencode/opencode.json` may contain the loader under the plural `plugins` key:
+The V2 server profile `~/.config/opencode/opencode.json` may contain the loader under
+the plural `plugins` key:
 
 ```json
 {
@@ -121,7 +119,7 @@ opencode2 plugin check
 configured target as its argument to update that package; omitting the target updates all configured
 mutable targets. Restarting the host does not upgrade a package, and exact pins remain fixed.
 The `opencode2` tag identifies OpenCode 2 compatibility, not the plugin's package major: later
-package majors can use the same channel. The channel is not published yet.
+package majors can use the same channel.
 
 Keep this V2 profile separate from V1 configuration. Both hosts may use the default
 `~/.config/opencode/` directory. `OPENCODE_CONFIG_DIR` selects a separate configuration root;
