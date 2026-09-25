@@ -1,186 +1,494 @@
-import type { Plugin } from "@opencode-ai/plugin";
+import { Plugin } from "@opencode/plugin";
+import type { Context as PluginContext } from "@opencode/plugin/promise/plugin";
+import { collectGitContext } from "./git-context.js";
+import { buildReviewMessage, REVIEWER_SYSTEM_PROMPT } from "./prompt.js";
+import reviewOutputSchema from "./schemas/review-output.schema.json" with { type: "json" };
 
 const PLUGIN_ID = "capybearista.opencode-adversarial-review";
+const REVIEWER_AGENT_ID = "adversarial-reviewer";
+const COMMAND_NAME = "adversarial-review";
+const REVIEW_TEMPERATURE = 0.1;
+const REVIEW_SESSION_TITLE = "Adversarial review";
+const SYNTHETIC_DESCRIPTION = "Adversarial review";
+const REVIEWER_DESCRIPTION =
+  "Do not invoke adversarial-reviewer directly. Run /adversarial-review instead; it is the only supported path and supplies a fresh review session with collected Git context.";
+// Hex is required; plugin-defined agents do not resolve theme color names.
+const REVIEWER_COLOR = "#f59e0b";
+const COMMAND_DESCRIPTION =
+  "Run an adversarial code review that challenges the implementation. Args: [--base <ref>] [--scope auto|working-tree|branch] [focus ...]";
+const REVIEW_OUTPUT_SCHEMA: unknown = reviewOutputSchema;
 
-const ADVERSARIAL_REVIEW_PROMPT = `<role>
-You are an adversarial code review agent.
-Your job is to break confidence in the change, not to validate it.
-</role>
+type PermissionEffect = "allow" | "deny" | "ask";
+type PermissionRule = { action: string; resource: string; effect: PermissionEffect };
+type AgentEditor = Parameters<Parameters<PluginContext["agent"]["transform"]>[0]>[0];
+type AgentInfo = NonNullable<ReturnType<AgentEditor["get"]>>;
+type SessionContextMessage = Awaited<ReturnType<PluginContext["session"]["context"]>>[number];
+type ReviewModel = { providerID: string; id: string; variant?: string };
+type ReviewFailureCode = "empty-output" | "invalid-json" | "schema-violation" | "session-failed";
 
-<task>
-Review the provided repository context as if you are trying to find the strongest reasons this change should not ship yet.
-The user's focus and target arguments are in the message below.
+// Ordered for the host's last-match-wins evaluation: defaults denied first,
+// read-only allows next, and the sensitive-read denies after the read allow.
+const REVIEWER_PERMISSIONS: readonly PermissionRule[] = [
+  { action: "*", resource: "*", effect: "deny" },
+  { action: "subagent", resource: "*", effect: "deny" },
+  { action: "edit", resource: "*", effect: "deny" },
+  { action: "write", resource: "*", effect: "deny" },
+  { action: "patch", resource: "*", effect: "deny" },
+  { action: "webfetch", resource: "*", effect: "deny" },
+  { action: "websearch", resource: "*", effect: "deny" },
+  { action: "question", resource: "*", effect: "deny" },
+  { action: "external_directory", resource: "*", effect: "deny" },
+  { action: "shell", resource: "*", effect: "deny" },
+  { action: "read", resource: "*", effect: "allow" },
+  { action: "glob", resource: "*", effect: "allow" },
+  { action: "grep", resource: "*", effect: "allow" },
+  { action: "shell", resource: "git blame*", effect: "allow" },
+  { action: "shell", resource: "git branch", effect: "allow" },
+  { action: "shell", resource: "git diff*", effect: "allow" },
+  { action: "shell", resource: "git log*", effect: "allow" },
+  { action: "shell", resource: "git ls-files*", effect: "allow" },
+  { action: "shell", resource: "git merge-base*", effect: "allow" },
+  { action: "shell", resource: "git rev-list*", effect: "allow" },
+  { action: "shell", resource: "git rev-parse*", effect: "allow" },
+  { action: "shell", resource: "git show*", effect: "allow" },
+  { action: "shell", resource: "git stash list*", effect: "allow" },
+  { action: "shell", resource: "git stash show*", effect: "allow" },
+  { action: "shell", resource: "git status*", effect: "allow" },
+  { action: "read", resource: "*.env", effect: "deny" },
+  { action: "read", resource: "*.env.*", effect: "deny" },
+  { action: "read", resource: "*.env.example", effect: "allow" },
+];
 
-If the arguments include \`--scope auto\`, review using the broadest context the provided information supports (default).
-If \`--scope working-tree\`, review staged and unstaged changes against HEAD.
-If \`--scope branch\`, collect the diff for all changes on the current branch. Determine the fork point by running \`git merge-base HEAD <upstream>\` where \`<upstream>\` is the tracking branch of HEAD, or \`origin/main\`, or \`main\` (in order of preference). Then run \`git diff <fork>...HEAD\`.
-If \`--base <ref>\` is provided without \`--scope\`, treat it as \`--scope branch --base <ref>\`.
-If \`--base <ref>\` is provided alongside \`--scope branch\`, use that ref as the base in \`git diff <ref>...HEAD\`.
-</task>
-
-<operating_stance>
-Default to skepticism.
-Assume the change can fail in subtle, high-cost, or user-visible ways until the evidence says otherwise.
-Do not give credit for good intent, partial fixes, or likely follow-up work.
-If something only works on the happy path, treat that as a real weakness.
-</operating_stance>
-
-<attack_surface>
-Prioritize the kinds of failures that are expensive, dangerous, or hard to detect:
-- auth, permissions, tenant isolation, and trust boundaries
-- data loss, corruption, duplication, and irreversible state changes
-- rollback safety, retries, partial failure, and idempotency gaps
-- race conditions, ordering assumptions, stale state, and re-entrancy
-- empty-state, null, timeout, and degraded dependency behavior
-- version skew, schema drift, migration hazards, and compatibility regressions
-- observability gaps that would hide failure or make recovery harder
-</attack_surface>
-
-<review_method>
-Actively try to disprove the change.
-Look for violated invariants, missing guards, unhandled failure paths, and assumptions that stop being true under stress.
-Trace how bad inputs, retries, concurrent actions, or partially completed operations move through the code.
-If the user supplied a focus area, weight it heavily, but still report any other material issue you can defend.
-If the diff context is limited (only stat, no full diff), use the available tools (read, grep, glob) to inspect specific files before finalizing.
-</review_method>
-
-<context_type>
-The diff context either contains a full inline diff (for changes to 1-2 files) or a summary stat only (for larger changes). If you see a stat-only section without a full inline diff, use your tools to inspect the changed files directly. If you see a full inline diff, use it as primary evidence and supplement with tools as needed.
-</context_type>
-
-<finding_bar>
-Report only material findings.
-Do not include style feedback, naming feedback, low-value cleanup, or speculative concerns without evidence.
-A finding should answer:
-1. What can go wrong?
-2. Why is this code path vulnerable?
-3. What is the likely impact?
-4. What concrete change would reduce the risk?
-</finding_bar>
-
-<structured_output_contract>
-Output valid JSON matching this schema:
-
-{
-  "verdict": "approve" | "needs-attention",
-  "summary": "terse ship/no-ship assessment",
-  "findings": [
-    {
-      "severity": "critical" | "high" | "medium" | "low",
-      "title": "short finding title",
-      "body": "detailed explanation",
-      "file": "relative file path",
-      "line_start": 1,
-      "line_end": 1,
-      "confidence": 0.0-1.0,
-      "recommendation": "concrete fix suggestion"
-    }
-  ],
-  "next_steps": ["actionable next step"]
+function hasRule(rules: readonly PermissionRule[], rule: PermissionRule): boolean {
+  return rules.some(
+    (existing) =>
+      existing.action === rule.action &&
+      existing.resource === rule.resource &&
+      existing.effect === rule.effect,
+  );
 }
 
-Use \`needs-attention\` if there is any material risk worth blocking on.
-Use \`approve\` only if you cannot support any substantive adversarial finding from the provided context.
-Keep the output compact and specific.
-</structured_output_contract>
+// Rules are merged additively: host-defined rules are preserved, exact duplicates
+// are skipped, and conflicting entries keep the host's evaluation precedence
+// instead of being rewritten by the plugin.
+function applyRules(agent: AgentInfo, rules: readonly PermissionRule[]): void {
+  for (const rule of rules) {
+    if (!hasRule(agent.permissions, rule)) agent.permissions.push(rule);
+  }
+}
 
-<grounding_rules>
-Be aggressive, but stay grounded.
-Every finding must be defensible from the provided repository context or tool outputs.
-Do not invent files, lines, code paths, incidents, attack chains, or runtime behavior you cannot support.
-If a conclusion depends on an inference, state that explicitly in the finding body and keep the confidence honest.
-</grounding_rules>
+function configureReviewerAgent(editor: AgentEditor): void {
+  const existing = editor.get(REVIEWER_AGENT_ID);
+  editor.update(REVIEWER_AGENT_ID, (agent) => {
+    agent.mode = "subagent";
+    agent.hidden = true;
+    agent.description = REVIEWER_DESCRIPTION;
+    agent.system = existing?.system ?? REVIEWER_SYSTEM_PROMPT;
+    agent.color = existing?.color ?? REVIEWER_COLOR;
+    // The reviewer runs unattended, so inherited ask rules are dropped instead of
+    // stalling on a user prompt; the explicit rules below keep it sandboxed.
+    const inherited = Array.isArray(agent.permissions) ? agent.permissions : [];
+    agent.permissions = inherited.filter((rule) => rule.effect !== "ask");
+    applyRules(agent, REVIEWER_PERMISSIONS);
+  });
+}
 
-<calibration_rules>
-Prefer one strong finding over several weak ones.
-Do not dilute serious issues with filler.
-If the change looks safe, say so directly and return no findings.
-</calibration_rules>
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
-<final_check>
-Before finalizing, check that each finding is:
-- adversarial rather than stylistic
-- tied to a concrete code location
-- plausible under a real failure scenario
-- actionable for an engineer fixing the issue
-</final_check>`;
+type HostLogSink = (input: { service: string; level: "error"; message: string }) => unknown;
 
-const COMMAND_TEMPLATE = `## Adversarial Review
-
-Arguments: $ARGUMENTS
-Target: code changes
-
-## Git Context
-
-!\`printf "=== Branch ===\\n" && git branch --show-current\`
-!\`printf "=== Status ===\\n" && git status --short --untracked-files=all\`
-!\`printf "=== Recent Commits ===\\n" && git log --oneline -3\`
-!\`printf "=== Changed Files ===\\n" && git diff HEAD --name-only\`
-!\`printf "=== Untracked File Contents ===\\n"; git -c core.quotepath=false ls-files --others --exclude-standard | head -5 | while IFS= read -r f; do printf "--- %s ---\\n" "$f" && cat -- "$f" 2>/dev/null | head -c 16384 && printf "\\n"; done\`
-!\`FILES=\$(git diff HEAD --name-only | wc -l | tr -d ' '); if [ "\$FILES" -gt 0 ] && [ "\$FILES" -le 5 ]; then printf "=== Full Diff ===\\n" && git diff HEAD; else printf "=== Diff Stat ===\\n" && git diff HEAD --stat; fi\``;
-
-const AGENT_NAME = "adversarial-review";
-const CMD_NAME = "adversarial-review";
-
-export const AdversarialReviewPlugin: Plugin = async () => {
-  return {
-    config: async (cfg) => {
-      try {
-        cfg.agent ??= {};
-        cfg.agent[AGENT_NAME] ??= {};
-
-        const agent = cfg.agent[AGENT_NAME];
-        agent.description ??=
-          "Adversarial code review — challenges implementation approach and design choices";
-        agent.mode ??= "subagent";
-        agent.model ??= "openai/gpt-5.4";
-        agent.temperature ??= 0.1;
-        agent.color ??= "warning";
-        (agent as any).permission ??= {};
-        const agentPerm = (agent as any).permission;
-        agentPerm.edit = "deny";
-        agentPerm.bash ??= {
-          "git blame*": "allow",
-          "git branch": "allow",
-          "git diff*": "allow",
-          "git log*": "allow",
-          "git ls-files*": "allow",
-          "git merge-base*": "allow",
-          "git rev-list*": "allow",
-          "git rev-parse*": "allow",
-          "git show*": "allow",
-          "git stash list*": "allow",
-          "git stash show*": "allow",
-          "git status*": "allow",
-          "*": "deny",
-        };
-        agentPerm.read ??= "allow";
-        agentPerm.glob ??= "allow";
-        agentPerm.grep ??= "allow";
-        agentPerm.webfetch ??= "deny";
-        agentPerm.websearch ??= "deny";
-        agent.prompt ??= ADVERSARIAL_REVIEW_PROMPT;
-
-        cfg.command ??= {};
-        cfg.command[CMD_NAME] ??= {} as any;
-        const cmd = cfg.command[CMD_NAME] as any;
-        cmd.description ??= "Run an adversarial code review that challenges the implementation";
-        cmd.argumentHint ??= "[--base <ref>] [--scope auto|working-tree|branch] [focus ...]";
-        cmd.agent ??= AGENT_NAME;
-        cmd.subtask ??= true;
-        cmd.template ??= COMMAND_TEMPLATE;
-      } catch (err) {
-        console.error(
-          `[${PLUGIN_ID}] Failed to register agent and command:`,
-          err instanceof Error ? err.message : String(err),
-        );
-        throw err;
-      }
-    },
+// @opencode/plugin 2.0.2 exposes no logging domain on the plugin context, so
+// console.error is the fallback. Hosts that add an `app.log` sink receive the same
+// messages as structured entries; wording never changes between the two paths.
+function createErrorLogger(ctx: PluginContext): (message: string) => void {
+  const sink = (ctx.app as unknown as { log?: unknown } | undefined)?.log;
+  if (typeof sink !== "function") {
+    return (message) => console.error(message);
+  }
+  const hostLog = sink as HostLogSink;
+  return (message) => {
+    try {
+      void Promise.resolve(
+        hostLog.call(ctx.app, { service: PLUGIN_ID, level: "error", message }),
+      ).catch(() => console.error(message));
+    } catch {
+      console.error(message);
+    }
   };
-};
+}
 
-export default {
+function resolveWorkingDirectory(location: PluginContext["location"]): string {
+  return location.directory.length > 0 ? location.directory : location.project.directory;
+}
+
+function invalidModelOption(value: unknown): Error {
+  return new Error(
+    `Invalid model option ${JSON.stringify(value)}; expected "provider/id" with an optional "#variant". Fix or remove it to inherit the invoking session's model.`,
+  );
+}
+
+function parseModelOption(raw: unknown): ReviewModel {
+  if (typeof raw !== "string") throw invalidModelOption(raw);
+  const value = raw.trim();
+  const providerSeparator = value.indexOf("/");
+  if (providerSeparator <= 0) throw invalidModelOption(value);
+  const providerID = value.slice(0, providerSeparator);
+  const variantSeparator = value.indexOf("#", providerSeparator + 1);
+  const id = value.slice(
+    providerSeparator + 1,
+    variantSeparator === -1 ? undefined : variantSeparator,
+  );
+  const variant = variantSeparator === -1 ? undefined : value.slice(variantSeparator + 1);
+  if (
+    id.length === 0 ||
+    providerID.includes("#") ||
+    (variant !== undefined && (variant.length === 0 || variant.includes("#")))
+  ) {
+    throw invalidModelOption(value);
+  }
+  return variant === undefined ? { providerID, id } : { providerID, id, variant };
+}
+
+async function resolveReviewModel(
+  ctx: PluginContext,
+  invocationSessionID: string,
+): Promise<ReviewModel> {
+  if (ctx.options.model !== undefined) return parseModelOption(ctx.options.model);
+  let caller: { model?: ReviewModel };
+  try {
+    caller = (await ctx.session.get({ sessionID: invocationSessionID })) as {
+      model?: ReviewModel;
+    };
+  } catch (error) {
+    throw new Error(
+      `Unable to read the invoking session "${invocationSessionID}": ${errorMessage(error)}. Select a model there or configure options.model.`,
+      { cause: error },
+    );
+  }
+  if (caller.model === undefined) {
+    throw new Error(
+      `The invoking session "${invocationSessionID}" has no model. Select a model there or configure options.model.`,
+    );
+  }
+  return caller.model;
+}
+
+type SchemaNode = Record<string, unknown>;
+
+function isRecord(value: unknown): value is SchemaNode {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function describeType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function matchesType(expected: string, value: unknown): boolean {
+  switch (expected) {
+    case "object":
+      return isRecord(value);
+    case "array":
+      return Array.isArray(value);
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "null":
+      return value === null;
+    default:
+      return true;
+  }
+}
+
+function schemaPath(path: string, key: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+    ? `${path}.${key}`
+    : `${path}[${JSON.stringify(key)}]`;
+}
+
+// Hand-rolled validator for the review-output schema, which uses only the
+// keywords below.
+function validateSchemaNode(schema: unknown, value: unknown, path: string): string | undefined {
+  if (!isRecord(schema)) return undefined;
+  if (typeof schema.type === "string" && !matchesType(schema.type, value)) {
+    const article = /^[aeiou]/.test(schema.type) ? "an" : "a";
+    return `${path} must be ${article} ${schema.type}, got ${describeType(value)}`;
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.some((allowed) => Object.is(allowed, value))) {
+    return `${path} must be one of ${schema.enum.map((allowed) => JSON.stringify(allowed)).join(", ")}, got ${JSON.stringify(value)}`;
+  }
+  if (
+    typeof value === "string" &&
+    typeof schema.minLength === "number" &&
+    value.length < schema.minLength
+  ) {
+    return `${path} must be at least ${schema.minLength} character(s)`;
+  }
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      return `${path} must be >= ${schema.minimum}`;
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      return `${path} must be <= ${schema.maximum}`;
+    }
+  }
+  if (Array.isArray(value) && schema.items !== undefined) {
+    for (let index = 0; index < value.length; index += 1) {
+      const issue = validateSchemaNode(schema.items, value[index], `${path}[${index}]`);
+      if (issue !== undefined) return issue;
+    }
+  }
+  if (isRecord(value)) {
+    const properties = isRecord(schema.properties) ? schema.properties : {};
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(value)) {
+        if (!(key in properties)) return `${path} has unexpected key "${key}"`;
+      }
+    }
+    if (Array.isArray(schema.required)) {
+      for (const key of schema.required) {
+        if (typeof key === "string" && !(key in value)) {
+          return `${path} is missing required key "${key}"`;
+        }
+      }
+    }
+    for (const [key, childSchema] of Object.entries(properties)) {
+      if (!(key in value)) continue;
+      const issue = validateSchemaNode(childSchema, value[key], schemaPath(path, key));
+      if (issue !== undefined) return issue;
+    }
+  }
+  return undefined;
+}
+
+function reviewFailure(code: ReviewFailureCode, detail: string, cause?: unknown): Error {
+  const message = `Adversarial review failed [${code}]: ${detail}`;
+  return cause === undefined ? new Error(message) : new Error(message, { cause });
+}
+
+type AssistantMessage = Extract<SessionContextMessage, { type: "assistant" }>;
+
+function latestAssistantMessage(
+  messages: readonly SessionContextMessage[],
+): AssistantMessage | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.type === "assistant") return message;
+  }
+  return undefined;
+}
+
+function formatSessionError(error: unknown): string {
+  if (isRecord(error)) {
+    const label = typeof error.type === "string" ? error.type : "error";
+    const detail = typeof error.message === "string" ? error.message : errorMessage(error);
+    return typeof error.status === "number"
+      ? `${label} (${error.status}): ${detail}`
+      : `${label}: ${detail}`;
+  }
+  return errorMessage(error);
+}
+
+type AssistantTextPart = { type: "text"; text: string };
+
+function isAssistantTextPart(part: unknown): part is AssistantTextPart {
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    (part as { type?: unknown }).type === "text" &&
+    typeof (part as { text?: unknown }).text === "string"
+  );
+}
+
+function extractReviewText(
+  messages: readonly SessionContextMessage[],
+  reviewSessionID: string,
+): string {
+  const message = latestAssistantMessage(messages);
+  if (message === undefined) {
+    throw reviewFailure(
+      "empty-output",
+      `review session ${reviewSessionID} produced no assistant message`,
+    );
+  }
+  if (message.error !== undefined) {
+    throw reviewFailure(
+      "session-failed",
+      `review session ${reviewSessionID} failed: ${formatSessionError(message.error)}`,
+      message.error,
+    );
+  }
+  if (!Array.isArray(message.content)) {
+    throw reviewFailure(
+      "session-failed",
+      `review session ${reviewSessionID} returned a malformed assistant message: content is missing or not an array`,
+    );
+  }
+  const text = message.content
+    .filter(isAssistantTextPart)
+    .map((part) => part.text)
+    .join("");
+  if (text.trim().length === 0) {
+    throw reviewFailure(
+      "empty-output",
+      `review session ${reviewSessionID} produced no assistant text output`,
+    );
+  }
+  return text;
+}
+
+function validateReviewOutput(text: string, reviewSessionID: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw reviewFailure(
+      "invalid-json",
+      `review session ${reviewSessionID} returned invalid JSON: ${errorMessage(error)}`,
+      error,
+    );
+  }
+  const diagnostic = validateSchemaNode(REVIEW_OUTPUT_SCHEMA, parsed, "$");
+  if (diagnostic !== undefined) {
+    throw reviewFailure(
+      "schema-violation",
+      `review session ${reviewSessionID} returned JSON that violates the review output schema: ${diagnostic}`,
+    );
+  }
+  const summary = isRecord(parsed) ? parsed.summary : undefined;
+  if (typeof summary === "string" && summary.trim().length === 0) {
+    throw reviewFailure(
+      "schema-violation",
+      `review session ${reviewSessionID} returned JSON that violates the review output schema: $.summary must not be blank`,
+    );
+  }
+}
+
+export default Plugin.define({
   id: PLUGIN_ID,
-  server: AdversarialReviewPlugin,
-};
+  async setup(ctx) {
+    const activeReviewSessions = new Set<string>();
+    const disposers: Array<() => Promise<void> | void> = [];
+    const logError = createErrorLogger(ctx);
+
+    const pinReviewTemperature = (event: {
+      sessionID: string;
+      options: { temperature?: number };
+    }) => {
+      if (activeReviewSessions.has(event.sessionID)) event.options.temperature = REVIEW_TEMPERATURE;
+    };
+
+    if (typeof ctx.agent?.transform === "function") {
+      const registration = await ctx.agent.transform((editor) => {
+        configureReviewerAgent(editor);
+      });
+      disposers.push(() => registration.dispose());
+    } else {
+      logError(
+        `[${PLUGIN_ID}] agent.transform is unavailable; ${REVIEWER_AGENT_ID} was not registered`,
+      );
+    }
+
+    if (typeof ctx.session?.hook === "function") {
+      const contextHook = await ctx.session.hook("context", pinReviewTemperature);
+      const generateHook = await ctx.session.hook("generate", pinReviewTemperature);
+      disposers.push(
+        () => contextHook.dispose(),
+        () => generateHook.dispose(),
+      );
+    } else {
+      logError(`[${PLUGIN_ID}] session.hook is unavailable; review temperature was not pinned`);
+    }
+
+    if (typeof ctx.command?.transform === "function") {
+      const registration = await ctx.command.transform((editor) => {
+        editor.add({
+          name: COMMAND_NAME,
+          description: COMMAND_DESCRIPTION,
+          execute: async (invocation) => {
+            const workingDirectory = resolveWorkingDirectory(ctx.location);
+            const model = await resolveReviewModel(ctx, invocation.sessionID);
+            const gitContext = await collectGitContext(workingDirectory);
+            const rawArgs = invocation.prompt.text;
+
+            let created: Awaited<ReturnType<PluginContext["session"]["create"]>>;
+            try {
+              // session.create is the supported spawn path for /adversarial-review;
+              // the root review session is intentionally retained as the audit trail.
+              created = await ctx.session.create({
+                agent: REVIEWER_AGENT_ID,
+                title: REVIEW_SESSION_TITLE,
+                location: { directory: workingDirectory },
+                model,
+              });
+            } catch (error) {
+              throw reviewFailure(
+                "session-failed",
+                `review session was not created: ${errorMessage(error)}`,
+                error,
+              );
+            }
+
+            const reviewSessionID = created.id;
+            activeReviewSessions.add(reviewSessionID);
+            try {
+              const stage = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
+                try {
+                  return await run();
+                } catch (error) {
+                  throw reviewFailure(
+                    "session-failed",
+                    `review session ${reviewSessionID} ${name} failed: ${errorMessage(error)}`,
+                    error,
+                  );
+                }
+              };
+
+              await stage("prompt", () =>
+                ctx.session.prompt({
+                  sessionID: reviewSessionID,
+                  text: buildReviewMessage(rawArgs, gitContext),
+                }),
+              );
+              await stage("wait", () => ctx.session.wait({ sessionID: reviewSessionID }));
+              const messages = await stage("context", () =>
+                ctx.session.context({ sessionID: reviewSessionID }),
+              );
+              const reviewText = extractReviewText(messages, reviewSessionID);
+              validateReviewOutput(reviewText, reviewSessionID);
+              await stage("delivery", () =>
+                ctx.session.synthetic({
+                  sessionID: invocation.sessionID,
+                  text: reviewText,
+                  description: SYNTHETIC_DESCRIPTION,
+                  metadata: { source: PLUGIN_ID, sessionID: reviewSessionID },
+                  delivery: invocation.delivery,
+                  resume: false,
+                }),
+              );
+            } finally {
+              activeReviewSessions.delete(reviewSessionID);
+            }
+          },
+        });
+      });
+      disposers.push(() => registration.dispose());
+    } else {
+      logError(
+        `[${PLUGIN_ID}] command.transform is unavailable; /${COMMAND_NAME} was not registered`,
+      );
+    }
+
+    return async () => {
+      for (const dispose of disposers) await dispose();
+    };
+  },
+});
