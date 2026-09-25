@@ -483,6 +483,17 @@ The execution contracts are:
 
 These are execution outcomes, not the final coding task graph. The coding orchestrator refines the implementation work graph after inspecting the current repository and capabilities available in its environment.
 
+## Delivery workflow
+
+The feature uses a single long-lived branch and draft PR from planning through implementation:
+
+- branch: `feat/opencode-auto-advisor`
+- draft PR: [#54](https://github.com/capyBearista/opencode-plugins/pull/54)
+
+Planning artifacts, implementation-plan refinement, approved implementation commits, validation, and final reconciliation remain on this branch/PR.
+
+This does **not** bypass the implementation approval gate. Application code must still wait until the coding orchestrator refines this plan, changes its status to **Awaiting implementation approval**, presents it to the user, and receives explicit approval.
+
 ## Validation strategy
 
 ### Pure/domain validation
