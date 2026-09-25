@@ -1,10 +1,24 @@
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 5000;
 const MIN_REFRESH_INTERVAL_MS = 1000;
 const MAX_REFRESH_INTERVAL_MS = 60_000;
 
+const GLOBAL_CONFIG_FILES = ["opencode.json", "opencode.jsonc", "cli.json", "cli.jsonc"] as const;
+
+function isNonBlank(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function getGlobalConfigDir(): string {
+  const override = process.env.OPENCODE_CONFIG_DIR;
+  if (isNonBlank(override)) return override;
+  const xdg = process.env.XDG_CONFIG_HOME;
+  if (isNonBlank(xdg)) return join(xdg, "opencode");
+  return join(homedir(), ".config", "opencode");
+}
 const CONFIG_PATH_SEGMENTS = [
   ["opencode.json"],
   ["opencode.jsonc"],
@@ -14,6 +28,10 @@ const CONFIG_PATH_SEGMENTS = [
   ["tui.jsonc"],
   [".opencode", "tui.json"],
   [".opencode", "tui.jsonc"],
+  ["cli.json"],
+  ["cli.jsonc"],
+  [".opencode", "cli.json"],
+  [".opencode", "cli.jsonc"],
 ] as const;
 
 export interface RamMonitorWidgetConfig {
@@ -28,7 +46,7 @@ export function getDefaultRefreshIntervalMs(): number {
 }
 
 export function normalizeRefreshIntervalMs(value: unknown): number {
-  const parsed = typeof value === "number" ? value : Number(value);
+  const parsed = Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_REFRESH_INTERVAL_MS;
   return Math.min(MAX_REFRESH_INTERVAL_MS, Math.max(MIN_REFRESH_INTERVAL_MS, Math.floor(parsed)));
 }
@@ -159,13 +177,28 @@ function stripTrailingCommas(input: string): string {
   return output;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return value as Record<string, unknown>;
+}
+
 function getConfigValue(config: unknown): unknown {
-  if (!config || typeof config !== "object") return undefined;
-  const experimental = (config as Record<string, unknown>).experimental;
-  if (!experimental || typeof experimental !== "object") return undefined;
-  const ramMonitor = (experimental as Record<string, unknown>).ramMonitor;
-  if (!ramMonitor || typeof ramMonitor !== "object") return undefined;
-  return (ramMonitor as Record<string, unknown>).refreshIntervalMs;
+  const experimental = asRecord(config)?.experimental;
+  const ramMonitor = asRecord(experimental)?.ramMonitor;
+  return asRecord(ramMonitor)?.refreshIntervalMs;
+}
+
+function parsePluginOptionIntervalMs(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? normalizeRefreshIntervalMs(value) : null;
+  }
+  if (!isNonBlank(value)) return null;
+
+  // String overrides are parsed with Number(), so hex ("0x10"), scientific
+  // ("5e3"), and whitespace-padded (" 3000 ") numerics are accepted by design;
+  // normalization then floors and clamps them like any other value.
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? normalizeRefreshIntervalMs(parsed) : null;
 }
 
 function isMissingConfigError(error: unknown): boolean {
@@ -173,12 +206,27 @@ function isMissingConfigError(error: unknown): boolean {
 }
 
 export function getRamMonitorConfigPaths(worktree: string): string[] {
-  return CONFIG_PATH_SEGMENTS.map((segments) => join(worktree, ...segments));
+  const globalDir = getGlobalConfigDir();
+  return [
+    ...GLOBAL_CONFIG_FILES.map((file) => join(globalDir, file)),
+    ...CONFIG_PATH_SEGMENTS.map((segments) => join(worktree, ...segments)),
+  ];
 }
 
 export async function loadRamMonitorWidgetConfig(
   worktree: string,
+  overrides?: { readonly refreshIntervalMs?: unknown },
 ): Promise<RamMonitorWidgetConfig> {
+  const overrideIntervalMs = parsePluginOptionIntervalMs(overrides?.refreshIntervalMs);
+  if (overrideIntervalMs !== null) {
+    return {
+      intervalMs: overrideIntervalMs,
+      sourcePath: "plugin options",
+      warning: null,
+      warningPath: null,
+    };
+  }
+
   let intervalMs = getDefaultRefreshIntervalMs();
   let sourcePath: string | null = null;
   let warning: string | null = null;

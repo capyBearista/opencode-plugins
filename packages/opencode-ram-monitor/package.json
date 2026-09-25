@@ -13,15 +13,18 @@
   "main": "./dist/server.js",
   "types": "./dist/server.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "server.js",
+    "tui.js"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc --project tsconfig.build.json --emitDeclarationOnly && bun build src/server.ts --outfile=dist/server.js --target=bun --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*' && bun build src/memory.ts --outfile=dist/memory.js --target=bun && bun build src/sidebar-config.ts --outfile=dist/sidebar-config.js --target=bun && bun build src/debug.ts --outfile=dist/debug.js --target=bun && bun build src/sidebar.tsx --outfile=dist/sidebar.js --target=bun --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*'",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json --emitDeclarationOnly && bun build src/server.ts --outfile=dist/server.js --target=bun --external '@opencode/*' && bun build src/tui.ts --outfile=dist/tui.js --target=bun --external '@opencode/*' --external '@opentui/*' --external 'solid-js' --external 'tree-sitter*'",
     "typecheck": "tsc --noEmit",
     "check": "bunx @biomejs/biome check --write .",
     "lint": "bunx @biomejs/biome check .",
     "ci": "bunx @biomejs/biome ci .",
-    "test": "bun test"
+    "test": "bun test",
+    "smoke": "bun run build && bun scripts/smoke-built.ts"
   },
   "exports": {
     ".": {
@@ -33,26 +36,23 @@
       "default": "./dist/server.js"
     },
     "./tui": {
-      "types": "./dist/sidebar.d.ts",
-      "default": "./dist/sidebar.js"
+      "types": "./dist/tui.d.ts",
+      "default": "./dist/tui.js"
     }
   },
-  "oc-plugin": [
-    "server",
-    "tui"
-  ],
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3",
-    "@opentui/solid": ">=0.2.12",
-    "solid-js": ">=1.9.13"
+    "@opencode/plugin": "2.0.2",
+    "@opentui/core": ">=0.5.10",
+    "@opentui/solid": ">=0.5.10",
+    "solid-js": ">=1.9.0"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3",
-    "@opentui/core": ">=0.1.103",
-    "@opentui/solid": ">=0.2.12",
+    "@opencode/plugin": "2.0.2",
+    "@opentui/core": "0.5.10",
+    "@opentui/solid": "0.5.10",
     "@types/bun": "latest",
     "@types/node": "^25.8.0",
-    "solid-js": ">=1.9.13",
+    "solid-js": "1.9.12",
     "typescript": "^5.8.0"
   }
 }

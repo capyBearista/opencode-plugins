@@ -633,7 +633,11 @@ export async function sampleDarwinRssWithFallback(
       return merged;
     }
     throw new Error("darwin bulk snapshot parsed no usable RSS rows");
-  } catch {
+  } catch (error) {
+    await debugLog("rss-bulk-snapshot-fallback", {
+      source: "ps",
+      error: error instanceof Error ? error.message : String(error),
+    });
     const rssByPid = new Map<number, number>();
     for (const pid of pids) {
       try {
@@ -722,7 +726,11 @@ export async function sampleWindowsRssWithFallback(
       return merged;
     }
     throw new Error("windows bulk snapshot parsed no usable RSS rows");
-  } catch {
+  } catch (error) {
+    await debugLog("rss-bulk-snapshot-fallback", {
+      source: "wmic",
+      error: error instanceof Error ? error.message : String(error),
+    });
     const rssByPid = new Map<number, number>();
     for (const pid of pids) {
       try {
@@ -939,7 +947,10 @@ export async function getLightweightRam(): Promise<LightweightRamResult> {
       ...computeLightweightRamBreakdown(snapshot, pids, roots, currentSessionRoot, process.pid),
       count: countLogicalSessions(pids, liveSets),
     };
-  } catch {
+  } catch (error) {
+    await debugLog("lightweight-ram-fallback", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return getLegacyLightweightRam();
   }
 }
@@ -1095,7 +1106,10 @@ export async function getHeavyProcessTree(): Promise<string> {
     }
 
     return markdown.trim();
-  } catch {
+  } catch (error) {
+    await debugLog("heavy-process-tree-failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return `### OpenCode RAM Usage Tree\n\nNo detailed process tree could be generated. Current process PID is ${process.pid}.`;
   }
 }
