@@ -17,6 +17,19 @@ Subdirectories contain specialized files that extend these rules.
 - **MUST** run `bun run typecheck && bun run lint && bun run test && bun run build` before opening a PR
 - **MUST NOT** commit secrets, API keys, or tokens
 
+### Planning and Durable Knowledge (MUST)
+
+- **MUST** inspect applicable active plans, accepted decisions/ADRs, relevant research, current architecture documentation, linked Issues, and package-local instructions before substantial implementation work.
+- **MUST NOT** silently contradict an accepted durable decision. If implementation requires a material change, update the governing plan/decision record and obtain any required approval before proceeding.
+- **MUST** keep non-trivial implementation planning in repository artifacts rather than only in chat history.
+- **MUST** honor plan approval gates. Do not begin implementation while a governing plan is `Draft`, `Awaiting implementation approval`, or `Blocked`.
+- **MUST** distinguish a required blocked prerequisite from consciously deferred scope; do not bypass blockers by relabeling them deferred.
+- **MUST** update `docs/DECISIONS.md` and any applicable ADR when a durable decision is accepted or superseded. ADRs normally stay in place and use status/links to preserve decision history.
+- **MUST** reconcile durable project knowledge before considering implementation complete: resulting architecture, decisions, research, documentation, acceptance criteria, blockers, and remaining Issues must match reality.
+- **MUST** update current architecture documentation when implementation materially changes system/module boundaries, persistent state, interfaces, runtime topology, or major integration relationships.
+- **MUST** treat artifacts under archive paths as historical context, not authoritative current state, unless verified against current code, decisions, architecture, and active plans.
+- **SHOULD** use `docs/plans/` for non-trivial active plans, `docs/research/` for reusable research, and `docs/decisions/` for standalone ADRs when no more specific established convention applies.
+
 ### Plugin Development (MUST)
 
 Scope: V1 packages. The two V2 ports use the Promise API instead; see the V2 boundary below.
