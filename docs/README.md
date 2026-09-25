@@ -14,6 +14,11 @@ The root [README](../README.md) and package READMEs describe current installatio
 | [output-styles/claude-output-styles.md](./output-styles/claude-output-styles.md) | Upstream reference | Snapshot of Claude Code output-style docs. Background for the output-styles plugin, not a statement of this repo's behavior. |
 | [ram-monitor/post-mortem-v1.0.0.md](./ram-monitor/post-mortem-v1.0.0.md) | Package note | What broke and what fixed it during ram-monitor 1.0.0 stabilization. |
 | [ram-monitor/codex-comparison.md](./ram-monitor/codex-comparison.md) | Package note | Prompt-structure comparison between the official Codex plugin and this repo's review plugin. |
+| [DECISIONS.md](./DECISIONS.md) | Active | Durable project decisions. Small accepted decisions live in the ledger; larger architectural choices link to standalone ADRs under `decisions/`. |
+| [plans/opencode-auto-advisor.md](./plans/opencode-auto-advisor.md) | Draft plan | Governing product/technical plan for the proposed OpenCode Auto Advisor plugin. |
+| [research/claude-code-advisor.md](./research/claude-code-advisor.md) | Current research | Claude Advisor behavior, tool surface, persistence, and prompt evidence. |
+| [research/opencode-v2-advisor-runtime.md](./research/opencode-v2-advisor-runtime.md) | Current research | OpenCode V2 context, generation, tool timing, and automatic-advice delivery capabilities. |
+| [research/opencode-v2-jev-evaluation.md](./research/opencode-v2-jev-evaluation.md) | Revalidate before implementation | Experimental Evaluation/Jev routing capability and provider constraints. |
 
 ## Generated prompt sources
 
@@ -26,6 +31,18 @@ The V1 prompt-sync workflow stays on. There is no V2 prompt-inheritance port.
 `.agents/skills/` bundles reference material for contributors and agents (`bun`, `biome`, `opentui`, `opentui-design`). Each skill owns its `SKILL.md` and `references/` directory. Leave the contents alone and do not reformat them.
 
 Provenance notes ship with the skill where they exist. The Biome skill carries its own `LICENSE.txt` and changelog. Do not invent ownership or license claims for the rest.
+
+## Planning and durable project knowledge
+
+Non-trivial work may use:
+
+- `DECISIONS.md` plus `decisions/` for durable choices and ADR history;
+- `research/` for findings likely to matter during implementation or maintenance;
+- `plans/` for active non-trivial project plans.
+
+Plans describe intent and constraints rather than current implemented architecture. GitHub Issues remain the execution/status system. Research is not archived merely because a current task stops using it; mark it for revalidation or supersession when its facts or applicability change. ADRs normally remain in place and use status to record lifecycle.
+
+Completed or cancelled plans may later move to `archive/plans/` after current architecture, durable decisions, research, and unresolved execution work have been reconciled.
 
 ## Conventions
 
