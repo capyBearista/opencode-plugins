@@ -14,6 +14,10 @@ const CONFIG_PATH_SEGMENTS = [
   ["tui.jsonc"],
   [".opencode", "tui.json"],
   [".opencode", "tui.jsonc"],
+  ["cli.json"],
+  ["cli.jsonc"],
+  [".opencode", "cli.json"],
+  [".opencode", "cli.jsonc"],
 ] as const;
 
 export interface RamMonitorWidgetConfig {
@@ -178,7 +182,18 @@ export function getRamMonitorConfigPaths(worktree: string): string[] {
 
 export async function loadRamMonitorWidgetConfig(
   worktree: string,
+  overrides?: { readonly refreshIntervalMs?: unknown },
 ): Promise<RamMonitorWidgetConfig> {
+  const overrideValue = overrides?.refreshIntervalMs;
+  if (overrideValue !== undefined) {
+    return {
+      intervalMs: normalizeRefreshIntervalMs(overrideValue),
+      sourcePath: "plugin options",
+      warning: null,
+      warningPath: null,
+    };
+  }
+
   let intervalMs = getDefaultRefreshIntervalMs();
   let sourcePath: string | null = null;
   let warning: string | null = null;
