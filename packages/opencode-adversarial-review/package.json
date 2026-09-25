@@ -13,15 +13,17 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "server.js"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && bun scripts/check-schema-asset.ts",
     "typecheck": "tsc --noEmit",
     "check": "bunx @biomejs/biome check --write .",
     "lint": "bunx @biomejs/biome check .",
     "ci": "bunx @biomejs/biome ci .",
-    "test": "bun test"
+    "test": "bun test",
+    "smoke": "bun run build && bun scripts/smoke-built.ts"
   },
   "exports": {
     ".": {
@@ -30,10 +32,10 @@
     }
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3"
+    "@opencode/plugin": "2.0.2"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3",
+    "@opencode/plugin": "2.0.2",
     "@tsconfig/node22": "^22.0.0",
     "@types/bun": "latest",
     "typescript": "^6.0.3"

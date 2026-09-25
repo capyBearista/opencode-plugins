@@ -30,7 +30,7 @@ graph TB
         direction LR
         Command -->|!git status| S[Status]
         Command -->|!git log| L[Commits]
-        Command -->|!git diff| D[Diff Summary]
+        Command -->|!git diff| D[Full Diff]
         Command -->|!cat| U[Untracked]
     end
 
@@ -54,13 +54,13 @@ graph TB
     class Adversary adversary;
 ```
 
-The plugin uses a **stateless subagent architecture**. When the command is invoked, a deterministic shell script collects git metadata (diff stat, untracked files, recent commits) and injects it into a fresh subagent session. This ensures the review is unbiased by the primary agent's conversation history.
+The plugin uses a **stateless subagent architecture**. When the command is invoked, the plugin collects the branch, status, recent commits, the full diff against `HEAD`, and the full text contents of unignored untracked files, then injects them into a fresh reviewer session. This ensures the review is unbiased by the primary agent's conversation history.
 
 ## Features
 
 - **Adversarial Persona**: A specialized subagent prompted to find reasons *not* to ship, prioritizing auth gaps, race conditions, and data loss.
-- **Dynamic Context Collection**: Automatically switches between full-inline diff (for 1-2 files) and high-level stat (for larger changes).
-- **Subagent Self-Collection**: The subagent uses whitelisted git and file tools to "pull" the specific file contents it needs based on the initial diff summary.
+- **Complete Context Collection**: Inlines the entire diff against `HEAD` and the full text contents of unignored untracked files — no truncation.
+- **Subagent Self-Collection**: The reviewer uses whitelisted read-only git and file tools to pull surrounding code or branch-scope diffs it still needs.
 - **Structured JSON Output**: Returns findings with severity, file locations, confidence scores, and concrete recommendations.
 - **Configurable Scope**: Support for `--base <ref>`, `--scope branch`, and `--scope working-tree`.
 
@@ -104,7 +104,7 @@ Run a review on your current working tree changes:
 | `--scope` | `auto`, `working-tree`, `branch` | The range of changes to review. Defaults to `auto`. |
 | `--base` | `<git-ref>` | The base reference (branch or commit) to compare against when using `branch` scope. |
 
-- **`auto`**: Reviews using the broadest context the provided information supports.
+- **`auto`**: Reviews the working tree when it has staged or unstaged changes; otherwise reviews the current branch.
 - **`working-tree`**: Reviews staged and unstaged changes against `HEAD`.
 - **`branch`**: Reviews all changes on the current branch since it diverged from the upstream or main branch.
 - **`focus ...`**: Any trailing text is treated as a focus area for the review.
@@ -135,11 +135,9 @@ Review with a specific focus area:
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
-| `agent.adversarial-review.model` | `string` | The model to use for the subagent (defaults to `openai/gpt-5.4`). |
-| `agent.adversarial-review.temperature` | `number` | Sampling temperature (defaults to `0.1` for deterministic review). |
-| `command.adversarial-review.template` | `string` | The shell-injected template used to gather git context. |
+| `options.model` | `string` | Model override for the review (`provider/id`, optional `#variant`). Defaults to the invoking session's model. |
 
-This plugin requires no manual configuration out of the box, but you can override the subagent model in your local `opencode.json`.
+This plugin requires no manual configuration out of the box. The reviewer inherits the invoking session's model; set the plugin `model` option to override it. The review temperature is pinned to `0.1` by the plugin's session hooks, and the Git context is collected programmatically, so there is no agent or command template to configure.
 
 ## Permissions & Security
 
@@ -150,10 +148,16 @@ This plugin is designed with a "least privilege" security model. The adversarial
 - **Read/Grep/Glob**: Allowed (read-only) to enable code inspection.
 - **Network**: Web fetch and search are disabled to ensure the review remains focused on the files at hand.
 
+The `/adversarial-review` command is the only supported and unbiased path. The reviewer is hidden and its description tells agents not to invoke it directly; a direct spawn is still technically possible, but it is unsupported and caller-controlled.
+
+### Context disclosure
+
+Invoking `/adversarial-review` consents to sending the review context to the reviewer model: the complete diff against `HEAD` and the full text contents of unignored untracked files. The plugin does not scan for secrets, so check your `.gitignore` and your tracked files before running it on a tree that contains them. Direct reads of `.env` and `.env.*` files are denied to the reviewer; `.env.example` remains readable.
+
 ## Troubleshooting
 
 - **"No changes to review"**: Ensure you have staged or unstaged changes, or use `--base` to review a committed branch.
-- **Model timeouts**: Large diffs may require a model with a larger context window or more time. The subagent is whitelisted to `read` files if the diff stat is too long to include.
+- **Model timeouts**: Large diffs may require a model with a larger context window or more time. The reviewer can also read files with its tools while it works.
 - **Git errors**: Ensure you are running within a git repository. The command relies on `git` being available in your PATH.
 
 ## Contributing

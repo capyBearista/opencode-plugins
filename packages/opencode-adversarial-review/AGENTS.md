@@ -64,10 +64,10 @@ The JSON result shape is defined in `src/schemas/review-output.schema.json`.
 
 ### Edge Cases
 
-- **No changes**: Diff stat is empty → subagent reports "no changes to review"
-- **Large diff**: Inline stat + file list only; subagent self-collects specific files with read/grep
-- **Binary files**: Naturally skipped by diff; subagent uses read tool for specific text files
-- **No git repo**: `!`git` commands fail → error output becomes context → subagent reports "not a git repository"
+- **No changes**: The full diff is empty → reviewer reports "no changes to review"
+- **Large diff**: The complete `git diff HEAD` is inlined with no truncation; the reviewer self-collects surrounding context with read/grep
+- **Binary files**: Tracked binaries are diffed by git; untracked binaries are skipped by the NUL check, and the reviewer can read specific text files with its tools
+- **No git repo**: `git` failures are labeled as errors in the context → reviewer reports "not a git repository"
 
 ## Quick Reference
 
