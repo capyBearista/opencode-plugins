@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "@opentui/solid/preload";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { type JSX, testRender } from "@opentui/solid";
+import { createRoot } from "solid-js";
 import { getRamMonitorDebugLogPath, isRamMonitorDebugEnabled } from "./debug.js";
 import * as MemoryModule from "./memory.js";
 import {
@@ -31,6 +33,7 @@ import {
   parsePsProcessSnapshot,
   parseWmicProcessSnapshot,
 } from "./snapshot.js";
+import { readRamWidgetTheme } from "./theme.js";
 
 type LoadRamMonitorWidgetConfig = (worktree: string) => Promise<{
   intervalMs: number;
@@ -83,6 +86,173 @@ function getResolveActiveSessionPids(): ResolveActiveSessionPids {
 function getSelectTargetRoots(): SelectTargetRoots {
   const module = MemoryModule as Record<string, unknown>;
   return module.selectTargetRoots as SelectTargetRoots;
+}
+
+type MockRenderable = {
+  tag: string;
+  children: unknown[];
+  props: Record<string, unknown>;
+};
+
+type RealRenderable = {
+  height: number;
+  getChildren: () => RealRenderable[];
+};
+
+type MockSlotClaim = {
+  render: (input: unknown) => unknown;
+  prepend?: string;
+  append?: string;
+  before?: string;
+  after?: string;
+  replace?: string;
+};
+
+function readProp(node: MockRenderable, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(node.props, key);
+  return descriptor?.get ? descriptor.get.call(node.props) : node.props[key];
+}
+
+type MockTuiContext = {
+  ui: {
+    slot: (claim: MockSlotClaim) => () => void;
+    dialog: {
+      set: ReturnType<typeof mock>;
+      show: ReturnType<typeof mock>;
+      clear: ReturnType<typeof mock>;
+    };
+  };
+  keymap: { layer: (input: () => unknown) => (() => void) | undefined };
+  theme: Record<string, unknown>;
+  location: { directory: string };
+  renderer: { idle: () => Promise<void> };
+};
+
+function mockOpenTuiSolid(): void {
+  mock.module("@opentui/solid", () => ({
+    createElement: (tag: string) => ({ tag, children: [], props: {} }),
+    insert: (node: MockRenderable, child: unknown) => {
+      if (Array.isArray(child)) {
+        node.children.push(...child);
+        return;
+      }
+      node.children.push(child);
+    },
+    spread: (node: MockRenderable, props: Record<string, unknown>) => {
+      for (const key of Object.keys(props)) {
+        const descriptor = Object.getOwnPropertyDescriptor(props, key);
+        if (descriptor) {
+          Object.defineProperty(node.props, key, descriptor);
+        }
+      }
+    },
+  }));
+}
+
+function createTuiContext(): {
+  context: MockTuiContext;
+  slots: MockSlotClaim[];
+  layers: Array<() => unknown>;
+  layerDisposers: Array<() => void>;
+  dialog: MockTuiContext["ui"]["dialog"];
+  dialogCalls: string[];
+  getShownRender: () => (() => unknown) | undefined;
+} {
+  const slots: MockSlotClaim[] = [];
+  const layers: Array<() => unknown> = [];
+  const layerDisposers: Array<() => void> = [];
+  const dialogCalls: string[] = [];
+  let shownRender: (() => unknown) | undefined;
+  const dialog = {
+    set: mock(() => {
+      dialogCalls.push("set");
+    }),
+    show: mock((render: () => unknown) => {
+      dialogCalls.push("show");
+      shownRender = render;
+    }),
+    clear: mock(() => {
+      dialogCalls.push("clear");
+    }),
+  };
+  const context: MockTuiContext = {
+    ui: {
+      slot: (claim) => {
+        slots.push(claim);
+        return () => {};
+      },
+      dialog,
+    },
+    keymap: {
+      layer: (input) => {
+        layers.push(input);
+        const dispose = () => {};
+        layerDisposers.push(dispose);
+        return dispose;
+      },
+    },
+    theme: {
+      text: {
+        base: "white",
+        muted: "gray",
+        feedback: {
+          error: { base: "red" },
+          warning: { base: "yellow" },
+          success: { base: "green" },
+          info: { base: "blue" },
+        },
+      },
+      background: { raised: { base: "#111111" } },
+      border: { base: "#444444" },
+      markdown: {
+        text: "white",
+        heading: "cyan",
+        strong: "yellow",
+        emphasis: "magenta",
+        code: "green",
+        blockQuote: "gray",
+        listItem: "white",
+        link: "blue",
+        linkText: "blue",
+      },
+    },
+    location: { directory: process.cwd() },
+    renderer: { idle: async () => {} },
+  };
+
+  return {
+    context,
+    slots,
+    layers,
+    layerDisposers,
+    dialog,
+    dialogCalls,
+    getShownRender: () => shownRender,
+  };
+}
+
+async function loadTuiPlugin() {
+  return await import(`./tui.js?tui=${Date.now()}-${Math.random()}`);
+}
+
+async function mountSidebarWidget(): Promise<{
+  setup: Awaited<ReturnType<typeof testRender>>;
+  box: RealRenderable;
+}> {
+  const module = await loadTuiPlugin();
+  const { context, slots } = createTuiContext();
+  await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
+
+  const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");
+  const setup = await testRender(() => sidebarSlot?.render({ sessionID: "s-1" }) as JSX.Element, {
+    width: 40,
+    height: 12,
+  });
+
+  await Bun.sleep(5);
+  await setup.renderOnce();
+  const root = setup.renderer.root as unknown as RealRenderable;
+  return { setup, box: root.getChildren()[0] as RealRenderable };
 }
 
 describe("@capybearista/opencode-ram-monitor", () => {
@@ -381,77 +551,287 @@ describe("@capybearista/opencode-ram-monitor", () => {
     );
   });
 
-  test("package metadata targets compiled TUI and debug artifacts", async () => {
+  test("package metadata targets dual V2 server and TUI entries", async () => {
     const packageJson = JSON.parse(
       await Bun.file(new URL("../package.json", import.meta.url)).text(),
     ) as {
       scripts: { build: string };
-      exports: { "./tui": { default: string } };
+      files: string[];
+      exports: Record<string, { types: string; default: string }>;
+      peerDependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+      "oc-plugin"?: unknown;
     };
 
     expect(packageJson.scripts.build).toContain(
-      "bun build src/debug.ts --outfile=dist/debug.js --target=bun",
+      "bun build src/server.ts --outfile=dist/server.js --target=bun",
     );
     expect(packageJson.scripts.build).toContain(
-      "bun build src/sidebar.tsx --outfile=dist/sidebar.js --target=bun",
+      "bun build src/tui.ts --outfile=dist/tui.js --target=bun",
     );
-    expect(packageJson.exports["./tui"].default).toBe("./dist/sidebar.js");
+    expect(packageJson.exports["."].default).toBe("./dist/server.js");
+    expect(packageJson.exports["./server"].default).toBe("./dist/server.js");
+    expect(packageJson.exports["./tui"].default).toBe("./dist/tui.js");
+    expect(packageJson.files).toEqual(["dist", "server.js", "tui.js"]);
+    expect(packageJson["oc-plugin"]).toBeUndefined();
+    expect(packageJson.peerDependencies["@opencode/plugin"]).toMatch(/^2\./);
+    expect(packageJson.devDependencies["@opencode/plugin"]).toMatch(/^2\./);
+    expect(packageJson.peerDependencies["@opencode-ai/plugin"]).toBeUndefined();
   });
 
-  test("build produces a loadable compiled TUI artifact", async () => {
-    const packageDir = new URL("..", import.meta.url).pathname;
-    await Bun.$`bun run build`.cwd(packageDir).quiet();
-    await Bun.$`bun --eval ${`import("./dist/sidebar.js").then((module) => {
-  if (module.default?.id !== "capybearista.opencode-ram-monitor") {
-    throw new Error("invalid sidebar module id")
-  }
-  if (typeof module.default?.tui !== "function") {
-    throw new Error("invalid sidebar module export")
-  }
-})`}`
-      .cwd(packageDir)
-      .quiet();
+  test("server and TUI wrappers re-export their built entrypoints", async () => {
+    const serverWrapper = await Bun.file(new URL("../server.js", import.meta.url)).text();
+    const tuiWrapper = await Bun.file(new URL("../tui.js", import.meta.url)).text();
+    const bunfig = await Bun.file(new URL("../bunfig.toml", import.meta.url)).text();
+
+    expect(serverWrapper).toContain("./dist/server.js");
+    expect(tuiWrapper).toContain("./dist/tui.js");
+    expect(bunfig).toContain('preload = ["@opentui/solid/preload"]');
   });
 
-  test("registers sidebar slot and returns a renderable", async () => {
-    mock.module("@opentui/solid", () => ({
-      createElement: () => ({ children: [] as unknown[] }),
-      insert: (node: { children?: unknown[] }, child: unknown) => {
-        node.children?.push(child);
-      },
-      spread: () => {},
-    }));
+  test("source entrypoints expose the V2 server and TUI contracts", async () => {
+    const server = await import(`./server.js?contract=${Date.now()}`);
+    const tui = await import(`./tui.js?contract=${Date.now()}`);
 
-    const module = await import(`./sidebar.js?slot-render=${Date.now()}`);
-    let sidebarContent: (() => unknown) | undefined;
+    expect(server.default.id).toBe("capybearista.opencode-ram-monitor");
+    expect(server.default.setup).toBeFunction();
+    expect(tui.default.id).toBe("capybearista.opencode-ram-monitor");
+    expect(tui.default.setup).toBeFunction();
 
-    await (module.default.tui as (api: unknown) => Promise<void>)({
-      slots: {
-        register: (payload: { slots?: { sidebar_content?: () => unknown } }) => {
-          sidebarContent = payload.slots?.sidebar_content;
+    const commandNames: string[] = [];
+    await (server.default.setup as unknown as (input: unknown) => Promise<void>)({
+      command: {
+        transform: async (callback: (editor: unknown) => void) => {
+          callback({
+            add: (definition: { name: string }) => {
+              commandNames.push(definition.name);
+            },
+          });
         },
       },
-      theme: {
-        current: {
-          text: "white",
-          secondary: "gray",
-          error: "red",
-          warning: "yellow",
-          success: "green",
-          borderSubtle: "dimgray",
-          backgroundElement: "#111111",
+      session: { synthetic: async () => {} },
+    });
+    expect(commandNames).toEqual(["ram"]);
+
+    const { context, slots } = createTuiContext();
+    await (tui.default.setup as unknown as (input: unknown) => Promise<void>)(context);
+    expect(slots[0]?.append).toBe("sidebar.content");
+    expect(slots[1]?.append).toBe("app");
+  });
+
+  test("maps V2 theme tokens onto widget theme keys", () => {
+    const theme = readRamWidgetTheme({
+      text: {
+        base: "white",
+        muted: "gray",
+        feedback: {
+          error: { base: "red" },
+          warning: { base: "yellow" },
+          success: { base: "green" },
+          info: { base: "blue" },
         },
       },
-      state: {
-        path: {
-          worktree: process.cwd(),
-        },
-      },
+      background: { raised: { base: "#111111" } },
+      border: { base: "dimgray" },
     });
 
-    expect(sidebarContent).toBeFunction();
-    expect(() => sidebarContent?.()).not.toThrow();
-    expect(sidebarContent?.()).toBeTruthy();
+    expect(theme).toEqual({
+      text: "white",
+      textMuted: "gray",
+      secondary: "gray",
+      error: "red",
+      warning: "yellow",
+      success: "green",
+      borderSubtle: "dimgray",
+      backgroundElement: "#111111",
+    });
+  });
+
+  test("sidebar widget takes no footer row when there is no hint", async () => {
+    const { setup, box } = await mountSidebarWidget();
+
+    expect(box.getChildren().length).toBe(4);
+    expect(box.height).toBe(6);
+
+    setup.renderer.destroy();
+  });
+
+  test("registers the sidebar widget and the ram command layer", async () => {
+    mockOpenTuiSolid();
+    const module = await loadTuiPlugin();
+    const { context, slots, layers, dialog } = createTuiContext();
+
+    await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
+
+    expect(slots[0]?.append).toBe("sidebar.content");
+    expect(slots[1]?.append).toBe("app");
+
+    const appSlot = slots.find((slot) => slot.append === "app");
+    expect(appSlot?.render({})).toBeNull();
+    expect(layers.length).toBe(1);
+
+    const layer = layers[0]?.() as {
+      mode: string;
+      commands: Array<{
+        id: string;
+        slash?: { name: string; arguments?: boolean };
+        run: () => void;
+      }>;
+    };
+    expect(layer.mode).toBe("global");
+
+    const command = layer.commands.find((item) => item.slash?.name === "ram");
+    expect(command).toBeDefined();
+    expect(command?.slash?.arguments).toBe(true);
+
+    command?.run();
+    expect(dialog.set).toHaveBeenCalledWith({ size: "xlarge" });
+    expect(dialog.show).toHaveBeenCalledTimes(1);
+  });
+
+  test("registers one keymap layer per mount and re-registers after disposal", async () => {
+    mockOpenTuiSolid();
+    const module = await loadTuiPlugin();
+    const { context, slots, layers, layerDisposers } = createTuiContext();
+    await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
+
+    const appSlot = slots.find((slot) => slot.append === "app");
+    expect(appSlot).toBeDefined();
+
+    const dispose = createRoot((dispose) => {
+      appSlot?.render({});
+      appSlot?.render({});
+      expect(layers.length).toBe(1);
+      expect(layerDisposers.length).toBe(1);
+      expect(layerDisposers[0]).toBeFunction();
+      return dispose;
+    });
+    dispose();
+
+    const disposeAgain = createRoot((dispose) => {
+      appSlot?.render({});
+      return dispose;
+    });
+    expect(layers.length).toBe(2);
+    expect(layerDisposers.length).toBe(2);
+    disposeAgain();
+  });
+
+  test("sidebar widget opens the modal and the modal loads the process tree", async () => {
+    mockOpenTuiSolid();
+    mock.module("./memory.js", () => ({
+      getHeavyProcessTree: async () => "TREE OUTPUT",
+      getLightweightRam: async () => ({
+        thisDirect: 0,
+        thisWithTools: 0,
+        allDirect: 0,
+        allWithTools: 0,
+        count: 0,
+      }),
+      formatBytes: () => "0 MB",
+    }));
+
+    const module = await loadTuiPlugin();
+    const { context, slots, dialog, dialogCalls, getShownRender } = createTuiContext();
+    await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
+
+    const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");
+    const widget = sidebarSlot?.render({ sessionID: "s-1" }) as MockRenderable;
+    expect(widget.tag).toBe("box");
+    expect(widget.props.onMouseUp).toBeFunction();
+    expect(widget.props.padding).toBeUndefined();
+    expect(widget.props.paddingLeft).toBe(1);
+    expect(widget.props.paddingRight).toBe(1);
+
+    (widget.props.onMouseUp as () => void)();
+    expect(dialogCalls).toEqual(["clear", "show", "set"]);
+    expect(dialog.set).toHaveBeenCalledWith({ size: "xlarge" });
+    expect(dialog.show).toHaveBeenCalledTimes(1);
+
+    const modal = getShownRender()?.() as MockRenderable;
+    expect(modal.tag).toBe("box");
+
+    const scrollbox = modal.children[1] as MockRenderable;
+    expect(scrollbox.tag).toBe("scrollbox");
+    const bodyNode = scrollbox.children[0] as MockRenderable;
+    expect(bodyNode.tag).toBe("markdown");
+    expect(readProp(bodyNode, "internalBlockMode")).toBe("top-level");
+    expect(readProp(bodyNode, "syntaxStyle")).toBeDefined();
+    const body = () => readProp(bodyNode, "content") as string;
+    expect(body()).toBe("Loading RAM usage...");
+
+    await Bun.sleep(1);
+    expect(body()).toBe("TREE OUTPUT");
+
+    const hint = modal.children[2] as MockRenderable;
+    (hint.props.onMouseUp as () => void)();
+    expect(dialogCalls).toEqual(["clear", "show", "set", "clear"]);
+  });
+
+  test("re-opening the modal clears the previous dialog before showing again", async () => {
+    mockOpenTuiSolid();
+    mock.module("./memory.js", () => ({
+      getHeavyProcessTree: async () => "TREE OUTPUT",
+      getLightweightRam: async () => ({
+        thisDirect: 0,
+        thisWithTools: 0,
+        allDirect: 0,
+        allWithTools: 0,
+        count: 0,
+      }),
+      formatBytes: () => "0 MB",
+    }));
+
+    const module = await loadTuiPlugin();
+    const { context, slots, dialog, dialogCalls } = createTuiContext();
+    await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
+
+    const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");
+    const widget = sidebarSlot?.render({ sessionID: "s-1" }) as MockRenderable;
+    const open = widget.props.onMouseUp as () => void;
+
+    open();
+    open();
+
+    expect(dialogCalls).toEqual(["clear", "show", "set", "clear", "show", "set"]);
+    expect(dialog.show).toHaveBeenCalledTimes(2);
+    expect(dialog.set).toHaveBeenCalledTimes(2);
+  });
+
+  test("modal shows the tree failure error instead of loading forever", async () => {
+    mockOpenTuiSolid();
+    mock.module("./memory.js", () => ({
+      formatBytes: () => "0 MB",
+      getHeavyProcessTree: async () => {
+        throw new Error("tree exploded");
+      },
+      getLightweightRam: async () => ({
+        thisDirect: 0,
+        thisWithTools: 0,
+        allDirect: 0,
+        allWithTools: 0,
+        count: 0,
+      }),
+    }));
+
+    const module = await loadTuiPlugin();
+    const { context, slots, getShownRender } = createTuiContext();
+    await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
+
+    const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");
+    const widget = sidebarSlot?.render({ sessionID: "s-1" }) as MockRenderable;
+    (widget.props.onMouseUp as () => void)();
+
+    const modal = getShownRender()?.() as MockRenderable;
+    const scrollbox = modal.children[1] as MockRenderable;
+    const bodyNode = scrollbox.children[0] as MockRenderable;
+    const body = () => readProp(bodyNode, "content") as string;
+
+    await Bun.sleep(1);
+
+    expect(body().startsWith("Error:")).toBeTrue();
+    expect(body()).toContain("tree exploded");
+    expect(readProp(bodyNode, "fg")).toBe("red");
   });
 
   test("parses bulk ps rss snapshots", () => {
@@ -804,6 +1184,321 @@ describe("@capybearista/opencode-ram-monitor", () => {
     }
   });
 
+  test("prefers plugin options over config files", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+
+    try {
+      await writeFile(
+        join(dir, "opencode.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2000,
+            },
+          },
+        }),
+      );
+
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 7000 })).resolves.toEqual({
+        intervalMs: 7000,
+        sourcePath: "plugin options",
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("ignores invalid plugin options and falls back to config files", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+
+    try {
+      await writeFile(
+        join(dir, "opencode.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2000,
+            },
+          },
+        }),
+      );
+
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: "bad" })).resolves.toEqual({
+        intervalMs: 2000,
+        sourcePath: join(dir, "opencode.json"),
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("treats blank or non-numeric plugin options as absent", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+
+    try {
+      await writeFile(
+        join(dir, "opencode.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2000,
+            },
+          },
+        }),
+      );
+
+      const fromFile = {
+        intervalMs: 2000,
+        sourcePath: join(dir, "opencode.json"),
+        warning: null,
+        warningPath: null,
+      };
+
+      const absentValues = [
+        "",
+        null,
+        false,
+        true,
+        "   ",
+        [],
+        {},
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+      ];
+      for (const refreshIntervalMs of absentValues) {
+        await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs })).resolves.toEqual(
+          fromFile,
+        );
+      }
+
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: "3000" })).resolves.toEqual(
+        {
+          intervalMs: 3000,
+          sourcePath: "plugin options",
+          warning: null,
+          warningPath: null,
+        },
+      );
+
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 0 })).resolves.toEqual({
+        intervalMs: 1000,
+        sourcePath: "plugin options",
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("floors and clamps numeric plugin options", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+
+    try {
+      const fromOptions = (intervalMs: number) => ({
+        intervalMs,
+        sourcePath: "plugin options",
+        warning: null,
+        warningPath: null,
+      });
+
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 2500.9 })).resolves.toEqual(
+        fromOptions(2500),
+      );
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: -500 })).resolves.toEqual(
+        fromOptions(1000),
+      );
+      await expect(
+        loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 999_999 }),
+      ).resolves.toEqual(fromOptions(60_000));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("uses the default when plugin options and config files are both unusable", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+    const emptyGlobal = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
+    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    process.env.OPENCODE_CONFIG_DIR = emptyGlobal;
+
+    try {
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: "bad" })).resolves.toEqual({
+        intervalMs: 5000,
+        sourcePath: null,
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
+      await rm(dir, { recursive: true, force: true });
+      await rm(emptyGlobal, { recursive: true, force: true });
+    }
+  });
+
+  test("reads the global config dir when the project has no config", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+    const globalDir = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
+    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    process.env.OPENCODE_CONFIG_DIR = globalDir;
+
+    try {
+      await writeFile(
+        join(globalDir, "cli.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2600,
+            },
+          },
+        }),
+      );
+
+      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
+        intervalMs: 2600,
+        sourcePath: join(globalDir, "cli.json"),
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
+      await rm(dir, { recursive: true, force: true });
+      await rm(globalDir, { recursive: true, force: true });
+    }
+  });
+
+  test("prefers project config over the global config dir", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+    const globalDir = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
+    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    process.env.OPENCODE_CONFIG_DIR = globalDir;
+
+    try {
+      await writeFile(
+        join(globalDir, "cli.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2600,
+            },
+          },
+        }),
+      );
+      await writeFile(
+        join(dir, "opencode.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2800,
+            },
+          },
+        }),
+      );
+
+      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
+        intervalMs: 2800,
+        sourcePath: join(dir, "opencode.json"),
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
+      await rm(dir, { recursive: true, force: true });
+      await rm(globalDir, { recursive: true, force: true });
+    }
+  });
+
+  test("resolves the global config dir from XDG_CONFIG_HOME", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+    const globalDir = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
+    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    const priorXdg = process.env.XDG_CONFIG_HOME;
+    delete process.env.OPENCODE_CONFIG_DIR;
+    process.env.XDG_CONFIG_HOME = globalDir;
+
+    try {
+      await mkdir(join(globalDir, "opencode"), { recursive: true });
+      await writeFile(
+        join(globalDir, "opencode", "cli.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2900,
+            },
+          },
+        }),
+      );
+
+      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
+        intervalMs: 2900,
+        sourcePath: join(globalDir, "opencode", "cli.json"),
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
+      if (priorXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = priorXdg;
+      await rm(dir, { recursive: true, force: true });
+      await rm(globalDir, { recursive: true, force: true });
+    }
+  });
+
+  test("prefers OPENCODE_CONFIG_DIR over XDG_CONFIG_HOME", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+    const configDir = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
+    const xdgDir = await mkdtemp(join(tmpdir(), "ram-monitor-xdg-"));
+    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    const priorXdg = process.env.XDG_CONFIG_HOME;
+    process.env.OPENCODE_CONFIG_DIR = configDir;
+    process.env.XDG_CONFIG_HOME = xdgDir;
+
+    try {
+      await writeFile(
+        join(xdgDir, "cli.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2900,
+            },
+          },
+        }),
+      );
+
+      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
+        intervalMs: 5000,
+        sourcePath: null,
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
+      if (priorXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = priorXdg;
+      await rm(dir, { recursive: true, force: true });
+      await rm(configDir, { recursive: true, force: true });
+      await rm(xdgDir, { recursive: true, force: true });
+    }
+  });
+
   test("loads refresh interval from .opencode JSONC config files", async () => {
     const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
     const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
@@ -910,30 +1605,45 @@ describe("@capybearista/opencode-ram-monitor", () => {
     }
   });
 
-  test("/ram command is handled only after prompt injection succeeds", async () => {
+  test("/ram command owns prompt injection and resolves normally", async () => {
     mock.module("./memory.js", () => ({
       getHeavyProcessTree: async () => "tree",
     }));
 
-    const module = await import("./server.js");
-    const prompts: unknown[] = [];
+    const module = await import(`./server.js?server=${Date.now()}`);
+    const definitions: Array<{
+      name: string;
+      description?: string;
+      execute: (input: unknown) => Promise<void>;
+    }> = [];
+    const synthetic = mock(async (_input: unknown) => {});
 
-    const plugin = await module.default.server({
-      client: {
-        session: {
-          prompt: async (payload: unknown) => {
-            prompts.push(payload);
-          },
+    await (module.default.setup as unknown as (input: unknown) => Promise<void>)({
+      command: {
+        transform: async (callback: (editor: unknown) => void) => {
+          callback({
+            add: (definition: unknown) => {
+              definitions.push(definition as (typeof definitions)[number]);
+            },
+          });
         },
       },
-    } as never);
+      session: { synthetic },
+    });
 
-    const beforeExecute = plugin["command.execute.before"];
-    expect(beforeExecute).toBeFunction();
-    await expect(
-      beforeExecute?.({ command: "ram", sessionID: "s-1" } as never, {} as never),
-    ).rejects.toThrow("__RAM_COMMAND_HANDLED__");
-    expect(prompts.length).toBe(1);
+    const command = definitions[0];
+    expect(command?.name).toBe("ram");
+    expect(command?.description).toBe("Show a detailed process tree and RAM usage");
+
+    await command?.execute({ sessionID: "s-1", prompt: { text: "" }, delivery: "steer" });
+
+    expect(synthetic).toHaveBeenCalledTimes(1);
+    expect(synthetic.mock.calls[0]?.[0]).toMatchObject({
+      sessionID: "s-1",
+      text: "tree",
+      delivery: "steer",
+      resume: false,
+    });
   });
 
   test("/ram command raises a user-visible error when prompt injection fails", async () => {
@@ -941,22 +1651,73 @@ describe("@capybearista/opencode-ram-monitor", () => {
       getHeavyProcessTree: async () => "tree",
     }));
 
-    const module = await import("./server.js");
+    const module = await import(`./server.js?server-fail=${Date.now()}`);
+    const definitions: Array<{ execute: (input: unknown) => Promise<void> }> = [];
 
-    const plugin = await module.default.server({
-      client: {
-        session: {
-          prompt: async () => {
-            throw new Error("injection failed");
-          },
+    await (module.default.setup as unknown as (input: unknown) => Promise<void>)({
+      command: {
+        transform: async (callback: (editor: unknown) => void) => {
+          callback({
+            add: (definition: unknown) => {
+              definitions.push(definition as (typeof definitions)[number]);
+            },
+          });
         },
       },
-    } as never);
+      session: {
+        synthetic: async () => {
+          throw new Error("injection failed");
+        },
+      },
+    });
 
-    const beforeExecute = plugin["command.execute.before"];
-    expect(beforeExecute).toBeFunction();
-    await expect(
-      beforeExecute?.({ command: "ram", sessionID: "s-1" } as never, {} as never),
-    ).rejects.toThrow("Unable to display RAM usage output. Please try again.");
+    let caught: unknown;
+    try {
+      await definitions[0]?.execute({ sessionID: "s-1", prompt: { text: "" }, delivery: "steer" });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("Unable to display RAM usage output. Please try again.");
+    expect((caught as Error).cause).toBeInstanceOf(Error);
+    expect(((caught as Error).cause as Error).message).toBe("injection failed");
+  });
+
+  test("/ram command reports tree failures through prompt injection without throwing", async () => {
+    mock.module("./memory.js", () => ({
+      getHeavyProcessTree: async () => {
+        throw new Error("tree failed");
+      },
+    }));
+
+    const module = await import(`./server.js?server-tree-fail=${Date.now()}`);
+    const definitions: Array<{ execute: (input: unknown) => Promise<void> }> = [];
+    const synthetic = mock(async (_input: unknown) => {});
+
+    await (module.default.setup as unknown as (input: unknown) => Promise<void>)({
+      command: {
+        transform: async (callback: (editor: unknown) => void) => {
+          callback({
+            add: (definition: unknown) => {
+              definitions.push(definition as (typeof definitions)[number]);
+            },
+          });
+        },
+      },
+      session: { synthetic },
+    });
+
+    await definitions[0]?.execute({ sessionID: "s-1", prompt: { text: "" }, delivery: "steer" });
+
+    expect(synthetic).toHaveBeenCalledTimes(1);
+    expect(synthetic.mock.calls[0]?.[0]).toMatchObject({
+      sessionID: "s-1",
+      delivery: "steer",
+      resume: false,
+    });
+    expect((synthetic.mock.calls[0]?.[0] as { text: string }).text).toContain(
+      "Unable to generate RAM usage tree. Please try again.",
+    );
   });
 });
