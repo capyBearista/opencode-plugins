@@ -1,10 +1,18 @@
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 5000;
 const MIN_REFRESH_INTERVAL_MS = 1000;
 const MAX_REFRESH_INTERVAL_MS = 60_000;
 
+const GLOBAL_CONFIG_FILES = ["opencode.json", "opencode.jsonc", "cli.json", "cli.jsonc"] as const;
+
+function getGlobalConfigDir(): string {
+  const override = process.env.OPENCODE_CONFIG_DIR;
+  if (override && override.trim().length > 0) return override;
+  return join(homedir(), ".config", "opencode");
+}
 const CONFIG_PATH_SEGMENTS = [
   ["opencode.json"],
   ["opencode.jsonc"],
@@ -177,7 +185,11 @@ function isMissingConfigError(error: unknown): boolean {
 }
 
 export function getRamMonitorConfigPaths(worktree: string): string[] {
-  return CONFIG_PATH_SEGMENTS.map((segments) => join(worktree, ...segments));
+  const globalDir = getGlobalConfigDir();
+  return [
+    ...GLOBAL_CONFIG_FILES.map((file) => join(globalDir, file)),
+    ...CONFIG_PATH_SEGMENTS.map((segments) => join(worktree, ...segments)),
+  ];
 }
 
 export async function loadRamMonitorWidgetConfig(
@@ -185,7 +197,7 @@ export async function loadRamMonitorWidgetConfig(
   overrides?: { readonly refreshIntervalMs?: unknown },
 ): Promise<RamMonitorWidgetConfig> {
   const overrideValue = overrides?.refreshIntervalMs;
-  if (overrideValue !== undefined) {
+  if (overrideValue !== undefined && Number.isFinite(Number(overrideValue))) {
     return {
       intervalMs: normalizeRefreshIntervalMs(overrideValue),
       sourcePath: "plugin options",

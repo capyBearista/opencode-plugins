@@ -97,7 +97,7 @@ Fallback: add `experimental.ramMonitor.refreshIntervalMs` to any supported confi
 3. `tui.json` / `tui.jsonc` and `.opencode/` variants - legacy TUI configs
 4. `cli.json` / `cli.jsonc` and `.opencode/` variants
 
-Plugin `options` win over config files; if multiple files define the setting, later files override earlier ones.
+Plugin `options` win over config files when the value is a valid number; invalid values fall back to files, then the default. Files load the global config dir first (`$OPENCODE_CONFIG_DIR` or `~/.config/opencode/`), then project files — later files override earlier ones.
 
 JSONC comments and trailing commas are supported.
 
