@@ -5,6 +5,10 @@ import { getHeavyProcessTree } from "./memory.js";
 const PROMPT_INJECTION_FAILURE_MESSAGE = "Unable to display RAM usage output. Please try again.";
 const TREE_FAILURE_MESSAGE = "Unable to generate RAM usage tree. Please try again.";
 
+function toLogMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default Plugin.define({
   id: "capybearista.opencode-ram-monitor",
   async setup(ctx) {
@@ -19,7 +23,7 @@ export default Plugin.define({
           } catch (error) {
             await debugLog("heavy-tree-failed", {
               sessionID: invocation.sessionID,
-              error: error instanceof Error ? error.message : String(error),
+              error: toLogMessage(error),
             });
             treeText = TREE_FAILURE_MESSAGE;
           }
@@ -36,9 +40,9 @@ export default Plugin.define({
           } catch (error) {
             await debugLog("prompt-inject-failed", {
               sessionID: invocation.sessionID,
-              error: error instanceof Error ? error.message : String(error),
+              error: toLogMessage(error),
             });
-            throw new Error(PROMPT_INJECTION_FAILURE_MESSAGE);
+            throw new Error(PROMPT_INJECTION_FAILURE_MESSAGE, { cause: error });
           }
         },
       });

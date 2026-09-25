@@ -43,7 +43,8 @@ await server.default.setup({
   },
   session: { synthetic: async () => {} },
 });
-assert(commandNames.join(",") === "ram", `unexpected commands: ${commandNames.join(",")}`);
+assert(commandNames.length === 1, `expected one command, got ${commandNames.length}`);
+assert(commandNames[0] === "ram", `unexpected command: ${commandNames[0]}`);
 
 const slots: SlotClaim[] = [];
 const layers: Array<() => unknown> = [];
@@ -69,8 +70,9 @@ const context = {
 };
 
 await tui.default.setup(context);
-const targets = slots.map((slot) => slot.after ?? slot.append).join(",");
-assert(targets === "sidebar.content,app", `unexpected slot targets: ${targets}`);
+assert(slots.length === 2, `unexpected slot count: ${slots.length}`);
+assert(slots[0]?.append === "sidebar.content", `unexpected first slot target: ${slots[0]?.append}`);
+assert(slots[1]?.append === "app", `unexpected second slot target: ${slots[1]?.append}`);
 
 const appSlot = slots.find((slot) => slot.append === "app");
 assert(appSlot, "app slot was not registered");

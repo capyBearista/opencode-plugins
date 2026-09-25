@@ -20,6 +20,8 @@ import { readRamWidgetTheme } from "./theme.js";
 
 type NodePropValue = unknown | (() => unknown);
 type TuiContext = Plugin.Context;
+type RamWidgetThemeTokens = ReturnType<typeof readRamWidgetTheme>;
+type RamWidgetToken = RamWidgetThemeTokens[keyof RamWidgetThemeTokens];
 
 const MODAL_MAX_HEIGHT = 24;
 
@@ -58,9 +60,10 @@ function createContainerNode(
 ): JSX.Element {
   const node = createElement(tag);
   spread(node, createRenderableProps(props), true);
-  for (const child of children) {
-    insert(node, child);
-  }
+  // One children expression mirrors Solid's JSX path: the reconciler unwraps
+  // function children and reconciles them, so a child that yields null takes
+  // no row and does not clear its siblings.
+  insert(node, children);
   return node as unknown as JSX.Element;
 }
 
@@ -127,6 +130,7 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
     count: 0,
   });
   const [error, setError] = createSignal<string | null>(null);
+  const [configError, setConfigError] = createSignal<string | null>(null);
   const [intervalMs, setIntervalMs] = createSignal<number>(getDefaultRefreshIntervalMs());
   const [tick, setTick] = createSignal(0);
   const [warning, setWarning] = createSignal<string | null>(null);
@@ -140,14 +144,13 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
     processSnapshotCache.setTtlMs(config.intervalMs);
     setWarning(config.warning ? `Config warning: using ${config.intervalMs}ms fallback` : null);
 
-    if (config.warning) {
-      await debugLog("sidebar-config-fallback", {
-        appliedConfigPath: config.sourcePath || "unknown",
-        failedConfigPath: config.warningPath || "unknown",
-        error: config.warning,
-        fallbackIntervalMs: config.intervalMs,
-      });
-    }
+    if (!config.warning) return;
+    await debugLog("sidebar-config-fallback", {
+      appliedConfigPath: config.sourcePath || "unknown",
+      failedConfigPath: config.warningPath || "unknown",
+      error: config.warning,
+      fallbackIntervalMs: config.intervalMs,
+    });
   };
 
   const poll = async () => {
@@ -174,9 +177,32 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
     }
   };
 
+  const statusColor = (fallback: RamWidgetToken): RamWidgetToken => {
+    if (error() || configError()) return theme().error;
+    if (warning()) return theme().warning;
+    return fallback;
+  };
+
+  const footerHint = (): string | null => {
+    if (configError()) return `Config error: ${configError()}`;
+    if (error()) return warning();
+    return null;
+  };
+
   onMount(() => {
     void (async () => {
-      await loadConfig();
+      try {
+        await loadConfig();
+      } catch (err: unknown) {
+        await debugLog("sidebar-config-load-failed", {
+          worktree: worktree(),
+          error: getErrorMessage(err),
+        });
+        if (!disposed) {
+          setConfigError(getErrorMessage(err));
+        }
+      }
+
       if (!disposed) {
         void poll();
       }
@@ -193,8 +219,7 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
     {
       border: true,
       borderStyle: "rounded",
-      borderColor: () =>
-        error() ? theme().error : warning() ? theme().warning : theme().borderSubtle,
+      borderColor: () => statusColor(theme().borderSubtle),
       backgroundColor: () => theme().backgroundElement,
       gap: 0,
       paddingLeft: 1,
@@ -210,7 +235,7 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
         [
           createTextNode(
             {
-              fg: () => (error() ? theme().error : warning() ? theme().warning : theme().success),
+              fg: () => statusColor(theme().success),
             },
             () => formatRamHeaderLeft(tick() % 2 === 0 ? "●" : "○"),
           ),
@@ -237,9 +262,10 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
       createTextNode({ fg: () => (error() ? theme().error : theme().secondary) }, () =>
         !error() ? formatRamRow("All", ram().allDirect, ram().allWithTools) : null,
       ),
-      createTextNode({ fg: () => theme().textMuted }, () =>
-        !error() ? "/ram includes tools" : warning() ? warning() : null,
-      ),
+      () => {
+        const hint = footerHint();
+        return hint ? createTextNode({ fg: () => theme().textMuted }, hint) : null;
+      },
     ],
   );
 }
@@ -264,7 +290,9 @@ function RamModal(props: { context: TuiContext }): JSX.Element {
     disposed = true;
     void props.context.renderer
       .idle()
-      .catch(() => {})
+      .catch((err: unknown) => {
+        void debugLog("renderer-idle-failed", { error: getErrorMessage(err) });
+      })
       .finally(() => syntaxStyle.destroy());
   });
 
@@ -331,19 +359,26 @@ export default Plugin.define({
   id: "capybearista.opencode-ram-monitor",
   setup(context) {
     const unregisterSidebar = context.ui.slot({
-      // `after` is the only ordering lever in the V2 slot API: it renders this
-      // claim after every contribution inside `sidebar.content`, so the widget
-      // follows the built-in Context/MCP panels instead of leading them.
-      after: "sidebar.content",
+      // `append` renders inside `sidebar.content` in plugin enable order, so
+      // the widget follows the built-in Context/MCP panels yet precedes
+      // third-party plugins listed after this one. (An `after` claim would
+      // sit below every contribution regardless of order, and would survive
+      // a slot replacement — traded away here for ordering.)
+      append: "sidebar.content",
       render() {
         return createComponent(RamWidget, { context, onOpen: () => openRamModal(context) });
       },
     });
 
-    // context.keymap.layer creates a layer owned by the calling component, so
-    // it cannot run in setup scope; the always-mounted "app" slot supplies
-    // that component. The flag keeps duplicate app mounts or repeated renders
-    // from stacking layers, and onCleanup lets a remount re-register.
+    // Host contract: `keymap.layer()` returns void and the layer is owned by
+    // the calling component. @opencode/plugin 2.0.2 declares
+    // `layer(input: () => KeymapLayer): void` (dist/tui/context.d.ts), and the
+    // host maps it to Keymap.createLayer (packages/tui/src/plugin/api.tsx),
+    // which registers through @opentui/keymap/solid `useBindings` and is
+    // disposed with that component. So it cannot run in setup scope; the
+    // always-mounted "app" slot supplies that component. The flag keeps
+    // duplicate app mounts or repeated renders from stacking layers, and
+    // onCleanup lets a remount re-register.
     let commandLayerRegistered = false;
 
     const unregisterCommand = context.ui.slot({

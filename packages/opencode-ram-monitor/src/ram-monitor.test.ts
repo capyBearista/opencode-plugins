@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "@opentui/solid/preload";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { type JSX, testRender } from "@opentui/solid";
 import { createRoot } from "solid-js";
 import { getRamMonitorDebugLogPath, isRamMonitorDebugEnabled } from "./debug.js";
 import * as MemoryModule from "./memory.js";
@@ -93,6 +94,11 @@ type MockRenderable = {
   props: Record<string, unknown>;
 };
 
+type RealRenderable = {
+  height: number;
+  getChildren: () => RealRenderable[];
+};
+
 type MockSlotClaim = {
   render: (input: unknown) => unknown;
   prepend?: string;
@@ -116,7 +122,7 @@ type MockTuiContext = {
       clear: ReturnType<typeof mock>;
     };
   };
-  keymap: { layer: (input: () => unknown) => void };
+  keymap: { layer: (input: () => unknown) => (() => void) | undefined };
   theme: Record<string, unknown>;
   location: { directory: string };
   renderer: { idle: () => Promise<void> };
@@ -126,6 +132,10 @@ function mockOpenTuiSolid(): void {
   mock.module("@opentui/solid", () => ({
     createElement: (tag: string) => ({ tag, children: [], props: {} }),
     insert: (node: MockRenderable, child: unknown) => {
+      if (Array.isArray(child)) {
+        node.children.push(...child);
+        return;
+      }
       node.children.push(child);
     },
     spread: (node: MockRenderable, props: Record<string, unknown>) => {
@@ -143,12 +153,14 @@ function createTuiContext(): {
   context: MockTuiContext;
   slots: MockSlotClaim[];
   layers: Array<() => unknown>;
+  layerDisposers: Array<() => void>;
   dialog: MockTuiContext["ui"]["dialog"];
   dialogCalls: string[];
   getShownRender: () => (() => unknown) | undefined;
 } {
   const slots: MockSlotClaim[] = [];
   const layers: Array<() => unknown> = [];
+  const layerDisposers: Array<() => void> = [];
   const dialogCalls: string[] = [];
   let shownRender: (() => unknown) | undefined;
   const dialog = {
@@ -174,6 +186,9 @@ function createTuiContext(): {
     keymap: {
       layer: (input) => {
         layers.push(input);
+        const dispose = () => {};
+        layerDisposers.push(dispose);
+        return dispose;
       },
     },
     theme: {
@@ -188,7 +203,7 @@ function createTuiContext(): {
         },
       },
       background: { raised: { base: "#111111" } },
-      border: { base: "dimgray" },
+      border: { base: "#444444" },
       markdown: {
         text: "white",
         heading: "cyan",
@@ -205,11 +220,39 @@ function createTuiContext(): {
     renderer: { idle: async () => {} },
   };
 
-  return { context, slots, layers, dialog, dialogCalls, getShownRender: () => shownRender };
+  return {
+    context,
+    slots,
+    layers,
+    layerDisposers,
+    dialog,
+    dialogCalls,
+    getShownRender: () => shownRender,
+  };
 }
 
 async function loadTuiPlugin() {
   return await import(`./tui.js?tui=${Date.now()}-${Math.random()}`);
+}
+
+async function mountSidebarWidget(): Promise<{
+  setup: Awaited<ReturnType<typeof testRender>>;
+  box: RealRenderable;
+}> {
+  const module = await loadTuiPlugin();
+  const { context, slots } = createTuiContext();
+  await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
+
+  const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");
+  const setup = await testRender(() => sidebarSlot?.render({ sessionID: "s-1" }) as JSX.Element, {
+    width: 40,
+    height: 12,
+  });
+
+  await Bun.sleep(5);
+  await setup.renderOnce();
+  const root = setup.renderer.root as unknown as RealRenderable;
+  return { setup, box: root.getChildren()[0] as RealRenderable };
 }
 
 describe("@capybearista/opencode-ram-monitor", () => {
@@ -572,7 +615,7 @@ describe("@capybearista/opencode-ram-monitor", () => {
 
     const { context, slots } = createTuiContext();
     await (tui.default.setup as unknown as (input: unknown) => Promise<void>)(context);
-    expect(slots[0]?.after).toBe("sidebar.content");
+    expect(slots[0]?.append).toBe("sidebar.content");
     expect(slots[1]?.append).toBe("app");
   });
 
@@ -604,6 +647,15 @@ describe("@capybearista/opencode-ram-monitor", () => {
     });
   });
 
+  test("sidebar widget takes no footer row when there is no hint", async () => {
+    const { setup, box } = await mountSidebarWidget();
+
+    expect(box.getChildren().length).toBe(4);
+    expect(box.height).toBe(6);
+
+    setup.renderer.destroy();
+  });
+
   test("registers the sidebar widget and the ram command layer", async () => {
     mockOpenTuiSolid();
     const module = await loadTuiPlugin();
@@ -611,7 +663,7 @@ describe("@capybearista/opencode-ram-monitor", () => {
 
     await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
 
-    expect(slots[0]?.after).toBe("sidebar.content");
+    expect(slots[0]?.append).toBe("sidebar.content");
     expect(slots[1]?.append).toBe("app");
 
     const appSlot = slots.find((slot) => slot.append === "app");
@@ -640,7 +692,7 @@ describe("@capybearista/opencode-ram-monitor", () => {
   test("registers one keymap layer per mount and re-registers after disposal", async () => {
     mockOpenTuiSolid();
     const module = await loadTuiPlugin();
-    const { context, slots, layers } = createTuiContext();
+    const { context, slots, layers, layerDisposers } = createTuiContext();
     await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
 
     const appSlot = slots.find((slot) => slot.append === "app");
@@ -650,6 +702,8 @@ describe("@capybearista/opencode-ram-monitor", () => {
       appSlot?.render({});
       appSlot?.render({});
       expect(layers.length).toBe(1);
+      expect(layerDisposers.length).toBe(1);
+      expect(layerDisposers[0]).toBeFunction();
       return dispose;
     });
     dispose();
@@ -659,6 +713,7 @@ describe("@capybearista/opencode-ram-monitor", () => {
       return dispose;
     });
     expect(layers.length).toBe(2);
+    expect(layerDisposers.length).toBe(2);
     disposeAgain();
   });
 
@@ -680,7 +735,7 @@ describe("@capybearista/opencode-ram-monitor", () => {
     const { context, slots, dialog, dialogCalls, getShownRender } = createTuiContext();
     await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
 
-    const sidebarSlot = slots.find((slot) => slot.after === "sidebar.content");
+    const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");
     const widget = sidebarSlot?.render({ sessionID: "s-1" }) as MockRenderable;
     expect(widget.tag).toBe("box");
     expect(widget.props.onMouseUp).toBeFunction();
@@ -731,7 +786,7 @@ describe("@capybearista/opencode-ram-monitor", () => {
     const { context, slots, dialog, dialogCalls } = createTuiContext();
     await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
 
-    const sidebarSlot = slots.find((slot) => slot.after === "sidebar.content");
+    const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");
     const widget = sidebarSlot?.render({ sessionID: "s-1" }) as MockRenderable;
     const open = widget.props.onMouseUp as () => void;
 
@@ -741,6 +796,42 @@ describe("@capybearista/opencode-ram-monitor", () => {
     expect(dialogCalls).toEqual(["clear", "show", "set", "clear", "show", "set"]);
     expect(dialog.show).toHaveBeenCalledTimes(2);
     expect(dialog.set).toHaveBeenCalledTimes(2);
+  });
+
+  test("modal shows the tree failure error instead of loading forever", async () => {
+    mockOpenTuiSolid();
+    mock.module("./memory.js", () => ({
+      formatBytes: () => "0 MB",
+      getHeavyProcessTree: async () => {
+        throw new Error("tree exploded");
+      },
+      getLightweightRam: async () => ({
+        thisDirect: 0,
+        thisWithTools: 0,
+        allDirect: 0,
+        allWithTools: 0,
+        count: 0,
+      }),
+    }));
+
+    const module = await loadTuiPlugin();
+    const { context, slots, getShownRender } = createTuiContext();
+    await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
+
+    const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");
+    const widget = sidebarSlot?.render({ sessionID: "s-1" }) as MockRenderable;
+    (widget.props.onMouseUp as () => void)();
+
+    const modal = getShownRender()?.() as MockRenderable;
+    const scrollbox = modal.children[1] as MockRenderable;
+    const bodyNode = scrollbox.children[0] as MockRenderable;
+    const body = () => readProp(bodyNode, "content") as string;
+
+    await Bun.sleep(1);
+
+    expect(body().startsWith("Error:")).toBeTrue();
+    expect(body()).toContain("tree exploded");
+    expect(readProp(bodyNode, "fg")).toBe("red");
   });
 
   test("parses bulk ps rss snapshots", () => {
@@ -1147,6 +1238,92 @@ describe("@capybearista/opencode-ram-monitor", () => {
     }
   });
 
+  test("treats blank or non-numeric plugin options as absent", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+
+    try {
+      await writeFile(
+        join(dir, "opencode.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2000,
+            },
+          },
+        }),
+      );
+
+      const fromFile = {
+        intervalMs: 2000,
+        sourcePath: join(dir, "opencode.json"),
+        warning: null,
+        warningPath: null,
+      };
+
+      const absentValues = [
+        "",
+        null,
+        false,
+        true,
+        "   ",
+        [],
+        {},
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+      ];
+      for (const refreshIntervalMs of absentValues) {
+        await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs })).resolves.toEqual(
+          fromFile,
+        );
+      }
+
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: "3000" })).resolves.toEqual(
+        {
+          intervalMs: 3000,
+          sourcePath: "plugin options",
+          warning: null,
+          warningPath: null,
+        },
+      );
+
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 0 })).resolves.toEqual({
+        intervalMs: 1000,
+        sourcePath: "plugin options",
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("floors and clamps numeric plugin options", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+
+    try {
+      const fromOptions = (intervalMs: number) => ({
+        intervalMs,
+        sourcePath: "plugin options",
+        warning: null,
+        warningPath: null,
+      });
+
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 2500.9 })).resolves.toEqual(
+        fromOptions(2500),
+      );
+      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: -500 })).resolves.toEqual(
+        fromOptions(1000),
+      );
+      await expect(
+        loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 999_999 }),
+      ).resolves.toEqual(fromOptions(60_000));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("uses the default when plugin options and config files are both unusable", async () => {
     const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
     const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
@@ -1494,8 +1671,53 @@ describe("@capybearista/opencode-ram-monitor", () => {
       },
     });
 
-    await expect(
-      definitions[0]?.execute({ sessionID: "s-1", prompt: { text: "" }, delivery: "steer" }),
-    ).rejects.toThrow("Unable to display RAM usage output. Please try again.");
+    let caught: unknown;
+    try {
+      await definitions[0]?.execute({ sessionID: "s-1", prompt: { text: "" }, delivery: "steer" });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("Unable to display RAM usage output. Please try again.");
+    expect((caught as Error).cause).toBeInstanceOf(Error);
+    expect(((caught as Error).cause as Error).message).toBe("injection failed");
+  });
+
+  test("/ram command reports tree failures through prompt injection without throwing", async () => {
+    mock.module("./memory.js", () => ({
+      getHeavyProcessTree: async () => {
+        throw new Error("tree failed");
+      },
+    }));
+
+    const module = await import(`./server.js?server-tree-fail=${Date.now()}`);
+    const definitions: Array<{ execute: (input: unknown) => Promise<void> }> = [];
+    const synthetic = mock(async (_input: unknown) => {});
+
+    await (module.default.setup as unknown as (input: unknown) => Promise<void>)({
+      command: {
+        transform: async (callback: (editor: unknown) => void) => {
+          callback({
+            add: (definition: unknown) => {
+              definitions.push(definition as (typeof definitions)[number]);
+            },
+          });
+        },
+      },
+      session: { synthetic },
+    });
+
+    await definitions[0]?.execute({ sessionID: "s-1", prompt: { text: "" }, delivery: "steer" });
+
+    expect(synthetic).toHaveBeenCalledTimes(1);
+    expect(synthetic.mock.calls[0]?.[0]).toMatchObject({
+      sessionID: "s-1",
+      delivery: "steer",
+      resume: false,
+    });
+    expect((synthetic.mock.calls[0]?.[0] as { text: string }).text).toContain(
+      "Unable to generate RAM usage tree. Please try again.",
+    );
   });
 });
