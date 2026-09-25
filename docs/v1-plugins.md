@@ -2,7 +2,7 @@
 
 For anyone running these plugins on an OpenCode V1 host.
 
-The package READMEs for `opencode-agents-loader` and `opencode-double-tap-timeline` describe their published V2 releases. This guide retains setup instructions for the frozen V1 versions.
+The package READMEs for `opencode-agents-loader`, `opencode-double-tap-timeline`, and `opencode-ram-monitor` describe their published V2 releases. This guide retains setup instructions for the frozen V1 versions.
 
 ## Status
 
@@ -13,9 +13,9 @@ The package READMEs for `opencode-agents-loader` and `opencode-double-tap-timeli
 | `opencode-adversarial-review` | 1.0.0 | Active V1 releases use `latest`. |
 | `opencode-agent-prompt-inheritance` | 1.0.0 | Active V1 releases use `latest`; upstream prompt sync remains enabled. No V2 port. |
 | `opencode-output-styles` | 1.0.1 | Active V1 releases use `latest`. |
-| `opencode-ram-monitor` | 1.1.0 | Active V1 releases use `latest`. No V2 port in this release. |
+| `opencode-ram-monitor` | 1.1.0 | V1 `latest` is superseded: V2 `2.0.0` uses `latest`. Pin `1.1.0` for V1 hosts. |
 
-The loader and timeline `latest` tags remain frozen after V2 publication too. This freeze does not apply to the other four packages.
+The loader and timeline `latest` tags remain frozen after V2 publication too. This freeze does not apply to the other three packages.
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Through the V1 CLI:
 opencode plugin @capybearista/opencode-output-styles@latest
 ```
 
-For the frozen loader, use `@capybearista/opencode-agents-loader@1.0.0` in the V1 server config. For the frozen timeline, use `@capybearista/opencode-double-tap-timeline@1.0.1` in the V1 TUI config. The other four package READMEs retain their V1 usage instructions; see the root [README](../README.md) for links.
+For the frozen loader, use `@capybearista/opencode-agents-loader@1.0.0` in the V1 server config. For the frozen timeline, use `@capybearista/opencode-double-tap-timeline@1.0.1` in the V1 TUI config. The other three package READMEs retain their V1 usage instructions; see the root [README](../README.md) for links.
 
 ## Pinning and updates
 
@@ -47,6 +47,6 @@ Restarting OpenCode does not fetch a newer release for an already cached target.
 
 ## V2 boundary
 
-The two V2 ports use the plural `"plugins"` key: loader belongs in server `opencode.json`, while timeline belongs in TUI `cli.json`. Local directory loading uses `server.js` and `tui.js`, respectively. Both `2.0.0` releases are published under the `opencode2` tag.
+The three V2 ports use the plural `"plugins"` key: loader belongs in server `opencode.json`, while timeline belongs in TUI `cli.json`. Ram-monitor is a dual plugin (server `opencode.json` plus TUI `cli.json`). Local directory loading uses `server.js` and `tui.js`, respectively. Loader and timeline `2.0.0` releases are published under the `opencode2` tag; ram-monitor `2.0.0` is published under `latest`.
 
 Keep the lines apart: V1 and V2 may share a default configuration directory, and these plugin releases do not migrate it for you. Use separate profiles for side-by-side testing. V2 provides explicit plugin `check` and `update` actions; a restart alone does not upgrade a cached target, and exact pins stay fixed.

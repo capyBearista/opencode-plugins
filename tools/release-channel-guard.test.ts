@@ -120,7 +120,7 @@ async function createFixture(
       },
       [packageNames.inheritance]: { releaseClass: "v1", channel: "latest" },
       [packageNames.styles]: { releaseClass: "v1", channel: "latest" },
-      [packageNames.ram]: { releaseClass: "v1", channel: "latest" },
+      [packageNames.ram]: { releaseClass: "v2", channel: "latest" },
       [packageNames.review]: { releaseClass: "v1", channel: "latest" },
     },
   });
@@ -373,16 +373,16 @@ describe("release-channel-guard policy matrix", () => {
 
   test("R5 several ordinary V1 updates remain one latest publication", async () => {
     const cwd = await createFixture({
+      [packageNames.inheritance]: "1.0.1",
       [packageNames.styles]: "1.0.2",
-      [packageNames.ram]: "1.1.1",
     });
 
     const plan = await buildReleasePlan({ cwd, registryClient: createRegistryClient() });
 
     expect(plan.channel).toBe("latest");
     expect(plan.unpublished.map((pkg) => pkg.name)).toEqual([
+      packageNames.inheritance,
       packageNames.styles,
-      packageNames.ram,
     ]);
   });
 
@@ -407,6 +407,127 @@ describe("release-channel-guard policy matrix", () => {
       "mixed unpublished release classes",
     );
     expect(invocations).toBe(0);
+  });
+
+  test("R1 the policy requires the approved V2 class for ram-monitor", async () => {
+    const cwd = await createFixture();
+    const policyFile = path.join(cwd, "tools", "release-channels.json");
+    const policy = JSON.parse(await readFile(policyFile, "utf8")) as {
+      packages: Record<string, unknown>;
+    };
+    policy.packages[packageNames.ram] = { releaseClass: "v1", channel: "latest" };
+    await writeJson(policyFile, policy);
+
+    await expectGuardRejects(
+      buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
+      "does not match the approved release class",
+    );
+  });
+
+  test("R2 accepts major 2 and 3 for the V2 class", async () => {
+    for (const version of ["2.0.0", "3.0.0"]) {
+      const cwd = await createFixture({ [packageNames.ram]: version });
+
+      const plan = await buildReleasePlan({ cwd, registryClient: createRegistryClient() });
+
+      expect(plan.channel).toBe("latest");
+      expect(plan.unpublished).toEqual([
+        expect.objectContaining({
+          name: packageNames.ram,
+          version,
+          releaseClass: "v2",
+          channel: "latest",
+        }),
+      ]);
+    }
+  });
+
+  test("R2 rejects an unpublished major 1 version under the V2 class", async () => {
+    const cwd = await createFixture({ [packageNames.ram]: "1.2.0" });
+
+    await expectGuardRejects(
+      buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
+      "stable package version >=2.0.0",
+    );
+  });
+
+  test("R3 an unpublished V2-class release plans latest in one invocation", async () => {
+    const cwd = await createFixture({ [packageNames.ram]: "2.0.0" });
+    let invocation: readonly string[] | undefined;
+
+    const plan = await runReleaseGuard({
+      cwd,
+      mode: "publish",
+      env: publishEnvironment(),
+      registryClient: createRegistryClient(),
+      testOnlyNoGitTag: true,
+      runChangesets: async (args) => {
+        invocation = args;
+        return 0;
+      },
+    });
+
+    expect(plan.channel).toBe("latest");
+    expect(plan.unpublished).toEqual([
+      expect.objectContaining({
+        name: packageNames.ram,
+        version: "2.0.0",
+        releaseClass: "v2",
+        channel: "latest",
+      }),
+    ]);
+    expect(invocation).toEqual(["publish", "--tag", "latest", "--no-git-tag"]);
+  });
+
+  test("R3 the published V1 baseline under the V2 class stays a no-op", async () => {
+    const cwd = await createFixture();
+
+    const plan = await buildReleasePlan({ cwd, registryClient: createRegistryClient() });
+
+    expect(plan.channel).toBe("noop");
+    expect(plan.packages.find((pkg) => pkg.name === packageNames.ram)).toEqual(
+      expect.objectContaining({
+        version: "1.1.0",
+        releaseClass: "v2",
+        channel: "latest",
+        published: true,
+      }),
+    );
+  });
+
+  test("R4 mixed unpublished V1 and V2-class releases reject before any publish invocation", async () => {
+    const cwd = await createFixture({
+      [packageNames.ram]: "2.0.0",
+      [packageNames.styles]: "1.0.2",
+    });
+    let invocations = 0;
+
+    await expectGuardRejects(
+      runReleaseGuard({
+        cwd,
+        mode: "publish",
+        env: publishEnvironment(),
+        registryClient: createRegistryClient(),
+        runChangesets: async () => {
+          invocations++;
+          return 0;
+        },
+      }),
+      "mixed unpublished release classes",
+    );
+    expect(invocations).toBe(0);
+  });
+
+  test("R4 frozen OpenCode 2 and V2-class releases cannot share one publish", async () => {
+    const cwd = await createFixture({
+      [packageNames.agents]: "2.0.0",
+      [packageNames.ram]: "2.0.0",
+    });
+
+    await expectGuardRejects(
+      buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
+      "mixed unpublished release classes",
+    );
   });
 
   test("R7 frozen V1 packages cannot continue with an unpublished V1 version", async () => {
