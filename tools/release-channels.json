@@ -20,7 +20,7 @@
       "channel": "latest"
     },
     "@capybearista/opencode-ram-monitor": {
-      "releaseClass": "v1",
+      "releaseClass": "v2",
       "channel": "latest"
     },
     "@capybearista/opencode-adversarial-review": {

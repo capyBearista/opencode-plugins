@@ -39,7 +39,7 @@ const APPROVED_POLICY: Record<string, PolicyEntry> = {
     channel: "latest",
   },
   "@capybearista/opencode-ram-monitor": {
-    releaseClass: "v1",
+    releaseClass: "v2",
     channel: "latest",
   },
   "@capybearista/opencode-adversarial-review": {
@@ -48,7 +48,7 @@ const APPROVED_POLICY: Record<string, PolicyEntry> = {
   },
 };
 
-type ReleaseClass = "v1" | "frozen-v1-v2";
+type ReleaseClass = "v1" | "v2" | "frozen-v1-v2";
 type ReleaseChannel = "noop" | "latest" | "opencode2";
 
 type PolicyEntry = {
@@ -73,6 +73,7 @@ export type ReleasePackage = {
   name: string;
   version: string;
   releaseClass: "v1" | "v2";
+  channel: Exclude<ReleaseChannel, "noop">;
   published: boolean;
 };
 
@@ -175,30 +176,35 @@ export async function buildReleasePlan(options: BuildPlanOptions = {}): Promise<
       }
     }
 
+    const published = hasVersion(snapshot, item.version);
+    const major = majorVersion(item.version);
+    if (policyEntry.releaseClass === "v2" && !published && (major === undefined || major < 2)) {
+      throw new ReleaseGuardError(
+        `${item.name} may only publish a stable package version >=2.0.0 from the V2 release class`,
+      );
+    }
+
     packages.push({
       name: item.name,
       version: item.version,
       releaseClass:
-        policyEntry.releaseClass === "v1"
-          ? "v1"
-          : item.version === policyEntry.frozenLatest
+        policyEntry.releaseClass === "frozen-v1-v2"
+          ? item.version === policyEntry.frozenLatest
             ? "v1"
-            : "v2",
-      published: hasVersion(snapshot, item.version),
+            : "v2"
+          : policyEntry.releaseClass,
+      channel: policyEntry.channel,
+      published,
     });
   }
 
   const unpublished = packages.filter((item) => !item.published);
-  const releaseClasses = new Set(unpublished.map((item) => item.releaseClass));
+  // One Changesets run publishes a single tag, so class and destination must be homogeneous.
+  const releaseClasses = new Set(unpublished.map((item) => `${item.releaseClass}:${item.channel}`));
   if (releaseClasses.size > 1) {
     throw new ReleaseGuardError("mixed unpublished release classes cannot be published together");
   }
-  const channel =
-    unpublished.length === 0
-      ? "noop"
-      : unpublished[0].releaseClass === "v2"
-        ? "opencode2"
-        : "latest";
+  const channel: ReleaseChannel = unpublished.length === 0 ? "noop" : unpublished[0].channel;
   return { channel, packages, unpublished };
 }
 
