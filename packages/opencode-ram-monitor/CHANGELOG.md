@@ -1,5 +1,11 @@
 # @capybearista/opencode-ram-monitor
 
+## 2.0.0
+
+### Major Changes
+
+- c224cf0: Publish the opencode-ram-monitor V2 port as 2.0.0 on the `latest` npm tag.
+
 ## 1.1.0
 
 ### Minor Changes
