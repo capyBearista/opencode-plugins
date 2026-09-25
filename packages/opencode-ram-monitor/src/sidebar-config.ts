@@ -11,6 +11,8 @@ const GLOBAL_CONFIG_FILES = ["opencode.json", "opencode.jsonc", "cli.json", "cli
 function getGlobalConfigDir(): string {
   const override = process.env.OPENCODE_CONFIG_DIR;
   if (override && override.trim().length > 0) return override;
+  const xdg = process.env.XDG_CONFIG_HOME;
+  if (xdg && xdg.trim().length > 0) return join(xdg, "opencode");
   return join(homedir(), ".config", "opencode");
 }
 const CONFIG_PATH_SEGMENTS = [

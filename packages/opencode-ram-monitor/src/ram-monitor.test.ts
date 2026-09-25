@@ -1245,6 +1245,83 @@ describe("@capybearista/opencode-ram-monitor", () => {
     }
   });
 
+  test("resolves the global config dir from XDG_CONFIG_HOME", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+    const globalDir = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
+    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    const priorXdg = process.env.XDG_CONFIG_HOME;
+    delete process.env.OPENCODE_CONFIG_DIR;
+    process.env.XDG_CONFIG_HOME = globalDir;
+
+    try {
+      await mkdir(join(globalDir, "opencode"), { recursive: true });
+      await writeFile(
+        join(globalDir, "opencode", "cli.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2900,
+            },
+          },
+        }),
+      );
+
+      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
+        intervalMs: 2900,
+        sourcePath: join(globalDir, "opencode", "cli.json"),
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
+      if (priorXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = priorXdg;
+      await rm(dir, { recursive: true, force: true });
+      await rm(globalDir, { recursive: true, force: true });
+    }
+  });
+
+  test("prefers OPENCODE_CONFIG_DIR over XDG_CONFIG_HOME", async () => {
+    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
+    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
+    const configDir = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
+    const xdgDir = await mkdtemp(join(tmpdir(), "ram-monitor-xdg-"));
+    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    const priorXdg = process.env.XDG_CONFIG_HOME;
+    process.env.OPENCODE_CONFIG_DIR = configDir;
+    process.env.XDG_CONFIG_HOME = xdgDir;
+
+    try {
+      await writeFile(
+        join(xdgDir, "cli.json"),
+        JSON.stringify({
+          experimental: {
+            ramMonitor: {
+              refreshIntervalMs: 2900,
+            },
+          },
+        }),
+      );
+
+      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
+        intervalMs: 5000,
+        sourcePath: null,
+        warning: null,
+        warningPath: null,
+      });
+    } finally {
+      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
+      if (priorXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = priorXdg;
+      await rm(dir, { recursive: true, force: true });
+      await rm(configDir, { recursive: true, force: true });
+      await rm(xdgDir, { recursive: true, force: true });
+    }
+  });
+
   test("loads refresh interval from .opencode JSONC config files", async () => {
     const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
     const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
