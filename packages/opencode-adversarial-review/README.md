@@ -23,7 +23,7 @@ OpenCode is designed to be highly extensible. This plugin hooks into the OpenCod
 The plugin owns both reviewer agents and installs the commands that route to them. One `REVIEWERS` config drives both; only identity, command file, and prompt differ:
 
 - **Agents (in memory)**: setup registers the hidden `adversarial-reviewer` and `reviewer` subagents through `agent.transform`. Nothing is written to your agents directory.
-- **Commands (on disk)**: setup installs `commands/adversarial-review.md` and `commands/review.md` from the packaged templates into your OpenCode config directory. The host discovers them as `/adversarial-review` and `/review` and routes each to its reviewer with `subagent: true`.
+- **Commands (on disk)**: setup installs `commands/adversarial-review.md` and `commands/review.md` from the packaged templates into your OpenCode config directory. The host discovers them as `/adversarial-review` and `/review` and routes each to its reviewer with `subagent: true`. Each template stays minimal: frontmatter, the handoff, one pointer line, `$ARGUMENTS`, and the rendered Git snapshot. All review doctrine — target selection, focus handling, evidence rules, and the output contract — lives in `src/prompt.ts` and its lockstep references in `src/prompts/`.
 - **Prompts (packaged)**: `src/prompt.ts` holds both system prompts; `src/prompts/adversarial-review.md` and `src/prompts/review.md` are their reference copies.
 
 ```mermaid
@@ -53,7 +53,7 @@ graph TB
     class Review adversary;
 ```
 
-Each reviewer runs as a linked background child of the invoking session, so the review is unbiased by the primary agent's conversation history. It collects its own evidence with read-only `read`, `grep`, `glob`, whitelisted `git` commands (including `git remote -v` for repository identity), and the read-only `gh pr view` / `gh pr diff` surface (plus the `gh auth status` diagnostic); the command template only primes it with a point-in-time Git snapshot.
+Each reviewer runs as a linked background child of the invoking session, so the review is unbiased by the primary agent's conversation history. It collects its own evidence with read-only `read`, `grep`, `glob`, whitelisted `git` commands (including `git remote -v` for repository identity), and the read-only `gh pr view` / `gh pr diff` surface (plus the `gh auth status` diagnostic); the command template only primes it with a point-in-time Git snapshot and a pointer to the system prompt, which carries the target-selection, evidence, and output rules.
 
 ## Features
 
@@ -66,7 +66,7 @@ Each reviewer runs as a linked background child of the invoking session, so the 
 
 ## Requirements
 
-- GNU/Linux with a Bash-compatible shell. The command template is not tested on Windows or macOS and makes no cross-platform parity claims.
+- Tested on GNU/Linux with a Bash-compatible shell. On other platforms the five snapshot blocks may render partially; each block ends with `2>&1 || true` and the reviewer is told the snapshot may be incomplete, so it self-collects anything missing with its own read-only tools.
 - `git` on `PATH`.
 - `gh` on `PATH` and authenticated only for pull request targets; commit SHA, `--scope`, and `--base` targets do not use `gh`. When `gh` is missing, unauthenticated, or fails, the reviewer reports that plainly instead of guessing (on failure, its stderr verbatim).
 - A writable `<config>/commands/` directory (see Install).
@@ -123,7 +123,7 @@ Run a review on your current working tree changes:
 
 ### Arguments
 
-`/adversarial-review` and `/review` accept the same `--scope` and `--base` flags, plus a bare commit SHA or a GitHub pull request URL/number as the target:
+`/adversarial-review` and `/review` accept the same `--scope` and `--base` flags, plus a bare commit SHA or a GitHub pull request URL/number as the target. The installed command templates only forward these arguments; target selection, evidence rules, and the output contract live in the packaged system prompts (`src/prompt.ts`, mirrored in `src/prompts/`).
 
 | Argument | Values | Description |
 | :--- | :--- | :--- |
@@ -226,7 +226,7 @@ The `/adversarial-review` and `/review` commands route to hidden reviewers; each
 
 ### Shell blocks run outside the permission flow
 
-Each installed template contains five `!`-backtick blocks (branch, status, recent commits, working-tree diff, untracked file list). The host evaluates them with your shell while expanding the command, **before** the reviewer's permission rules apply. They run read-only git commands with your user's privileges in the project directory. Read the installed files before using them in an untrusted repository.
+Each installed template carries the argument line, a pointer to the system prompt, and five `!`-backtick blocks (branch, status, recent commits, working-tree diff, untracked file list). The host evaluates them with your shell while expanding the command, **before** the reviewer's permission rules apply. They run read-only git commands with your user's privileges in the project directory. Read the installed files before using them in an untrusted repository.
 
 **Accepted risk — argument paste warning.** The host substitutes `$ARGUMENTS` into a template before it scans for the `!`-backtick shell blocks, so argument text can become executable shell content. Commit SHAs and PR URLs travel through this same substitution path as plain text; they add no new risk class, but any pasted argument can still contain backtick blocks. Both commands are human-invoked surfaces only: typed or pasted arguments containing `!`-backtick blocks execute as shell commands with your user's privileges in the project directory. This risk is accepted and documented; no host-side fix is planned. Do not pass untrusted or pasted Markdown containing backtick blocks as arguments to either command. Inspect the arguments before invoking, and pass only text you would type into your own shell.
 
