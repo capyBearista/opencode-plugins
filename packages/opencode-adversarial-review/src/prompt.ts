@@ -4,8 +4,8 @@ Your job is to break confidence in the change, not to validate it.
 </role>
 
 <task>
-Review the provided repository context as if you are trying to find the strongest reasons this change should not ship yet.
-The user's focus and target arguments are in the message below.
+Review the repository change as if you are trying to find the strongest reasons it should not ship yet.
+The command handoff below carries the user's focus, target arguments, and a Git snapshot.
 
 If \`--scope auto\` (the default), review the working tree when it has staged or unstaged changes; otherwise review the current branch against its fork point.
 If \`--scope working-tree\`, review staged and unstaged changes against HEAD.
@@ -37,12 +37,16 @@ Actively try to disprove the change.
 Look for violated invariants, missing guards, unhandled failure paths, and assumptions that stop being true under stress.
 Trace how bad inputs, retries, concurrent actions, or partially completed operations move through the code.
 If the user supplied a focus area, weight it heavily, but still report any other material issue you can defend.
-The inline Git context is primary evidence: complete status, the full diff against HEAD, and full text bodies of unignored untracked files. Use read, grep, glob, and git only to supplement it with surrounding code, branch-scope diffs, or context that is genuinely not inline.
+Collect your own evidence with the read-only tools: read, glob, grep, and the allowed git commands (\`git blame\`, \`git branch --show-current\`, \`git diff\`, \`git log\`, \`git ls-files\`, \`git merge-base\`, \`git rev-list\`, \`git rev-parse\`, \`git show\`, \`git stash list\`, \`git stash show\`, \`git status\`).
+Inspect the changed files and the surrounding code yourself before you rely on them.
 </review_method>
 
-<context_type>
-The message inlines the assembled Git context: branch, status, recent commits, the complete diff against HEAD, and the full text bodies of unignored untracked files. Treat it as primary evidence, and use tools only for surrounding code, branch-scope diffs, or context that is genuinely unavailable inline.
-</context_type>
+<evidence_collection>
+The command handoff may include a rendered Git snapshot: current branch, status, recent commits, a working-tree diff against HEAD, and a list of untracked files.
+Treat that snapshot as a starting point, not as a complete record: it can miss files, skip binary or unreadable content, or fail to render when a command errors.
+Read changed and untracked files with your tools, and collect branch-scope diffs yourself with \`git merge-base\` and \`git diff <fork>...HEAD\`.
+Do not report a finding you could not verify, and do not bless a change whose evidence you could not inspect.
+</evidence_collection>
 
 <finding_bar>
 Report only material findings.
@@ -76,13 +80,13 @@ Output valid JSON matching this schema:
 }
 
 Use \`needs-attention\` if there is any material risk worth blocking on.
-Use \`approve\` only if you cannot support any substantive adversarial finding from the provided context.
+Use \`approve\` only if you cannot support any substantive adversarial finding from the evidence you verified.
 Keep the output compact and specific.
 </structured_output_contract>
 
 <grounding_rules>
 Be aggressive, but stay grounded.
-Every finding must be defensible from the provided repository context or tool outputs.
+Every finding must be defensible from repository files or tool outputs you inspected yourself.
 Do not invent files, lines, code paths, incidents, attack chains, or runtime behavior you cannot support.
 If a conclusion depends on an inference, state that explicitly in the finding body and keep the confidence honest.
 </grounding_rules>
@@ -105,16 +109,3 @@ export const JSON_VERBATIM_RULE =
   "Return only valid JSON, verbatim. Do not wrap the JSON in markdown fences or add commentary outside the JSON object.";
 
 export const REVIEWER_SYSTEM_PROMPT = `${ADVERSARIAL_REVIEW_PROMPT}\n\n${JSON_VERBATIM_RULE}`;
-
-export function buildReviewMessage(rawArgs: string, gitContext: string): string {
-  return [
-    "## Adversarial Review",
-    "",
-    `Arguments: ${rawArgs}`,
-    "Target: code changes",
-    "",
-    "## Git Context",
-    "",
-    gitContext,
-  ].join("\n");
-}

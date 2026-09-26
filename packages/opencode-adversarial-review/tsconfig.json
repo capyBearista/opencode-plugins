@@ -3,7 +3,6 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "resolveJsonModule": true,
     "types": ["bun", "node"]
   },
   "include": ["src"],
