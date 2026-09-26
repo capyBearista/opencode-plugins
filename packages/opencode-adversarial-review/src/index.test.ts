@@ -52,6 +52,34 @@ const JSON_VERBATIM_RULE =
   "Return only valid JSON, verbatim. Do not wrap the JSON in markdown fences or add commentary outside the JSON object.";
 const MARKDOWN_VERBATIM_RULE =
   "Return only the Markdown report, verbatim. Do not wrap the report in markdown fences or add commentary outside the report.";
+const DO_NOT_INVOKE_DESCRIPTION =
+  "Do not invoke this agent directly. It is invocable only by the user.";
+
+// The shared deterministic resolver block is byte-identical across both
+// prompts, both prompt references, and both command templates. Only the
+// remainder sentence (focus area vs. ignored) differs by reviewer.
+const RESOLVER_HEAD = `Target selection:
+- A pull request URL always wins: when an argument is a PR URL, that URL selects the PR, no matter where it appears or what other target tokens are present.
+- Otherwise, the first bare token decides: an all-decimal number is a PR number, and a hex string of 7 or more characters containing at least one letter a-f, or any full-length 40-character SHA, is a commit. A pure-decimal string is never a commit, so \`1234567\` is PR #1234567.
+- A first bare token that matches neither class (including non-hex non-decimal tokens) is reported plainly as unresolvable and never scope-reviewed; hex matching is case-insensitive (A-F accepted), a 40-character all-decimal token is read as a commit SHA because the length rule wins over the decimal rule, and multiple PR URLs resolve first-URL-wins with the remainder reported, not reviewed.
+- An explicit target (PR URL, PR number, or commit SHA) beats \`--scope\` and \`--base\`: when one is present, those flags are ignored.`;
+
+const RESOLVER_REMAINDER_ADVERSARIAL =
+  "- The first target token wins; any remaining trailing text is the focus area.";
+
+const RESOLVER_REMAINDER_REVIEW =
+  "- The first target token wins. Other trailing non-flag text is ignored; focus areas are not supported, so review the whole change the selected target covers.";
+
+const RESOLVER_TAIL = `- Before resolving a bare PR number, verify the current repository with \`git remote -v\`; a bare number is resolved in the current repository only, and any \`user:token@\` credentials in the remote output are redacted before you reason about it.
+- Resolve PR URLs against the current repository only: if a URL points at another repository, stop and warn explicitly unless the user asked for a cross-repo review.
+- A commit target is reviewed with \`git show <sha>\` yourself, and files at that revision are read with \`git show <sha>:<file>\` instead of their working-tree copies.
+- A pull request target is reviewed with \`gh pr view <pr-or-url>\` and \`gh pr diff <pr-or-url>\` yourself. If \`gh\` is missing or unauthenticated, report that plainly instead of guessing at the change; when \`gh\` fails, report its stderr verbatim.
+- For a commit or pull request target, prefer the evidence you collect yourself over the working-tree snapshot blocks: they describe the current checkout, not the selected target.
+- Otherwise, select the review scope with the flags below.`;
+
+function expectDeterministicResolver(text: string, remainder: string): void {
+  expect(text).toInclude(`${RESOLVER_HEAD}\n${remainder}\n${RESOLVER_TAIL}\n`);
+}
 
 const temporaryDirectories: string[] = [];
 
@@ -445,31 +473,19 @@ describe("@capybearista/opencode-adversarial-review", () => {
     const context = createTestContext();
     await setupPlugin(context);
 
-    for (const [agentId, commandFile] of [
-      [REVIEWER_AGENT_ID, COMMAND_FILE_NAME],
-      [REVIEW_AGENT_ID, REVIEW_COMMAND_FILE_NAME],
-    ] as const) {
-      const commandName = commandFile.replace(/\.md$/, "");
+    for (const agentId of [REVIEWER_AGENT_ID, REVIEW_AGENT_ID]) {
       const agent = context.agents.get(agentId);
       expect(agent?.mode).toBe("subagent");
       expect(agent?.hidden).toBe(true);
-      expect(agent?.description).toInclude(`Do not invoke ${agentId} directly`);
-      expect(agent?.description).toInclude(`Run /${commandName} instead`);
-      expect(agent?.description).toInclude("only supported path");
-      expect(agent?.description).toInclude(join(context.configDir, "commands", commandFile));
+      expect(agent?.description).toBe(DO_NOT_INVOKE_DESCRIPTION);
     }
   });
 
-  test("reviewer description names the installed command template path", async () => {
+  test("reviewer description is the static do-not-invoke text", async () => {
     const context = createTestContext();
     await setupPlugin(context);
 
-    const description = context.agents.get(REVIEWER_AGENT_ID)?.description ?? "";
-    expect(description).toInclude("Do not invoke adversarial-reviewer directly");
-    expect(description).toInclude("/adversarial-review");
-    expect(description).toInclude("only supported path");
-    expect(description).toInclude(join(context.configDir, "commands", COMMAND_FILE_NAME));
-    expect(description).not.toInclude("collected Git context");
+    expect(context.agents.get(REVIEWER_AGENT_ID)?.description).toBe(DO_NOT_INVOKE_DESCRIPTION);
   });
 
   test("existing reviewer configuration keeps system and color but not its description", async () => {
@@ -488,7 +504,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     const agent = context.agents.get(REVIEWER_AGENT_ID);
     expect(agent?.description).not.toBe("custom description");
-    expect(agent?.description).toInclude("/adversarial-review");
+    expect(agent?.description).toBe(DO_NOT_INVOKE_DESCRIPTION);
     expect(agent?.system).toBe("custom system");
     expect(agent?.color).toBe("#123456");
     expect(agent?.mode).toBe("subagent");
@@ -511,7 +527,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     const agent = context.agents.get(REVIEW_AGENT_ID);
     expect(agent?.description).not.toBe("custom description");
-    expect(agent?.description).toInclude("/review");
+    expect(agent?.description).toBe(DO_NOT_INVOKE_DESCRIPTION);
     expect(agent?.system).toBe("custom system");
     expect(agent?.color).toBe("#654321");
     expect(agent?.mode).toBe("subagent");
@@ -529,12 +545,65 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     expect(system).toBe(`${reference.trimEnd()}\n\n${JSON_VERBATIM_RULE}`);
     expect(system).toInclude("Collect your own evidence with the read-only tools");
+    expect(system).toInclude("never use `echo`");
     expect(system).toInclude("Treat that snapshot as a starting point, not as a complete record");
     expect(system).toInclude("<attack_surface>");
     expect(system).toInclude("<finding_bar>");
     expect(system).toInclude("<structured_output_contract>");
     expect(system).toInclude("If `--scope auto` (the default)");
     expect(system).toInclude("review the working tree when it has staged or unstaged changes");
+    expectDeterministicResolver(system, RESOLVER_REMAINDER_ADVERSARIAL);
+    expect(system).toInclude("A pull request URL always wins");
+    expect(system).toInclude("an all-decimal number is a PR number");
+    expect(system).toInclude(
+      "A pure-decimal string is never a commit, so `1234567` is PR #1234567",
+    );
+    expect(system).toInclude("reported plainly as unresolvable and never scope-reviewed");
+    expect(system).toInclude("hex matching is case-insensitive (A-F accepted)");
+    expect(system).toInclude(
+      "a 40-character all-decimal token is read as a commit SHA because the length rule wins over the decimal rule",
+    );
+    expect(system).toInclude(
+      "multiple PR URLs resolve first-URL-wins with the remainder reported, not reviewed",
+    );
+    expect(system).toInclude("beats `--scope` and `--base`");
+    expect(system).toInclude("verify the current repository with `git remote -v`");
+    expect(system).toInclude(
+      "any `user:token@` credentials in the remote output are redacted before you reason about it",
+    );
+    expect(system).toInclude(
+      "stop and warn explicitly unless the user asked for a cross-repo review",
+    );
+    expect(system).toInclude("when `gh` fails, report its stderr verbatim");
+    expect(system).toInclude("Gate evidence collection on the selected target");
+    expect(system).toInclude(
+      "Commit target: use only `git show <sha>` and `git show <sha>:<file>` for versioned files",
+    );
+    expect(system).toInclude("Do not read, grep, or glob working-tree copies");
+    expect(system).toInclude(
+      "if the commit is not available locally, report that plainly instead of guessing",
+    );
+    expect(system).toInclude("Pull request target: collect `gh` evidence first");
+    expect(system).toInclude("verifying it matches the PR head revision");
+    expect(system).toInclude("resolve the PR head with `gh pr view <pr-or-url> --json headRefOid`");
+    expect(system).toInclude("compare it with `git rev-parse HEAD`");
+    expect(system).toInclude(
+      "when either value is unavailable, report that plainly and fall back to `gh` evidence",
+    );
+    expect(system).toInclude(
+      "prefer the evidence you collect yourself over the working-tree snapshot blocks",
+    );
+    expect(system).toInclude("`git merge-base`, `git remote -v`, `git rev-list`");
+    expect(system).toInclude(
+      "and the read-only `gh pr view` / `gh pr diff` for a pull request target plus the `gh auth status` diagnostic",
+    );
+    expect(system).not.toInclude(
+      "A bare commit SHA (full 40-character or short form) selects that commit",
+    );
+    expect(system).not.toInclude(
+      "A bare all-decimal number is a PR number, a bare hex string of 7 or more characters",
+    );
+    expect(system).not.toInclude("The first bare SHA, PR-number, or URL token selects the target");
     expect(system).not.toInclude("The inline Git context is primary evidence");
     expect(system).not.toInclude("full text bodies of unignored untracked files");
   });
@@ -548,13 +617,73 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     expect(system).toBe(`${reference.trimEnd()}\n\n${MARKDOWN_VERBATIM_RULE}`);
     expect(system).toInclude("Review only: do not modify the repository");
-    expect(system).toInclude("Trailing non-flag text is ignored");
+    expect(system).toInclude("Other trailing non-flag text is ignored");
     expect(system).toInclude("state `None` when the change is sound");
+    expect(system).toInclude(
+      "each tagged `must` when it warrants action or should block, or `consider` when it is optional",
+    );
     expect(system).not.toInclude("acknowledged");
     expect(system).toInclude("Collect your own evidence with the read-only tools");
+    expect(system).toInclude("never use `echo`");
     expect(system).toInclude("If `--scope auto` (the default)");
     expect(system).toInclude("review the working tree when it has staged or unstaged changes");
     expect(system).toInclude("<report_contract>");
+    expect(system).toInclude(
+      "the first line must be exactly `Verdict: approve` or `Verdict: needs-attention`",
+    );
+    expectDeterministicResolver(system, RESOLVER_REMAINDER_REVIEW);
+    expect(system).toInclude("A pull request URL always wins");
+    expect(system).toInclude("an all-decimal number is a PR number");
+    expect(system).toInclude(
+      "A pure-decimal string is never a commit, so `1234567` is PR #1234567",
+    );
+    expect(system).toInclude("reported plainly as unresolvable and never scope-reviewed");
+    expect(system).toInclude("hex matching is case-insensitive (A-F accepted)");
+    expect(system).toInclude(
+      "a 40-character all-decimal token is read as a commit SHA because the length rule wins over the decimal rule",
+    );
+    expect(system).toInclude(
+      "multiple PR URLs resolve first-URL-wins with the remainder reported, not reviewed",
+    );
+    expect(system).toInclude("beats `--scope` and `--base`");
+    expect(system).toInclude("verify the current repository with `git remote -v`");
+    expect(system).toInclude(
+      "any `user:token@` credentials in the remote output are redacted before you reason about it",
+    );
+    expect(system).toInclude(
+      "stop and warn explicitly unless the user asked for a cross-repo review",
+    );
+    expect(system).toInclude("when `gh` fails, report its stderr verbatim");
+    expect(system).toInclude("Gate evidence collection on the selected target");
+    expect(system).toInclude(
+      "Commit target: gather evidence only with `git show <sha>` and `git show <sha>:<file>` for versioned files",
+    );
+    expect(system).toInclude("Do not read, grep, or glob working-tree copies");
+    expect(system).toInclude(
+      "if the commit is not available locally, report that plainly instead of guessing",
+    );
+    expect(system).toInclude("Pull request target: gather `gh` evidence first");
+    expect(system).toInclude("verifying it matches the PR head revision");
+    expect(system).toInclude("resolve the PR head with `gh pr view <pr-or-url> --json headRefOid`");
+    expect(system).toInclude("compare it with `git rev-parse HEAD`");
+    expect(system).toInclude(
+      "when either value is unavailable, report that plainly and fall back to `gh` evidence",
+    );
+    expect(system).toInclude(
+      "prefer the evidence you collect yourself over the working-tree snapshot blocks",
+    );
+    expect(system).toInclude("`git merge-base`, `git remote -v`, `git rev-list`");
+    expect(system).toInclude(
+      "and the read-only `gh pr view` / `gh pr diff` for a pull request target plus the `gh auth status` diagnostic",
+    );
+    expect(system).not.toInclude(
+      "A bare commit SHA (full 40-character or short form) selects that commit",
+    );
+    expect(system).not.toInclude("A pull request URL or bare PR number selects that pull request");
+    expect(system).not.toInclude(
+      "A bare all-decimal number is a PR number, a bare hex string of 7 or more characters",
+    );
+    expect(system).not.toInclude("The target is selected only by a bare commit SHA");
     expect(system).not.toInclude("break confidence");
     expect(system).not.toInclude("Output valid JSON matching this schema");
   });
@@ -645,6 +774,12 @@ describe("@capybearista/opencode-adversarial-review", () => {
       ["shell", "git stash list"],
       ["shell", "git stash show"],
       ["shell", "git status --short"],
+      ["shell", "gh pr view 123"],
+      ["shell", "gh pr view https://github.com/capyBearista/opencode-plugins/pull/7"],
+      ["shell", "gh pr diff 123"],
+      ["shell", "gh pr diff https://github.com/capyBearista/opencode-plugins/pull/7"],
+      ["shell", "gh auth status"],
+      ["shell", "git remote -v"],
     ];
     for (const [action, resource] of allowed) {
       expect(effectiveEffect(permissions, action, resource)).toBe("allow");
@@ -663,6 +798,19 @@ describe("@capybearista/opencode-adversarial-review", () => {
       ["shell", "git branch --move old new"],
       ["shell", "rm -rf /"],
       ["shell", "git push origin main"],
+      ["shell", "git remote add origin https://example.com/repo.git"],
+      ["shell", "git remote remove origin"],
+      ["shell", "gh"],
+      ["shell", "gh issue list"],
+      ["shell", "gh auth login"],
+      ["shell", "gh auth logout"],
+      ["shell", "gh auth status --show-token"],
+      ["shell", "gh auth status -t"],
+      ["shell", "gh repo view capyBearista/opencode-plugins"],
+      ["shell", "gh pr checkout 123"],
+      ["shell", "gh pr create --fill"],
+      ["shell", "gh pr merge 123"],
+      ["shell", "gh api /repos/owner/repo"],
       ["edit", "src/index.ts"],
       ["write", "src/index.ts"],
       ["patch", "src/index.ts"],
@@ -773,6 +921,148 @@ describe("@capybearista/opencode-adversarial-review", () => {
     }
   });
 
+  test("gh is allowlisted to the read-only PR surface only", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    const permissions = context.agents.get(REVIEWER_AGENT_ID)?.permissions ?? [];
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "gh pr view*",
+      effect: "allow",
+    });
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "gh pr diff*",
+      effect: "allow",
+    });
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "gh auth status*",
+      effect: "allow",
+    });
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "gh auth status*--show-token*",
+      effect: "deny",
+    });
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "gh auth status*-t*",
+      effect: "deny",
+    });
+    expect(permissions).toContainEqual({ action: "shell", resource: "gh *", effect: "deny" });
+
+    const allowed = [
+      "gh pr view 123",
+      "gh pr view https://github.com/capyBearista/opencode-plugins/pull/7",
+      "gh pr diff 123",
+      "gh pr diff https://github.com/capyBearista/opencode-plugins/pull/7",
+      "gh auth status",
+    ];
+    for (const command of allowed) {
+      expect(effectiveEffect(permissions, "shell", command)).toBe("allow");
+    }
+
+    const denied = [
+      "gh",
+      "gh issue list",
+      "gh auth login",
+      "gh auth logout",
+      "gh auth token",
+      "gh auth status --show-token",
+      "gh auth status -t",
+      "gh repo view capyBearista/opencode-plugins",
+      "gh pr checkout 123",
+      "gh pr create --fill",
+      "gh pr merge 123",
+      "gh api /repos/owner/repo",
+      "gh repo clone owner/repo",
+    ];
+    for (const command of denied) {
+      expect(effectiveEffect(permissions, "shell", command)).toBe("deny");
+    }
+  });
+
+  // The host evaluates permissions with a last-match-wins scan, so rule order
+  // is load-bearing: the `gh *` catch-all must precede the specific allows, and
+  // the specific allows must be ordered most-specific-last.
+  test("gh deny and allow rules are ordered most-specific-last", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    const permissions = context.agents.get(REVIEWER_AGENT_ID)?.permissions ?? [];
+    const indexOf = (effect: string, resource: string) =>
+      permissions.findIndex(
+        (rule) => rule.action === "shell" && rule.resource === resource && rule.effect === effect,
+      );
+    const catchAllIndex = indexOf("deny", "gh *");
+    const prViewIndex = indexOf("allow", "gh pr view*");
+    const prDiffIndex = indexOf("allow", "gh pr diff*");
+    const authStatusIndex = indexOf("allow", "gh auth status*");
+    const showTokenIndex = indexOf("deny", "gh auth status*--show-token*");
+    const shortTokenIndex = indexOf("deny", "gh auth status*-t*");
+
+    expect(catchAllIndex).toBeGreaterThanOrEqual(0);
+    expect(prViewIndex).toBeGreaterThan(catchAllIndex);
+    expect(prDiffIndex).toBeGreaterThan(prViewIndex);
+    expect(authStatusIndex).toBeGreaterThan(prDiffIndex);
+    expect(showTokenIndex).toBeGreaterThan(authStatusIndex);
+    expect(shortTokenIndex).toBeGreaterThan(authStatusIndex);
+  });
+
+  test("git remote and gh auth diagnostics are allowlisted only in their read-only forms", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    const permissions = context.agents.get(REVIEWER_AGENT_ID)?.permissions ?? [];
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "git remote -v*",
+      effect: "allow",
+    });
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "gh auth status*",
+      effect: "allow",
+    });
+    expect(permissions).not.toContainEqual({
+      action: "shell",
+      resource: "git remote *",
+      effect: "allow",
+    });
+    expect(permissions).not.toContainEqual({
+      action: "shell",
+      resource: "gh repo view*",
+      effect: "allow",
+    });
+
+    expect(effectiveEffect(permissions, "shell", "git remote -v")).toBe("allow");
+    expect(effectiveEffect(permissions, "shell", "gh auth status")).toBe("allow");
+    expect(effectiveEffect(permissions, "shell", "gh auth status --hostname github.com")).toBe(
+      "allow",
+    );
+
+    const denied = [
+      "git remote add origin https://example.com/repo.git",
+      "git remote remove origin",
+      "git remote set-url origin https://example.com/other.git",
+      "git remote prune origin",
+      "git remote show origin",
+      "git remote --verbose",
+      "gh repo view capyBearista/opencode-plugins",
+      "gh auth login",
+      "gh auth logout",
+      "gh auth token",
+      "gh auth status --show-token",
+      "gh auth status -t",
+      "gh auth status --show-token --hostname github.com",
+    ];
+    for (const command of denied) {
+      expect(effectiveEffect(permissions, "shell", command)).toBe("deny");
+    }
+  });
+
   test("setup treats a missing permissions array as empty when configuring the reviewer", async () => {
     const context = createTestContext({
       agents: [
@@ -803,18 +1093,24 @@ describe("@capybearista/opencode-adversarial-review", () => {
     ).rejects.toThrow();
   });
 
-  test("missing session.hook is handled without throwing", async () => {
+  test("setup registers no session hooks so reviewers inherit the parent temperature", async () => {
     const context = createTestContext();
-    (context.ctx.session as { hook?: unknown }).hook = undefined;
+    const cleanup = await setupPlugin(context);
+
+    expect(context.hooks.size).toBe(0);
+    expect(context.logs).toHaveLength(0);
+    await cleanup?.();
+  });
+
+  test("setup succeeds without a session domain", async () => {
+    const context = createTestContext();
+    (context.ctx as { session?: unknown }).session = undefined;
 
     const cleanup = await setupPlugin(context);
 
     expect(context.agents.has(REVIEWER_AGENT_ID)).toBe(true);
-    expect(context.logs).toContainEqual({
-      service: PLUGIN_ID,
-      level: "error",
-      message: `[${PLUGIN_ID}] session.hook is unavailable; review temperature was not pinned`,
-    });
+    expect(context.agents.has(REVIEW_AGENT_ID)).toBe(true);
+    expect(context.hooks.size).toBe(0);
     await cleanup?.();
   });
 
@@ -825,100 +1121,42 @@ describe("@capybearista/opencode-adversarial-review", () => {
         entries.push(input);
       },
     });
-    (context.ctx.session as { hook?: unknown }).hook = undefined;
-    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    const configDir = await isolatedConfigDirectory();
+    await writeFile(join(configDir, "commands", COMMAND_FILE_NAME), "existing\n");
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
 
-    const cleanup = await setupPlugin(context);
+    const cleanup = await setupPlugin(context, configDir);
 
     expect(entries).toContainEqual({
       service: PLUGIN_ID,
-      level: "error",
-      message: `[${PLUGIN_ID}] session.hook is unavailable; review temperature was not pinned`,
+      level: "warn",
+      message: `[${PLUGIN_ID}] ${join(configDir, "commands", COMMAND_FILE_NAME)} already exists; leaving it untouched. It may be stale or customized: edit it in place, delete it to reinstall the bundled template, or delete it after removing the plugin to uninstall.`,
     });
-    expect(errorSpy).not.toHaveBeenCalled();
-    errorSpy.mockRestore();
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
     await cleanup?.();
   });
 
-  test("a failing host structured log sink falls back to console.error", async () => {
+  test("a failing host structured log sink falls back to console.warn", async () => {
     const context = createTestContext({
       hostLog: () => {
         throw new Error("sink unavailable");
       },
     });
-    (context.ctx.session as { hook?: unknown }).hook = undefined;
-    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    const configDir = await isolatedConfigDirectory();
+    await writeFile(join(configDir, "commands", COMMAND_FILE_NAME), "existing\n");
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
 
-    const cleanup = await setupPlugin(context);
+    const cleanup = await setupPlugin(context, configDir);
 
-    expect(errorSpy).toHaveBeenCalledWith(
-      `[${PLUGIN_ID}] session.hook is unavailable; review temperature was not pinned`,
+    expect(warnSpy).toHaveBeenCalledWith(
+      `[${PLUGIN_ID}] ${join(configDir, "commands", COMMAND_FILE_NAME)} already exists; leaving it untouched. It may be stale or customized: edit it in place, delete it to reinstall the bundled template, or delete it after removing the plugin to uninstall.`,
     );
-    errorSpy.mockRestore();
+    warnSpy.mockRestore();
     await cleanup?.();
   });
 
-  test("review temperature hooks fire for the reviewer agent only", async () => {
-    const context = createTestContext();
-    await setupPlugin(context);
-
-    expect([...context.hooks.keys()].sort()).toEqual(["context", "generate"]);
-
-    const reviewer: HookEvent = { sessionID: "ses_review", agent: REVIEWER_AGENT_ID, options: {} };
-    const foreign: HookEvent = { sessionID: "ses_build", agent: "build", options: {} };
-    const anonymous: HookEvent = { sessionID: "ses_unknown", options: {} };
-    for (const name of ["context", "generate"]) {
-      const hook = context.hooks.get(name);
-      hook?.(reviewer);
-      hook?.(foreign);
-      hook?.(anonymous);
-    }
-
-    expect(reviewer.options.temperature).toBe(0.1);
-    expect(foreign.options.temperature).toBeUndefined();
-    expect(anonymous.options.temperature).toBeUndefined();
-  });
-
-  test("temperature hooks also pin the review agent", async () => {
-    const context = createTestContext();
-    await setupPlugin(context);
-
-    const review: HookEvent = { sessionID: "ses_review", agent: REVIEW_AGENT_ID, options: {} };
-    for (const name of ["context", "generate"]) {
-      context.hooks.get(name)?.(review);
-    }
-
-    expect(review.options.temperature).toBe(0.1);
-    expect(context.logs.filter((entry) => entry.level === "warn")).toHaveLength(0);
-  });
-
-  test("temperature hooks warn once per observed non-reviewer agent", async () => {
-    const context = createTestContext();
-    await setupPlugin(context);
-
-    const reviewer: HookEvent = { sessionID: "ses_review", agent: REVIEWER_AGENT_ID, options: {} };
-    const foreign: HookEvent = { sessionID: "ses_build", agent: "build", options: {} };
-    const anonymous: HookEvent = { sessionID: "ses_unknown", options: {} };
-    for (const name of ["context", "generate"]) {
-      const hook = context.hooks.get(name);
-      hook?.(reviewer);
-      hook?.(foreign);
-      hook?.(anonymous);
-      hook?.(foreign);
-      hook?.(anonymous);
-    }
-
-    expect(reviewer.options.temperature).toBe(0.1);
-    const warnings = context.logs.filter(
-      (entry) => entry.level === "warn" && entry.message.includes("temperature"),
-    );
-    expect(warnings).toHaveLength(2);
-    expect(warnings[0]?.message).toInclude('agent "build"');
-    expect(warnings[0]?.message).toInclude(`"${REVIEWER_AGENT_ID}" and "${REVIEW_AGENT_ID}" only`);
-    expect(warnings[1]?.message).toInclude("no agent");
-  });
-
-  test("cleanup disposes both agent registrations and both temperature hooks", async () => {
+  test("cleanup disposes both agent registrations and registers no hooks", async () => {
     const context = createTestContext();
     const cleanup = await setupPlugin(context);
 
@@ -926,7 +1164,8 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     expect(context.agents.has(REVIEWER_AGENT_ID)).toBe(true);
     expect(context.agents.has(REVIEW_AGENT_ID)).toBe(true);
-    expect(context.disposers.sort()).toEqual(["agent", "agent", "hook:context", "hook:generate"]);
+    expect(context.hooks.size).toBe(0);
+    expect(context.disposers.sort()).toEqual(["agent", "agent"]);
   });
 
   test("setup installs both command files under HOME and writes no agent file", async () => {
@@ -939,7 +1178,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(result.agents.map((agent) => agent.id).sort()).toEqual(
       [REVIEWER_AGENT_ID, REVIEW_AGENT_ID].sort(),
     );
-    expect(result.hooks).toEqual(["context", "generate"]);
+    expect(result.hooks).toEqual([]);
     expect(result.commandTransforms).toBe(0);
 
     const adversarialAsset = await readFile(COMMAND_ASSET_PATH, "utf8");
@@ -949,6 +1188,9 @@ describe("@capybearista/opencode-adversarial-review", () => {
     const adversarialFrontmatter = frontmatterOf(adversarialAsset);
     expect(adversarialFrontmatter.description).toBeString();
     expect(adversarialFrontmatter.description).toInclude("adversarial");
+    expect(adversarialFrontmatter.description).toInclude(
+      "Args: [<sha|pr-url|pr-number>] [--base <ref>] [--scope auto|working-tree|branch] [focus ...]",
+    );
     expect(adversarialFrontmatter.agent).toBe(REVIEWER_AGENT_ID);
     expect(adversarialFrontmatter.subagent).toBe("true");
     expect("model" in adversarialFrontmatter).toBe(false);
@@ -963,6 +1205,9 @@ describe("@capybearista/opencode-adversarial-review", () => {
     const reviewFrontmatter = frontmatterOf(reviewAsset);
     expect(reviewFrontmatter.description).toBeString();
     expect(reviewFrontmatter.description).toInclude("code review");
+    expect(reviewFrontmatter.description).toInclude(
+      "Args: [<sha|pr-url|pr-number>] [--base <ref>] [--scope auto|working-tree|branch]",
+    );
     expect(reviewFrontmatter.agent).toBe(REVIEW_AGENT_ID);
     expect(reviewFrontmatter.subagent).toBe("true");
     expect("model" in reviewFrontmatter).toBe(false);
@@ -986,6 +1231,9 @@ describe("@capybearista/opencode-adversarial-review", () => {
       }
       expect(asset).toInclude("GNU/Linux");
     }
+
+    expectDeterministicResolver(adversarialAsset, RESOLVER_REMAINDER_ADVERSARIAL);
+    expectDeterministicResolver(reviewAsset, RESOLVER_REMAINDER_REVIEW);
 
     const bunCachePrefix = join(".bun", "");
     expect((await walkFiles(home)).filter((file) => !file.startsWith(bunCachePrefix))).toEqual([

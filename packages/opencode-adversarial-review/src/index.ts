@@ -6,38 +6,37 @@ import type { Context as PluginContext } from "@opencode/plugin/promise/plugin";
 import { ADVERSARIAL_REVIEWER_SYSTEM_PROMPT, REVIEWER_SYSTEM_PROMPT } from "./prompt.js";
 
 const PLUGIN_ID = "capybearista.opencode-adversarial-review";
-const REVIEW_TEMPERATURE = 0.1;
 // Hex is required; plugin-defined agents do not resolve theme color names.
 const REVIEWER_COLOR = "#f59e0b";
 
 type ReviewerConfig = {
   agentId: string;
   commandFilename: string;
-  description: (commandPath: string) => string;
+  description: string;
   systemPrompt: string;
 };
 
+const DO_NOT_INVOKE_DESCRIPTION =
+  "Do not invoke this agent directly. It is invocable only by the user.";
+
 // One entry per reviewer. Setup loops both the install and the registration so
 // every reviewer shares one set of mechanics and differs only in identity,
-// command file, description, and system prompt.
+// command file, and system prompt.
 const REVIEWERS: readonly ReviewerConfig[] = [
   {
     agentId: "adversarial-reviewer",
     commandFilename: "adversarial-review.md",
-    description: (commandPath) =>
-      `Do not invoke adversarial-reviewer directly. Run /adversarial-review instead; the installed command template at ${commandPath} is the only supported path.`,
+    description: DO_NOT_INVOKE_DESCRIPTION,
     systemPrompt: ADVERSARIAL_REVIEWER_SYSTEM_PROMPT,
   },
   {
     agentId: "reviewer",
     commandFilename: "review.md",
-    description: (commandPath) =>
-      `Do not invoke reviewer directly. Run /review instead; the installed command template at ${commandPath} is the only supported path.`,
+    description: DO_NOT_INVOKE_DESCRIPTION,
     systemPrompt: REVIEWER_SYSTEM_PROMPT,
   },
 ];
 
-const REVIEWER_AGENT_IDS = new Set(REVIEWERS.map((reviewer) => reviewer.agentId));
 const REVIEWER_AGENT_ID_LIST = REVIEWERS.map((reviewer) => `"${reviewer.agentId}"`).join(" and ");
 
 type PermissionEffect = "allow" | "deny" | "ask";
@@ -68,12 +67,26 @@ const REVIEWER_PERMISSIONS: readonly PermissionRule[] = [
   { action: "shell", resource: "git log*", effect: "allow" },
   { action: "shell", resource: "git ls-files*", effect: "allow" },
   { action: "shell", resource: "git merge-base*", effect: "allow" },
+  { action: "shell", resource: "git remote -v*", effect: "allow" },
   { action: "shell", resource: "git rev-list*", effect: "allow" },
   { action: "shell", resource: "git rev-parse*", effect: "allow" },
   { action: "shell", resource: "git show*", effect: "allow" },
   { action: "shell", resource: "git stash list*", effect: "allow" },
   { action: "shell", resource: "git stash show*", effect: "allow" },
   { action: "shell", resource: "git status*", effect: "allow" },
+  // `gh` is allowlisted to the read-only PR surface only, plus the
+  // `gh auth status*` diagnostic. Order is load-bearing: evaluation is
+  // last-match-wins, so the `gh *` catch-all deny must come before the specific
+  // allows (after them it would override them), and the specific allows stay
+  // ordered most-specific-last. The token-printing forms of the diagnostic are
+  // denied after its allow: `--show-token` and its `-t` short form would print
+  // the stored credential, while the bare diagnostic stays allowed.
+  { action: "shell", resource: "gh *", effect: "deny" },
+  { action: "shell", resource: "gh pr view*", effect: "allow" },
+  { action: "shell", resource: "gh pr diff*", effect: "allow" },
+  { action: "shell", resource: "gh auth status*", effect: "allow" },
+  { action: "shell", resource: "gh auth status*--show-token*", effect: "deny" },
+  { action: "shell", resource: "gh auth status*-t*", effect: "deny" },
   // Denies below must stay after the allows: `--ext-diff` and `--textconv`
   // execute configured diff drivers, and `--output` writes the rendered diff to
   // an arbitrary file.
@@ -123,16 +136,12 @@ function applyRules(agent: AgentInfo, rules: readonly PermissionRule[]): void {
   agent.permissions = [...merged, ...hostDenies];
 }
 
-function configureReviewerAgent(
-  editor: AgentEditor,
-  reviewer: ReviewerConfig,
-  description: string,
-): void {
+function configureReviewerAgent(editor: AgentEditor, reviewer: ReviewerConfig): void {
   const existing = editor.get(reviewer.agentId);
   editor.update(reviewer.agentId, (agent) => {
     agent.mode = "subagent";
     agent.hidden = true;
-    agent.description = description;
+    agent.description = reviewer.description;
     agent.system = existing?.system ?? reviewer.systemPrompt;
     agent.color = existing?.color ?? REVIEWER_COLOR;
     // The reviewer runs unattended, so inherited ask rules are dropped instead of
@@ -188,7 +197,7 @@ function commandFilePath(commandFilename: string): string {
 async function installCommandFile(
   reviewer: ReviewerConfig,
   logWarn: (message: string) => void,
-): Promise<string> {
+): Promise<void> {
   const commandPath = commandFilePath(reviewer.commandFilename);
   const commandName = `/${reviewer.commandFilename.replace(/\.md$/, "")}`;
   const assetUrl = new URL(`../commands/${reviewer.commandFilename}`, import.meta.url);
@@ -208,21 +217,19 @@ async function installCommandFile(
       logWarn(
         `[${PLUGIN_ID}] ${commandPath} already exists; leaving it untouched. It may be stale or customized: edit it in place, delete it to reinstall the bundled template, or delete it after removing the plugin to uninstall.`,
       );
-      return commandPath;
+      return;
     }
     throw new Error(
       `Unable to install the ${commandName} command at ${commandPath}: ${errorMessage(error)}. Create the parent directory and grant write access, then restart OpenCode. Neither reviewer agent was registered.`,
       { cause: error },
     );
   }
-  return commandPath;
 }
 
 export default Plugin.define({
   id: PLUGIN_ID,
   async setup(ctx) {
     const disposers: Array<() => Promise<void> | void> = [];
-    const logError = createHostLogger(ctx, "error");
     const logWarn = createHostLogger(ctx, "warn");
 
     if (typeof ctx.agent?.transform !== "function") {
@@ -231,47 +238,15 @@ export default Plugin.define({
       );
     }
 
-    const installations: Array<{ reviewer: ReviewerConfig; commandPath: string }> = [];
     for (const reviewer of REVIEWERS) {
-      installations.push({ reviewer, commandPath: await installCommandFile(reviewer, logWarn) });
+      await installCommandFile(reviewer, logWarn);
     }
 
-    for (const { reviewer, commandPath } of installations) {
+    for (const reviewer of REVIEWERS) {
       const registration = await ctx.agent.transform((editor) => {
-        configureReviewerAgent(editor, reviewer, reviewer.description(commandPath));
+        configureReviewerAgent(editor, reviewer);
       });
       disposers.push(() => registration.dispose());
-    }
-
-    if (typeof ctx.session?.hook === "function") {
-      // Session hooks fire for every request in the host, so non-reviewer
-      // events are expected. Warn once per observed agent identity to surface
-      // skips (including events with no agent at all) without flooding logs.
-      const warnedHookAgents = new Set<string>();
-      const pinReviewTemperature = (event: {
-        sessionID: string;
-        agent?: string;
-        options: { temperature?: number };
-      }) => {
-        if (event.agent !== undefined && REVIEWER_AGENT_IDS.has(event.agent)) {
-          event.options.temperature = REVIEW_TEMPERATURE;
-          return;
-        }
-        const observed = event.agent ?? "(missing)";
-        if (warnedHookAgents.has(observed)) return;
-        warnedHookAgents.add(observed);
-        logWarn(
-          `[${PLUGIN_ID}] review temperature hook skipped ${event.agent === undefined ? "an event with no agent" : `agent "${event.agent}"`}; temperature is pinned for ${REVIEWER_AGENT_ID_LIST} only`,
-        );
-      };
-      const contextHook = await ctx.session.hook("context", pinReviewTemperature);
-      const generateHook = await ctx.session.hook("generate", pinReviewTemperature);
-      disposers.push(
-        () => contextHook.dispose(),
-        () => generateHook.dispose(),
-      );
-    } else {
-      logError(`[${PLUGIN_ID}] session.hook is unavailable; review temperature was not pinned`);
     }
 
     return async () => {

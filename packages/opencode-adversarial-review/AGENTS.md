@@ -13,7 +13,7 @@ This plugin provides **two code-review agents** for OpenCode: an adversarial rev
 
 ### Two Reviewers, One Mechanics
 
-`src/index.ts` defines a two-entry `REVIEWERS` config (`agentId`, `commandFilename`, `description`, `systemPrompt`) and loops the same machinery for both: install both command files, register both agents, and pin temperature for both identities.
+`src/index.ts` defines a two-entry `REVIEWERS` config (`agentId`, `commandFilename`, `description`, `systemPrompt`) and loops the same machinery for both: install both command files and register both agents.
 
 1. **Agents (in memory)** — `setup()` registers the hidden `adversarial-reviewer` and `reviewer` subagents through `ctx.agent.transform`. No agent file is ever written. The plugin enforces the do-not-invoke descriptions, `subagent` mode, hidden flag, and the shared read-only permission set; a host-defined `system` or `color` survives the update.
 
@@ -25,7 +25,7 @@ This plugin provides **two code-review agents** for OpenCode: an adversarial rev
 
    The host discovers them as `/adversarial-review` and `/review` and, because each frontmatter sets its agent and `subagent: true`, routes each to a linked background child of the invoking session. The host expands a template: `$ARGUMENTS` substitution first, then the five `!`-backtick shell blocks (branch, status, recent commits, `git diff HEAD`, untracked file list).
 
-3. **Prompts (packaged)** — `src/prompt.ts` holds both canonical system prompts; `src/prompts/adversarial-review.md` and `src/prompts/review.md` are the lockstep reference copies. `src/index.ts` stays limited to agent registration, command installs, and temperature hooks: the reviewers collect evidence with their own read-only tools, and the plugin never post-processes their answers.
+3. **Prompts (packaged)** — `src/prompt.ts` holds both canonical system prompts; `src/prompts/adversarial-review.md` and `src/prompts/review.md` are the lockstep reference copies. `src/index.ts` stays limited to agent registration and command installs: the reviewers collect evidence with their own read-only tools, and the plugin never post-processes their answers.
 
 ### Flow
 
@@ -36,7 +36,7 @@ Host expands the installed template (arguments, then shell blocks)
   ↓
 Child session (agent: adversarial-reviewer or reviewer, parent-linked background subagent)
   ↓
-Reviewer: scope selection → self-collected evidence (read/grep/glob/git) → requested output format
+Reviewer: scope selection → self-collected evidence (read/grep/glob/git, plus `gh pr` for PR targets) → requested output format
   ↓
 Parent session receives the child result as-is
 ```
@@ -45,11 +45,12 @@ Model resolution is the host chain: command frontmatter `model` → configured a
 
 ### Key Design Decisions
 
-- **No custom tool**: Context priming comes from the installed command templates' shell blocks; each reviewer self-collects the rest with whitelisted read-only tools.
+- **No custom tool**: Context priming comes from the installed command templates' shell blocks; each reviewer self-collects the rest with whitelisted read-only tools, including `git show` for commit targets and `gh pr view` / `gh pr diff` for PR targets.
 - **No primary agent involvement**: `subagent: true` routes directly to the reviewer. Zero conversation history leak.
-- **Least privilege**: Both reviewers share one permission set. `edit`/`write`/`patch`, `subagent`, `skill`, `question`, `webfetch`, `websearch`, `external_directory`, and general `shell` are denied; `read`/`glob`/`grep` and 12 `git` command prefixes are allowed (`git branch` is limited to `--show-current`; `--ext-diff`/`--textconv`/`--output` are denied after the allows). `.env`/`.env.*` is denied after the general allow for read, grep, and glob. Inherited `ask` rules are dropped because the reviewers run unattended, and pre-existing host denies are re-appended after the plugin rules so they outrank plugin allows.
+- **Least privilege**: Both reviewers share one permission set. `edit`/`write`/`patch`, `subagent`, `skill`, `question`, `webfetch`, `websearch`, `external_directory`, and general `shell` are denied; `read`/`glob`/`grep` and 13 `git` command prefixes are allowed (`git branch` is limited to `--show-current`, `git remote` to the read-only `-v` listing; `--ext-diff`/`--textconv`/`--output` are denied after the allows). The read-only GitHub surfaces are also allowed (`gh pr view*`, `gh pr diff*`, plus the `gh auth status*` diagnostic) with an explicit catch-all `gh *` deny ordered before those allows, since evaluation is last-match-wins; `gh auth login`/`logout`/`token` stay denied, and the token-printing forms `gh auth status --show-token` / `-t` are denied by rules ordered after the diagnostic allow. `.env`/`.env.*` is denied after the general allow for read, grep, and glob. Inherited `ask` rules are dropped because the reviewers run unattended, and pre-existing host denies are re-appended after the plugin rules so they outrank plugin allows.
 - **Write-once install**: `wx` refuses to replace an existing file, including a symlink. EEXIST logs a stale-or-customized warning naming both update paths (edit in place or delete) and the delete-to-uninstall step; permission/missing-parent failures abort setup before either agent is registered.
-- **Reviewer-scoped temperature**: the `context`/`generate` hooks fire host-wide and pin `0.1` only for `adversarial-reviewer` and `reviewer` events; each distinct other agent identity (including a missing agent) is warned about once so skipped events are visible without flooding host logs.
+- **Temperature inheritance**: the plugin registers no session hooks and pins no temperature; each reviewer inherits the invoking session's temperature along the parent chain, exactly like model resolution. There are no host-wide hook events to warn about.
+- **Target kinds**: both prompts resolve the target deterministically: a PR URL always wins; otherwise the first bare token decides (all-decimal → PR number, a 7+ character hex string containing a letter a-f case-insensitively or any full-length 40-character SHA → commit, pure-decimal strings are never commits, and a 40-character all-decimal token is read as a commit because length wins over the decimal rule), and an explicit target beats `--scope`/`--base`, which are then ignored. A token matching neither class (including non-hex non-decimal tokens) is reported plainly as unresolvable and never scope-reviewed; with multiple PR URLs, the first wins and the remainder is reported. Evidence is gated by target: a commit target is limited to `git show <sha>` / `git show <sha>:<file>` (no working-tree reads of versioned files), while a PR target gathers `gh` evidence first and reads a working-tree file only when it is verified at the PR head revision by comparing `gh pr view --json headRefOid` with `git rev-parse HEAD`. If `gh` is missing, unauthenticated, or fails, the reviewer reports that plainly (stderr verbatim on failure) instead of guessing; a cross-repo PR URL stops with an explicit warning unless the user asked for cross-repo review. `user:token@` credentials in `git remote -v` output are redacted before reasoning.
 - **No checksums or markers**: the plugin does not try to detect whether an existing file is its own; manual edits are preserved.
 
 ### Maintenance Rules
@@ -67,8 +68,9 @@ Model resolution is the host chain: command frontmatter `model` → configured a
 - **No changes**: the shell blocks render empty output; the reviewer reports there is nothing to review.
 - **Large diff**: the template's diff block may be large; the reviewer reads surrounding code and untracked contents with its tools rather than assuming the snapshot is complete.
 - **No git repo**: each shell block appends `2>&1 || true`, so failures render as text instead of aborting the command.
-- **Focus text on `/review`**: not supported. Trailing non-flag arguments are accepted by the host and ignored by the prompt; only `--scope` and `--base` change what is reviewed.
-- **Injection warning (accepted paste-risk)**: `$ARGUMENTS` is substituted before the shell blocks are evaluated, so argument text can become executable shell content for either command. Both commands are human-invoked; the risk is accepted and documented, with no host-side fix planned. Safe invocation: inspect arguments before invoking, and never pass untrusted or pasted Markdown containing backtick blocks as arguments.
+- **Focus text on `/review`**: not supported. Focus areas are unsupported (Codex parity); only `--scope`, `--base`, a bare commit SHA, and a PR URL/number select the target. Other trailing non-flag text is accepted by the host and ignored by the prompt.
+- **PR target without `gh`**: `gh pr view` / `gh pr diff` fail when `gh` is missing or unauthenticated. The prompt instructs the reviewer to report that plainly (stderr verbatim on failure) instead of guessing, and to stop with an explicit warning when the URL points at another repository unless the user asked for a cross-repo review; SHA and scope targets are unaffected.
+- **Injection warning (accepted paste-risk)**: `$ARGUMENTS` is substituted before the shell blocks are evaluated, so argument text can become executable shell content for either command. Commit SHAs and PR URLs travel the same substitution path as plain text and add no new risk class. Both commands are human-invoked; the risk is accepted and documented, with no host-side fix planned. Safe invocation: inspect arguments before invoking, and never pass untrusted or pasted Markdown containing backtick blocks as arguments.
 
 ## Quick Reference
 
@@ -95,7 +97,7 @@ Model resolution is the host chain: command frontmatter `model` → configured a
 - Framework: bun test
 - Running Tests: `bun test`
 - Install tests run setup in a subprocess with an isolated temp `HOME`; never write to the real config directory in tests or smoke.
-- Runtime smoke: `bun run smoke` verifies the built entry registers both reviewer agents, installs both command files, enforces the permission/description contract for each, and pins temperature for both agents only.
+- Runtime smoke: `bun run smoke` verifies the built entry registers both reviewer agents, installs both command files, enforces the permission/description contract for each, and registers no session hooks (only agent disposers).
 
 ## License
 

@@ -19,12 +19,41 @@ type TestAgent = {
   permissions: PermissionRule[];
 };
 
-type HookEvent = { sessionID: string; agent?: string; options: { temperature?: number } };
-
 type SmokeLog = { level?: string; message?: string };
+
+const DO_NOT_INVOKE_DESCRIPTION =
+  "Do not invoke this agent directly. It is invocable only by the user.";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`smoke: ${message}`);
+}
+
+// Local approximation of host rule matching: `*` wildcards, backslash
+// normalization, and the host's optional trailing " .*" argument form,
+// evaluated last-match-wins. Mirrors the matcher in src/index.test.ts; the host
+// remains authoritative at runtime.
+function matches(input: string, pattern: string): boolean {
+  let escaped = pattern
+    .replaceAll("\\", "/")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  if (escaped.endsWith(" .*")) escaped = `${escaped.slice(0, -3)}( .*)?`;
+  return new RegExp(`^${escaped}$`, "s").test(input.replaceAll("\\", "/"));
+}
+
+function effectiveEffect(
+  permissions: readonly PermissionRule[],
+  action: string,
+  resource: string,
+): string {
+  for (let index = permissions.length - 1; index >= 0; index -= 1) {
+    const rule = permissions[index];
+    if (rule && matches(action, rule.action) && matches(resource, rule.resource)) {
+      return rule.effect;
+    }
+  }
+  return "ask";
 }
 
 const server = (await import(new URL("../server.js", import.meta.url).href)) as {
@@ -41,7 +70,6 @@ process.env.OPENCODE_CONFIG_DIR = configDir;
 
 try {
   const agents = new Map<string, TestAgent>();
-  const hooks = new Map<string, (event: HookEvent) => void>();
   const disposers: string[] = [];
   const logs: SmokeLog[] = [];
   let commandTransforms = 0;
@@ -75,16 +103,6 @@ try {
         };
       },
     },
-    session: {
-      hook: async (name: string, callback: (event: HookEvent) => void) => {
-        hooks.set(name, callback);
-        return {
-          dispose: async () => {
-            disposers.push(`hook:${name}`);
-          },
-        };
-      },
-    },
     command: {
       transform: async () => {
         commandTransforms += 1;
@@ -98,21 +116,13 @@ try {
     ["reviewer", "review.md"],
   ] as const;
 
-  function assertReviewerContract(
-    agent: TestAgent | undefined,
-    agentId: string,
-    commandFile: string,
-  ): void {
+  function assertReviewerContract(agent: TestAgent | undefined, agentId: string): void {
     assert(agent !== undefined, `${agentId} agent was not registered`);
     assert(agent.mode === "subagent", `${agentId} agent is not a subagent`);
     assert(agent.hidden === true, `${agentId} agent is not hidden`);
     assert(
-      (agent.description ?? "").includes(`Run /${commandFile.replace(/\.md$/, "")} instead`),
-      `${agentId} description does not name its command`,
-    );
-    assert(
-      (agent.description ?? "").includes(join("commands", commandFile)),
-      `${agentId} description does not name the installed command template path`,
+      agent.description === DO_NOT_INVOKE_DESCRIPTION,
+      `${agentId} description does not match the static do-not-invoke text`,
     );
 
     const permissions = agent.permissions ?? [];
@@ -160,6 +170,18 @@ try {
       `${agentId} narrowed git branch allow rule is missing`,
     );
     assert(
+      hasRule({ action: "shell", resource: "gh pr view*", effect: "allow" }),
+      `${agentId} gh pr view allow rule is missing`,
+    );
+    assert(
+      hasRule({ action: "shell", resource: "gh pr diff*", effect: "allow" }),
+      `${agentId} gh pr diff allow rule is missing`,
+    );
+    assert(
+      hasRule({ action: "shell", resource: "gh *", effect: "deny" }),
+      `${agentId} gh catch-all deny rule is missing`,
+    );
+    assert(
       hasRule({ action: "shell", resource: "git diff*--ext-diff*", effect: "deny" }),
       `${agentId} diff-engine deny rule is missing`,
     );
@@ -171,65 +193,86 @@ try {
       hasRule({ action: "glob", resource: "*.env.example", effect: "allow" }),
       `${agentId} glob env.example allow rule is missing`,
     );
+
+    const indexOfRule = (expected: PermissionRule) =>
+      permissions.findIndex(
+        (rule) =>
+          rule.action === expected.action &&
+          rule.resource === expected.resource &&
+          rule.effect === expected.effect,
+      );
+    assert(
+      hasRule({ action: "shell", resource: "git remote -v*", effect: "allow" }),
+      `${agentId} narrowed git remote allow rule is missing`,
+    );
+    assert(
+      hasRule({ action: "shell", resource: "gh auth status*", effect: "allow" }),
+      `${agentId} gh auth status allow rule is missing`,
+    );
+    assert(
+      !hasRule({ action: "shell", resource: "git remote *", effect: "allow" }),
+      `${agentId} broad git remote allow rule must not be present`,
+    );
+    assert(
+      !hasRule({ action: "shell", resource: "gh repo view*", effect: "allow" }),
+      `${agentId} gh repo view allow rule must not be present`,
+    );
+    const ghCatchAll = indexOfRule({ action: "shell", resource: "gh *", effect: "deny" });
+    const ghPrView = indexOfRule({ action: "shell", resource: "gh pr view*", effect: "allow" });
+    const ghPrDiff = indexOfRule({ action: "shell", resource: "gh pr diff*", effect: "allow" });
+    const ghAuthStatus = indexOfRule({
+      action: "shell",
+      resource: "gh auth status*",
+      effect: "allow",
+    });
+    assert(
+      ghCatchAll >= 0 && ghPrView > ghCatchAll && ghPrDiff > ghPrView && ghAuthStatus > ghPrDiff,
+      `${agentId} gh rules are not ordered catch-all-deny then most-specific-allow`,
+    );
+    assert(
+      indexOfRule({ action: "shell", resource: "gh auth status*--show-token*", effect: "deny" }) >
+        ghAuthStatus &&
+        indexOfRule({ action: "shell", resource: "gh auth status*-t*", effect: "deny" }) >
+          ghAuthStatus,
+      `${agentId} token-printing gh flags are not denied after the gh auth status allow`,
+    );
+    assert(
+      effectiveEffect(permissions, "shell", "git remote -v") === "allow",
+      `${agentId} git remote -v is not allowed`,
+    );
+    assert(
+      effectiveEffect(permissions, "shell", "gh auth status") === "allow",
+      `${agentId} bare gh auth status is not allowed`,
+    );
+    assert(
+      effectiveEffect(permissions, "shell", "gh auth status --show-token") === "deny",
+      `${agentId} gh auth status --show-token is not denied`,
+    );
+    assert(
+      effectiveEffect(permissions, "shell", "gh auth status -t") === "deny",
+      `${agentId} gh auth status -t is not denied`,
+    );
   }
 
   assert(commandTransforms === 0, "the plugin registered a host command");
   for (const [agentId, commandFile] of reviewCommands) {
-    assertReviewerContract(agents.get(agentId), agentId, commandFile);
+    assertReviewerContract(agents.get(agentId), agentId);
     assert(
       await Bun.file(join(configDir, "commands", commandFile)).exists(),
       `the ${commandFile} command was not installed into the isolated config directory`,
     );
   }
 
-  assert(
-    [...hooks.keys()].sort().join(",") === "context,generate",
-    "temperature hooks are missing",
-  );
-  const reviewerEvent: HookEvent = {
-    sessionID: "ses_smoke_review",
-    agent: "adversarial-reviewer",
-    options: {},
-  };
-  const reviewAgentEvent: HookEvent = {
-    sessionID: "ses_smoke_agent_review",
-    agent: "reviewer",
-    options: {},
-  };
-  const foreignEvent: HookEvent = { sessionID: "ses_smoke_foreign", agent: "build", options: {} };
-  const anonymousEvent: HookEvent = { sessionID: "ses_smoke_unknown", options: {} };
-  for (const hook of hooks.values()) {
-    hook(reviewerEvent);
-    hook(reviewAgentEvent);
-    hook(foreignEvent);
-    hook(anonymousEvent);
-  }
-  assert(
-    reviewerEvent.options.temperature === 0.1,
-    "adversarial reviewer temperature was not pinned",
-  );
-  assert(reviewAgentEvent.options.temperature === 0.1, "review agent temperature was not pinned");
-  assert(foreignEvent.options.temperature === undefined, "temperature leaked to a foreign agent");
-  assert(
-    anonymousEvent.options.temperature === undefined,
-    "temperature leaked to an anonymous event",
-  );
-  const skipWarnings = logs.filter(
-    (entry) => entry.level === "warn" && (entry.message ?? "").includes("temperature"),
-  );
-  assert(
-    skipWarnings.length === 2,
-    "temperature hook did not warn once per unattributable agent identity",
-  );
+  assert(logs.length === 0, "setup logged diagnostics for a clean install");
 
   await cleanup?.();
   assert(
-    disposers.sort().join(",") === "agent,agent,hook:context,hook:generate",
-    "cleanup missed a registration",
+    disposers.sort().join(",") === "agent,agent",
+    "cleanup missed a registration or registered a session hook",
   );
 
   process.stdout.write(
-    "smoke: built server artifact loaded; both reviewer agents, permissions, installs, and reviewer-only hooks verified\n",
+    "smoke: built server artifact loaded; both reviewer agents, permissions, installs, and agent-only disposers verified without session hooks\n",
   );
 } finally {
   if (previousConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
