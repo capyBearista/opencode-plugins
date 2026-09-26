@@ -56,8 +56,9 @@ const DO_NOT_INVOKE_DESCRIPTION =
   "Do not invoke this agent directly. It is invocable only by the user.";
 
 // The shared deterministic resolver block is byte-identical across both
-// prompts, both prompt references, and both command templates. Only the
-// remainder sentence (focus area vs. ignored) differs by reviewer.
+// prompts and both prompt references; only the remainder sentence (focus area
+// vs. ignored) differs by reviewer. The command templates must not restate it:
+// MOVED_DOCTRINE_PHRASES pins those rules to the prompts.
 const RESOLVER_HEAD = `Target selection:
 - A pull request URL always wins: when an argument is a PR URL, that URL selects the PR, no matter where it appears or what other target tokens are present.
 - Otherwise, the first bare token decides: an all-decimal number is a PR number, and a hex string of 7 or more characters containing at least one letter a-f, or any full-length 40-character SHA, is a commit. A pure-decimal string is never a commit, so \`1234567\` is PR #1234567.
@@ -80,6 +81,65 @@ const RESOLVER_TAIL = `- Before resolving a bare PR number, verify the current r
 function expectDeterministicResolver(text: string, remainder: string): void {
   expect(text).toInclude(`${RESOLVER_HEAD}\n${remainder}\n${RESOLVER_TAIL}\n`);
 }
+
+// Normative rules moved out of the command templates: target selection, focus
+// handling, fork-point resolution, evidence gating, and output wording now
+// live only in the system prompts (src/prompt.ts plus its references).
+//
+// The command pointers paraphrase those rules on purpose so they never reuse a
+// banned substring and trip this tripwire; a local orientation that reuses one
+// fails CI intentionally and requires a deliberate update here rather than
+// silent wording drift.
+const MOVED_DOCTRINE_PHRASES = [
+  "Target selection:",
+  "A pull request URL always wins",
+  "the first bare token decides",
+  "reported plainly as unresolvable",
+  "beats `--scope` and `--base`",
+  "The first target token wins",
+  "any remaining trailing text is the focus area",
+  "focus areas are not supported",
+  "verify the current repository with `git remote -v`",
+  "stop and warn explicitly unless the user asked for a cross-repo review",
+  "when `gh` fails, report its stderr verbatim",
+  "prefer the evidence you collect yourself over the working-tree snapshot blocks",
+  "If `--scope auto` (the default)",
+  "If `--scope working-tree`",
+  "If `--scope branch`",
+  "git merge-base HEAD <upstream>",
+];
+
+// The platform-scope note is neither doctrine nor instruction-path content:
+// it was removed from the command templates entirely. The reviewer side
+// (read/glob/grep/git through the host tool abstraction) is portable; only the
+// five snapshot blocks are shell-dependent, and they degrade via `|| true`
+// while the snapshot caveat tells the reviewer to self-collect. Any
+// reintroduction of the old scope wording is a regression this tripwire
+// catches.
+const REMOVED_PLATFORM_SCOPE_PHRASES = [
+  "Platform scope:",
+  "GNU/Linux",
+  "Bash-compatible shell",
+  "No Windows or macOS parity is claimed",
+];
+
+const REVIEW_ONLY_GUARDRAIL =
+  "Review only: do not modify the repository; report findings and suggestions for the author to apply.";
+const REVIEW_ONLY_TRIPWIRE_STEM = "Review only: do not modify the repository";
+
+// Guardrail vs doctrine: the review-only sentence is a read-only safety
+// constraint on the reviewer, not review doctrine, so it is the one exception
+// to the doctrine-free template rule. review.md carries the full sentence and
+// passes via this allowlist; the banned stem still fails for
+// adversarial-review.md and every other asset.
+const DOCTRINE_TRIPWIRE_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
+  [REVIEW_COMMAND_FILE_NAME]: [REVIEW_ONLY_GUARDRAIL],
+};
+const TEMPLATE_TRIPWIRE_PHRASES = [
+  ...MOVED_DOCTRINE_PHRASES,
+  ...REMOVED_PLATFORM_SCOPE_PHRASES,
+  REVIEW_ONLY_TRIPWIRE_STEM,
+];
 
 const temporaryDirectories: string[] = [];
 
@@ -688,6 +748,44 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(system).not.toInclude("Output valid JSON matching this schema");
   });
 
+  test("command pointers paraphrase their prompts and name live prompt anchors", async () => {
+    const canonical = await readFile(join(import.meta.dirname, "prompt.ts"), "utf8");
+    const cases: Array<{ template: string; prompt: string; anchors: Record<string, string> }> = [
+      {
+        template: await readFile(COMMAND_ASSET_PATH, "utf8"),
+        prompt: await readFile(
+          join(import.meta.dirname, "prompts", "adversarial-review.md"),
+          "utf8",
+        ),
+        anchors: {
+          "Target selection": "Target selection:",
+          "focus weighting": "weight it heavily",
+          "evidence rules": "Gate evidence collection on the selected target",
+          "output contract": "<structured_output_contract>",
+        },
+      },
+      {
+        template: await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8"),
+        prompt: await readFile(join(import.meta.dirname, "prompts", "review.md"), "utf8"),
+        anchors: {
+          "Target selection": "Target selection:",
+          "scope flags": "select the review scope with the flags below",
+          "no focus text": "focus areas are not supported",
+          "evidence rules": "Gate evidence collection on the selected target",
+          "output contract": "<report_contract>",
+        },
+      },
+    ];
+
+    for (const { template, prompt, anchors } of cases) {
+      for (const [namedArea, anchor] of Object.entries(anchors)) {
+        expect(template).toInclude(namedArea);
+        expect(prompt).toInclude(anchor);
+        expect(canonical).toInclude(anchor);
+      }
+    }
+  });
+
   test("reviewer agents use a hex color instead of a theme name", async () => {
     const context = createTestContext();
     await setupPlugin(context);
@@ -1211,15 +1309,24 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(reviewFrontmatter.agent).toBe(REVIEW_AGENT_ID);
     expect(reviewFrontmatter.subagent).toBe("true");
     expect("model" in reviewFrontmatter).toBe(false);
-    expect(reviewAsset).toInclude("Review only: do not modify the repository");
-    expect(reviewAsset).toInclude("tracking branch of HEAD, or `origin/main`, or `main`");
-    expect(reviewAsset).toInclude("git merge-base HEAD <upstream>");
     expect(reviewAsset).not.toInclude("acknowledged");
 
-    for (const asset of [adversarialAsset, reviewAsset]) {
+    for (const [fileName, asset, pointerMarker] of [
+      [COMMAND_FILE_NAME, adversarialAsset, "focus weighting"],
+      [REVIEW_COMMAND_FILE_NAME, reviewAsset, "scope flags"],
+    ] as const) {
       expect(asset).toInclude("$ARGUMENTS");
       expect(asset.match(/!`[^`]+`/g) ?? []).toHaveLength(5);
       expect(asset.match(/!`[^`]*2>&1 \|\| true`/g) ?? []).toHaveLength(5);
+      for (const label of [
+        "- Branch:",
+        "- Status:",
+        "- Recent commits:",
+        "- Working-tree diff against HEAD:",
+        "- Untracked files (paths only; read their contents with your tools):",
+      ]) {
+        expect(asset).toInclude(label);
+      }
       for (const command of [
         "git branch --show-current",
         "git status --short",
@@ -1229,11 +1336,19 @@ describe("@capybearista/opencode-adversarial-review", () => {
       ]) {
         expect(asset).toInclude(command);
       }
-      expect(asset).toInclude("GNU/Linux");
+      expect(asset).toInclude(pointerMarker);
+      expect(asset).toInclude(
+        "The blocks below are a point-in-time snapshot rendered by this template.",
+      );
+      expect(asset).not.toInclude("GNU/Linux");
+      expect(asset).not.toInclude("Bash");
+      const allowlisted = DOCTRINE_TRIPWIRE_ALLOWLIST[fileName] ?? [];
+      for (const phrase of TEMPLATE_TRIPWIRE_PHRASES) {
+        if (allowlisted.some((guardrail) => guardrail.includes(phrase))) continue;
+        expect(asset).not.toInclude(phrase);
+      }
     }
-
-    expectDeterministicResolver(adversarialAsset, RESOLVER_REMAINDER_ADVERSARIAL);
-    expectDeterministicResolver(reviewAsset, RESOLVER_REMAINDER_REVIEW);
+    expect(reviewAsset).toInclude(REVIEW_ONLY_GUARDRAIL);
 
     const bunCachePrefix = join(".bun", "");
     expect((await walkFiles(home)).filter((file) => !file.startsWith(bunCachePrefix))).toEqual([
