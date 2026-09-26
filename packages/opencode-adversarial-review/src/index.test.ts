@@ -39,9 +39,19 @@ const PACKAGE_NAME = "@capybearista/opencode-adversarial-review";
 const REVIEWER_AGENT_ID = "adversarial-reviewer";
 const COMMAND_FILE_NAME = "adversarial-review.md";
 const COMMAND_ASSET_PATH = join(import.meta.dirname, "..", "commands", COMMAND_FILE_NAME);
+const REVIEW_AGENT_ID = "reviewer";
+const REVIEW_COMMAND_FILE_NAME = "review.md";
+const REVIEW_COMMAND_ASSET_PATH = join(
+  import.meta.dirname,
+  "..",
+  "commands",
+  REVIEW_COMMAND_FILE_NAME,
+);
 const PACKAGE_ROOT = resolve(import.meta.dirname, "..");
 const JSON_VERBATIM_RULE =
   "Return only valid JSON, verbatim. Do not wrap the JSON in markdown fences or add commentary outside the JSON object.";
+const MARKDOWN_VERBATIM_RULE =
+  "Return only the Markdown report, verbatim. Do not wrap the report in markdown fences or add commentary outside the report.";
 
 const temporaryDirectories: string[] = [];
 
@@ -205,29 +215,46 @@ function childEnvironment(overrides: Record<string, string>): Record<string, str
   return { ...environment, ...overrides };
 }
 
-async function runSetupInSubprocess(configuration: {
-  home: string;
-  opencodeConfigDir?: string;
-  writeFileError?: { code: string; message: string };
-}): Promise<SubprocessSetup> {
-  const pluginURL = pathToFileURL(join(PACKAGE_ROOT, "src", "index.ts")).href;
-  const writeFileMock =
-    configuration.writeFileError === undefined
+function fsErrorMock(
+  method: "readFile" | "writeFile",
+  error: { code: string; message: string; onlyFor?: string } | undefined,
+): string {
+  if (error === undefined) return "";
+  const real = method === "readFile" ? "realReadFile" : "realWriteFile";
+  const guard =
+    error.onlyFor === undefined
       ? ""
-      : `
+      : `if (!String(path).endsWith(${JSON.stringify(`/${error.onlyFor}`)})) {
+          return ${real}(path, ...args);
+        }
+        `;
+  return `
     const { mock } = await import("bun:test");
     const fs = await import("node:fs/promises");
+    const ${real} = fs.${method}.bind(fs);
     mock.module("node:fs/promises", () => ({
       ...fs,
-      writeFile: async () => {
-        const error = new Error(${JSON.stringify(configuration.writeFileError.message)});
-        error.code = ${JSON.stringify(configuration.writeFileError.code)};
+      ${method}: async (path, ...args) => {
+        ${guard}const error = new Error(${JSON.stringify(error.message)});
+        error.code = ${JSON.stringify(error.code)};
         throw error;
       },
     }));
   `;
+}
+
+async function runSetupInSubprocess(configuration: {
+  home: string;
+  opencodeConfigDir?: string;
+  readFileError?: { code: string; message: string; onlyFor?: string };
+  writeFileError?: { code: string; message: string; onlyFor?: string };
+}): Promise<SubprocessSetup> {
+  const pluginURL = pathToFileURL(join(PACKAGE_ROOT, "src", "index.ts")).href;
+  const writeFileMock = fsErrorMock("writeFile", configuration.writeFileError);
+  const readFileMock = fsErrorMock("readFile", configuration.readFileError);
   const script = `
     ${writeFileMock}
+    ${readFileMock}
     const { default: plugin } = await import(${JSON.stringify(pluginURL)});
     const agents = [];
     const hooks = [];
@@ -345,6 +372,8 @@ describe("@capybearista/opencode-adversarial-review", () => {
   test("package.json targets the V2 package root, ships the command, and has no TUI metadata", async () => {
     const manifest = await Bun.file(join(PACKAGE_ROOT, "package.json")).json();
     expect(manifest.main).toBe("./dist/index.js");
+    expect(manifest.description).toInclude("adversarial reviewer");
+    expect(manifest.description).toInclude("constructive reviewer");
     expect(manifest.exports["."].default).toBe("./dist/index.js");
     expect(manifest.files).toContain("server.js");
     expect(manifest.files).toContain("commands");
@@ -412,6 +441,25 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(agent?.hidden).toBe(true);
   });
 
+  test("both reviewers run as hidden subagents with do-not-invoke descriptions", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    for (const [agentId, commandFile] of [
+      [REVIEWER_AGENT_ID, COMMAND_FILE_NAME],
+      [REVIEW_AGENT_ID, REVIEW_COMMAND_FILE_NAME],
+    ] as const) {
+      const commandName = commandFile.replace(/\.md$/, "");
+      const agent = context.agents.get(agentId);
+      expect(agent?.mode).toBe("subagent");
+      expect(agent?.hidden).toBe(true);
+      expect(agent?.description).toInclude(`Do not invoke ${agentId} directly`);
+      expect(agent?.description).toInclude(`Run /${commandName} instead`);
+      expect(agent?.description).toInclude("only supported path");
+      expect(agent?.description).toInclude(join(context.configDir, "commands", commandFile));
+    }
+  });
+
   test("reviewer description names the installed command template path", async () => {
     const context = createTestContext();
     await setupPlugin(context);
@@ -447,6 +495,29 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(agent?.hidden).toBe(true);
   });
 
+  test("existing review agent configuration keeps system and color but not its description", async () => {
+    const context = createTestContext({
+      agents: [
+        {
+          id: REVIEW_AGENT_ID,
+          mode: "primary",
+          description: "custom description",
+          system: "custom system",
+          color: "#654321",
+        },
+      ],
+    });
+    await setupPlugin(context);
+
+    const agent = context.agents.get(REVIEW_AGENT_ID);
+    expect(agent?.description).not.toBe("custom description");
+    expect(agent?.description).toInclude("/review");
+    expect(agent?.system).toBe("custom system");
+    expect(agent?.color).toBe("#654321");
+    expect(agent?.mode).toBe("subagent");
+    expect(agent?.hidden).toBe(true);
+  });
+
   test("reviewer agent keeps the evidence-first system prompt and the verbatim JSON rule", async () => {
     const context = createTestContext();
     await setupPlugin(context);
@@ -468,11 +539,32 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(system).not.toInclude("full text bodies of unignored untracked files");
   });
 
-  test("reviewer agent uses a hex color instead of a theme name", async () => {
+  test("the review agent keeps the constructive review prompt and the verbatim markdown rule", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    const reference = await Bun.file(join(import.meta.dirname, "prompts", "review.md")).text();
+    const system = context.agents.get(REVIEW_AGENT_ID)?.system ?? "";
+
+    expect(system).toBe(`${reference.trimEnd()}\n\n${MARKDOWN_VERBATIM_RULE}`);
+    expect(system).toInclude("Review only: do not modify the repository");
+    expect(system).toInclude("Trailing non-flag text is ignored");
+    expect(system).toInclude("state `None` when the change is sound");
+    expect(system).not.toInclude("acknowledged");
+    expect(system).toInclude("Collect your own evidence with the read-only tools");
+    expect(system).toInclude("If `--scope auto` (the default)");
+    expect(system).toInclude("review the working tree when it has staged or unstaged changes");
+    expect(system).toInclude("<report_contract>");
+    expect(system).not.toInclude("break confidence");
+    expect(system).not.toInclude("Output valid JSON matching this schema");
+  });
+
+  test("reviewer agents use a hex color instead of a theme name", async () => {
     const context = createTestContext();
     await setupPlugin(context);
 
     expect(context.agents.get(REVIEWER_AGENT_ID)?.color).toMatch(/^#[0-9a-fA-F]{6}$/);
+    expect(context.agents.get(REVIEW_AGENT_ID)?.color).toMatch(/^#[0-9a-fA-F]{6}$/);
   });
 
   test("setup leaves every other agent's permissions untouched", async () => {
@@ -588,6 +680,30 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(permissions).toContainEqual({ action: "skill", resource: "*", effect: "deny" });
   });
 
+  test("the review agent reuses the reviewer permission set verbatim", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    const adversarial = context.agents.get(REVIEWER_AGENT_ID);
+    const review = context.agents.get(REVIEW_AGENT_ID);
+    expect(review?.permissions).toEqual(adversarial?.permissions);
+
+    const permissions = review?.permissions ?? [];
+    expect(permissions.some((rule) => rule.effect === "ask")).toBe(false);
+    expect(effectiveEffect(permissions, "read", "src/index.ts")).toBe("allow");
+    expect(effectiveEffect(permissions, "shell", "git diff HEAD")).toBe("allow");
+    expect(effectiveEffect(permissions, "shell", "git branch --show-current")).toBe("allow");
+    expect(effectiveEffect(permissions, "shell", "git branch -D topic")).toBe("deny");
+    expect(effectiveEffect(permissions, "shell", "git diff HEAD --output=/tmp/review.diff")).toBe(
+      "deny",
+    );
+    expect(effectiveEffect(permissions, "edit", "src/index.ts")).toBe("deny");
+    expect(effectiveEffect(permissions, "skill", "*")).toBe("deny");
+    expect(effectiveEffect(permissions, "read", ".env")).toBe("deny");
+    expect(effectiveEffect(permissions, "read", ".env.example")).toBe("allow");
+    expect(effectiveEffect(permissions, "*", "*")).toBe("deny");
+  });
+
   // Local approximation of host enforcement: wildcard patterns mirror the
   // host's `Wildcard.match` (opaque string resource, backslash normalization),
   // so a quoted flag such as `--ext"-"diff` can still evade a pattern match.
@@ -682,6 +798,9 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     await expect(setupPlugin(context)).rejects.toThrow(/agent\.transform is unavailable/);
     await expect(stat(join(context.configDir, "commands", COMMAND_FILE_NAME))).rejects.toThrow();
+    await expect(
+      stat(join(context.configDir, "commands", REVIEW_COMMAND_FILE_NAME)),
+    ).rejects.toThrow();
   });
 
   test("missing session.hook is handled without throwing", async () => {
@@ -760,6 +879,19 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(anonymous.options.temperature).toBeUndefined();
   });
 
+  test("temperature hooks also pin the review agent", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    const review: HookEvent = { sessionID: "ses_review", agent: REVIEW_AGENT_ID, options: {} };
+    for (const name of ["context", "generate"]) {
+      context.hooks.get(name)?.(review);
+    }
+
+    expect(review.options.temperature).toBe(0.1);
+    expect(context.logs.filter((entry) => entry.level === "warn")).toHaveLength(0);
+  });
+
   test("temperature hooks warn once per observed non-reviewer agent", async () => {
     const context = createTestContext();
     await setupPlugin(context);
@@ -782,58 +914,98 @@ describe("@capybearista/opencode-adversarial-review", () => {
     );
     expect(warnings).toHaveLength(2);
     expect(warnings[0]?.message).toInclude('agent "build"');
-    expect(warnings[0]?.message).toInclude(`"${REVIEWER_AGENT_ID}" only`);
+    expect(warnings[0]?.message).toInclude(`"${REVIEWER_AGENT_ID}" and "${REVIEW_AGENT_ID}" only`);
     expect(warnings[1]?.message).toInclude("no agent");
   });
 
-  test("cleanup disposes the agent registration and both temperature hooks", async () => {
+  test("cleanup disposes both agent registrations and both temperature hooks", async () => {
     const context = createTestContext();
     const cleanup = await setupPlugin(context);
 
     await cleanup?.();
 
-    expect(context.disposers.sort()).toEqual(["agent", "hook:context", "hook:generate"]);
+    expect(context.agents.has(REVIEWER_AGENT_ID)).toBe(true);
+    expect(context.agents.has(REVIEW_AGENT_ID)).toBe(true);
+    expect(context.disposers.sort()).toEqual(["agent", "agent", "hook:context", "hook:generate"]);
   });
 
-  test("setup installs the command file under HOME and writes no agent file", async () => {
+  test("setup installs both command files under HOME and writes no agent file", async () => {
     const home = await temporaryDirectory("adversarial-review-home-");
     await mkdir(join(home, ".config", "opencode", "commands"), { recursive: true });
 
     const result = await runSetupInSubprocess({ home });
 
     expect(result.ok).toBe(true);
-    expect(result.agents.map((agent) => agent.id)).toEqual([REVIEWER_AGENT_ID]);
+    expect(result.agents.map((agent) => agent.id).sort()).toEqual(
+      [REVIEWER_AGENT_ID, REVIEW_AGENT_ID].sort(),
+    );
     expect(result.hooks).toEqual(["context", "generate"]);
     expect(result.commandTransforms).toBe(0);
 
-    const installed = join(home, ".config", "opencode", "commands", COMMAND_FILE_NAME);
-    const asset = await readFile(COMMAND_ASSET_PATH, "utf8");
-    expect(await readFile(installed, "utf8")).toBe(asset);
+    const adversarialAsset = await readFile(COMMAND_ASSET_PATH, "utf8");
+    expect(
+      await readFile(join(home, ".config", "opencode", "commands", COMMAND_FILE_NAME), "utf8"),
+    ).toBe(adversarialAsset);
+    const adversarialFrontmatter = frontmatterOf(adversarialAsset);
+    expect(adversarialFrontmatter.description).toBeString();
+    expect(adversarialFrontmatter.description).toInclude("adversarial");
+    expect(adversarialFrontmatter.agent).toBe(REVIEWER_AGENT_ID);
+    expect(adversarialFrontmatter.subagent).toBe("true");
+    expect("model" in adversarialFrontmatter).toBe(false);
 
-    const frontmatter = frontmatterOf(asset);
-    expect(frontmatter.description).toBeString();
-    expect(frontmatter.description).toInclude("adversarial");
-    expect(frontmatter.agent).toBe(REVIEWER_AGENT_ID);
-    expect(frontmatter.subagent).toBe("true");
-    expect("model" in frontmatter).toBe(false);
+    const reviewAsset = await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8");
+    expect(
+      await readFile(
+        join(home, ".config", "opencode", "commands", REVIEW_COMMAND_FILE_NAME),
+        "utf8",
+      ),
+    ).toBe(reviewAsset);
+    const reviewFrontmatter = frontmatterOf(reviewAsset);
+    expect(reviewFrontmatter.description).toBeString();
+    expect(reviewFrontmatter.description).toInclude("code review");
+    expect(reviewFrontmatter.agent).toBe(REVIEW_AGENT_ID);
+    expect(reviewFrontmatter.subagent).toBe("true");
+    expect("model" in reviewFrontmatter).toBe(false);
+    expect(reviewAsset).toInclude("Review only: do not modify the repository");
+    expect(reviewAsset).toInclude("tracking branch of HEAD, or `origin/main`, or `main`");
+    expect(reviewAsset).toInclude("git merge-base HEAD <upstream>");
+    expect(reviewAsset).not.toInclude("acknowledged");
 
-    expect(asset).toInclude("$ARGUMENTS");
-    expect(asset.match(/!`[^`]+`/g) ?? []).toHaveLength(5);
-    for (const command of [
-      "git branch --show-current",
-      "git status --short",
-      "git log --oneline -3",
-      "git diff HEAD",
-      "git ls-files --others",
-    ]) {
-      expect(asset).toInclude(command);
+    for (const asset of [adversarialAsset, reviewAsset]) {
+      expect(asset).toInclude("$ARGUMENTS");
+      expect(asset.match(/!`[^`]+`/g) ?? []).toHaveLength(5);
+      expect(asset.match(/!`[^`]*2>&1 \|\| true`/g) ?? []).toHaveLength(5);
+      for (const command of [
+        "git branch --show-current",
+        "git status --short",
+        "git log --oneline -3",
+        "git diff HEAD",
+        "git ls-files --others",
+      ]) {
+        expect(asset).toInclude(command);
+      }
+      expect(asset).toInclude("GNU/Linux");
     }
-    expect(asset).toInclude("GNU/Linux");
 
     const bunCachePrefix = join(".bun", "");
     expect((await walkFiles(home)).filter((file) => !file.startsWith(bunCachePrefix))).toEqual([
       join(".config", "opencode", "commands", COMMAND_FILE_NAME),
+      join(".config", "opencode", "commands", REVIEW_COMMAND_FILE_NAME),
     ]);
+  });
+
+  test("both installed command files persist on disk after dispose", async () => {
+    const context = createTestContext();
+    const cleanup = await setupPlugin(context);
+
+    await cleanup?.();
+
+    expect(await readFile(join(context.configDir, "commands", COMMAND_FILE_NAME), "utf8")).toBe(
+      await readFile(COMMAND_ASSET_PATH, "utf8"),
+    );
+    expect(
+      await readFile(join(context.configDir, "commands", REVIEW_COMMAND_FILE_NAME), "utf8"),
+    ).toBe(await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8"));
   });
 
   test("a second setup preserves hand-edited bytes and warns about the existing file", async () => {
@@ -849,6 +1021,28 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     expect(result.ok).toBe(true);
     expect(await readFile(installed, "utf8")).toBe(edited);
+    const diagnostics = result.logs.filter(
+      (entry) =>
+        entry.message.includes("leaving it untouched") && entry.message.includes(installed),
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.level).toBe("warn");
+    expect(diagnostics[0]?.message).toInclude("stale or customized");
+    expect(diagnostics[0]?.message).toInclude("delete it");
+    expect(diagnostics[0]?.message).toInclude("uninstall");
+  });
+
+  test("a pre-existing review command file keeps its bytes and warns without naming the wrong path", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    await mkdir(join(home, ".config", "opencode", "commands"), { recursive: true });
+    const installed = join(home, ".config", "opencode", "commands", REVIEW_COMMAND_FILE_NAME);
+    const edited = `---\ndescription: custom review\nagent: ${REVIEW_AGENT_ID}\nsubagent: true\n---\n\ncustom body\n`;
+    await writeFile(installed, edited);
+
+    const result = await runSetupInSubprocess({ home });
+
+    expect(result.ok).toBe(true);
+    expect(await readFile(installed, "utf8")).toBe(edited);
     const diagnostics = result.logs.filter((entry) =>
       entry.message.includes("leaving it untouched"),
     );
@@ -856,8 +1050,9 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(diagnostics[0]?.level).toBe("warn");
     expect(diagnostics[0]?.message).toInclude(installed);
     expect(diagnostics[0]?.message).toInclude("stale or customized");
-    expect(diagnostics[0]?.message).toInclude("delete it");
-    expect(diagnostics[0]?.message).toInclude("uninstall");
+    expect(
+      await readFile(join(home, ".config", "opencode", "commands", COMMAND_FILE_NAME), "utf8"),
+    ).toBe(await readFile(COMMAND_ASSET_PATH, "utf8"));
   });
 
   test("setup does not follow or replace a symlinked command path", async () => {
@@ -877,6 +1072,26 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(await readFile(decoy, "utf8")).toBe("decoy bytes\n");
   });
 
+  test("setup does not follow or replace a symlinked review command path", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const decoy = join(home, "review-decoy.md");
+    await writeFile(decoy, "decoy bytes\n");
+    const installed = join(commands, REVIEW_COMMAND_FILE_NAME);
+    await symlink(decoy, installed);
+
+    const result = await runSetupInSubprocess({ home });
+
+    expect(result.ok).toBe(true);
+    expect((await lstat(installed)).isSymbolicLink()).toBe(true);
+    expect(await readlink(installed)).toBe(decoy);
+    expect(await readFile(decoy, "utf8")).toBe("decoy bytes\n");
+    expect(await readFile(join(commands, COMMAND_FILE_NAME), "utf8")).toBe(
+      await readFile(COMMAND_ASSET_PATH, "utf8"),
+    );
+  });
+
   test("OPENCODE_CONFIG_DIR targets only the override directory", async () => {
     const home = await temporaryDirectory("adversarial-review-home-");
     const override = await isolatedConfigDirectory();
@@ -887,8 +1102,14 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(await readFile(join(override, "commands", COMMAND_FILE_NAME), "utf8")).toBe(
       await readFile(COMMAND_ASSET_PATH, "utf8"),
     );
+    expect(await readFile(join(override, "commands", REVIEW_COMMAND_FILE_NAME), "utf8")).toBe(
+      await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8"),
+    );
     await expect(
       stat(join(home, ".config", "opencode", "commands", COMMAND_FILE_NAME)),
+    ).rejects.toThrow();
+    await expect(
+      stat(join(home, ".config", "opencode", "commands", REVIEW_COMMAND_FILE_NAME)),
     ).rejects.toThrow();
   });
 
@@ -900,7 +1121,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toInclude(join(broken, "commands", COMMAND_FILE_NAME));
-    expect(result.error).toInclude("was not registered");
+    expect(result.error).toInclude("Neither reviewer agent was registered");
     expect(result.agents).toHaveLength(0);
     await expect(stat(broken)).rejects.toThrow();
   });
@@ -921,8 +1142,81 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toInclude(commandPath);
-    expect(result.error).toInclude("was not registered");
+    expect(result.error).toInclude("Neither reviewer agent was registered");
     expect(result.agents).toHaveLength(0);
     await expect(stat(commandPath)).rejects.toThrow();
+  });
+
+  test("a read-only filesystem review install failure registers neither agent", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const configDir = await isolatedConfigDirectory();
+    const reviewPath = join(configDir, "commands", REVIEW_COMMAND_FILE_NAME);
+
+    const result = await runSetupInSubprocess({
+      home,
+      opencodeConfigDir: configDir,
+      writeFileError: {
+        code: "EROFS",
+        message: `EROFS: read-only file system, open '${reviewPath}'`,
+        onlyFor: REVIEW_COMMAND_FILE_NAME,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toInclude(reviewPath);
+    expect(result.error).toInclude("Neither reviewer agent was registered");
+    expect(result.agents).toHaveLength(0);
+    await expect(stat(reviewPath)).rejects.toThrow();
+    expect(await readFile(join(configDir, "commands", COMMAND_FILE_NAME), "utf8")).toBe(
+      await readFile(COMMAND_ASSET_PATH, "utf8"),
+    );
+  });
+
+  test("a missing packaged command template fails setup with a path-bearing error and no agent", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const configDir = await isolatedConfigDirectory();
+    const assetPath = join(PACKAGE_ROOT, "commands", COMMAND_FILE_NAME);
+
+    const result = await runSetupInSubprocess({
+      home,
+      opencodeConfigDir: configDir,
+      readFileError: {
+        code: "ENOENT",
+        message: `ENOENT: no such file or directory, open '${assetPath}'`,
+        onlyFor: COMMAND_FILE_NAME,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toInclude(assetPath);
+    expect(result.error).toInclude("Neither reviewer agent was registered");
+    expect(result.agents).toHaveLength(0);
+    await expect(stat(join(configDir, "commands", COMMAND_FILE_NAME))).rejects.toThrow();
+    await expect(stat(join(configDir, "commands", REVIEW_COMMAND_FILE_NAME))).rejects.toThrow();
+  });
+
+  test("an unreadable packaged review template leaves the first command on disk but registers neither agent", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const configDir = await isolatedConfigDirectory();
+    const assetPath = join(PACKAGE_ROOT, "commands", REVIEW_COMMAND_FILE_NAME);
+
+    const result = await runSetupInSubprocess({
+      home,
+      opencodeConfigDir: configDir,
+      readFileError: {
+        code: "EACCES",
+        message: `EACCES: permission denied, open '${assetPath}'`,
+        onlyFor: REVIEW_COMMAND_FILE_NAME,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toInclude(assetPath);
+    expect(result.error).toInclude("Neither reviewer agent was registered");
+    expect(result.agents).toHaveLength(0);
+    expect(await readFile(join(configDir, "commands", COMMAND_FILE_NAME), "utf8")).toBe(
+      await readFile(COMMAND_ASSET_PATH, "utf8"),
+    );
+    await expect(stat(join(configDir, "commands", REVIEW_COMMAND_FILE_NAME))).rejects.toThrow();
   });
 });
