@@ -13,11 +13,12 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
+    "commands",
     "dist",
     "server.js"
   ],
   "scripts": {
-    "build": "tsc && bun scripts/check-schema-asset.ts",
+    "build": "rm -rf dist && tsc",
     "typecheck": "tsc --noEmit",
     "check": "bunx @biomejs/biome check --write .",
     "lint": "bunx @biomejs/biome check .",
