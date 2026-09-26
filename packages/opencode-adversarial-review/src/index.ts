@@ -3,15 +3,42 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import type { Context as PluginContext } from "@opencode/plugin/promise/plugin";
-import { REVIEWER_SYSTEM_PROMPT } from "./prompt.js";
+import { ADVERSARIAL_REVIEWER_SYSTEM_PROMPT, REVIEWER_SYSTEM_PROMPT } from "./prompt.js";
 
 const PLUGIN_ID = "capybearista.opencode-adversarial-review";
-const REVIEWER_AGENT_ID = "adversarial-reviewer";
 const REVIEW_TEMPERATURE = 0.1;
-const COMMAND_FILE_NAME = "adversarial-review.md";
-const COMMAND_ASSET_URL = new URL("../commands/adversarial-review.md", import.meta.url);
 // Hex is required; plugin-defined agents do not resolve theme color names.
 const REVIEWER_COLOR = "#f59e0b";
+
+type ReviewerConfig = {
+  agentId: string;
+  commandFilename: string;
+  description: (commandPath: string) => string;
+  systemPrompt: string;
+};
+
+// One entry per reviewer. Setup loops both the install and the registration so
+// every reviewer shares one set of mechanics and differs only in identity,
+// command file, description, and system prompt.
+const REVIEWERS: readonly ReviewerConfig[] = [
+  {
+    agentId: "adversarial-reviewer",
+    commandFilename: "adversarial-review.md",
+    description: (commandPath) =>
+      `Do not invoke adversarial-reviewer directly. Run /adversarial-review instead; the installed command template at ${commandPath} is the only supported path.`,
+    systemPrompt: ADVERSARIAL_REVIEWER_SYSTEM_PROMPT,
+  },
+  {
+    agentId: "reviewer",
+    commandFilename: "review.md",
+    description: (commandPath) =>
+      `Do not invoke reviewer directly. Run /review instead; the installed command template at ${commandPath} is the only supported path.`,
+    systemPrompt: REVIEWER_SYSTEM_PROMPT,
+  },
+];
+
+const REVIEWER_AGENT_IDS = new Set(REVIEWERS.map((reviewer) => reviewer.agentId));
+const REVIEWER_AGENT_ID_LIST = REVIEWERS.map((reviewer) => `"${reviewer.agentId}"`).join(" and ");
 
 type PermissionEffect = "allow" | "deny" | "ask";
 type PermissionRule = { action: string; resource: string; effect: PermissionEffect };
@@ -96,13 +123,17 @@ function applyRules(agent: AgentInfo, rules: readonly PermissionRule[]): void {
   agent.permissions = [...merged, ...hostDenies];
 }
 
-function configureReviewerAgent(editor: AgentEditor, description: string): void {
-  const existing = editor.get(REVIEWER_AGENT_ID);
-  editor.update(REVIEWER_AGENT_ID, (agent) => {
+function configureReviewerAgent(
+  editor: AgentEditor,
+  reviewer: ReviewerConfig,
+  description: string,
+): void {
+  const existing = editor.get(reviewer.agentId);
+  editor.update(reviewer.agentId, (agent) => {
     agent.mode = "subagent";
     agent.hidden = true;
     agent.description = description;
-    agent.system = existing?.system ?? REVIEWER_SYSTEM_PROMPT;
+    agent.system = existing?.system ?? reviewer.systemPrompt;
     agent.color = existing?.color ?? REVIEWER_COLOR;
     // The reviewer runs unattended, so inherited ask rules are dropped instead of
     // stalling on a user prompt; the explicit rules below keep it sandboxed.
@@ -144,13 +175,9 @@ function createHostLogger(ctx: PluginContext, level: "error" | "warn"): (message
   };
 }
 
-function commandFilePath(): string {
+function commandFilePath(commandFilename: string): string {
   const configDirectory = process.env.OPENCODE_CONFIG_DIR ?? join(homedir(), ".config", "opencode");
-  return join(configDirectory, "commands", COMMAND_FILE_NAME);
-}
-
-function reviewerDescription(commandPath: string): string {
-  return `Do not invoke adversarial-reviewer directly. Run /adversarial-review instead; the installed command template at ${commandPath} is the only supported path.`;
+  return join(configDirectory, "commands", commandFilename);
 }
 
 // Write-once: `wx` is atomic, refuses to replace anything already at the path
@@ -158,14 +185,19 @@ function reviewerDescription(commandPath: string): string {
 // Parent-directory trust: the containing `commands/` directory is assumed
 // trustworthy. A symlinked parent could redirect the write outside the config
 // directory; the no-symlink-following guarantee covers the leaf file only.
-async function installCommandFile(logWarn: (message: string) => void): Promise<string> {
-  const commandPath = commandFilePath();
+async function installCommandFile(
+  reviewer: ReviewerConfig,
+  logWarn: (message: string) => void,
+): Promise<string> {
+  const commandPath = commandFilePath(reviewer.commandFilename);
+  const commandName = `/${reviewer.commandFilename.replace(/\.md$/, "")}`;
+  const assetUrl = new URL(`../commands/${reviewer.commandFilename}`, import.meta.url);
   let template: string;
   try {
-    template = await readFile(COMMAND_ASSET_URL, "utf8");
+    template = await readFile(assetUrl, "utf8");
   } catch (error) {
     throw new Error(
-      `Unable to read the bundled command template at ${COMMAND_ASSET_URL.pathname}: ${errorMessage(error)}. The ${REVIEWER_AGENT_ID} agent was not registered.`,
+      `Unable to read the bundled command template at ${assetUrl.pathname}: ${errorMessage(error)}. Neither reviewer agent was registered.`,
       { cause: error },
     );
   }
@@ -179,7 +211,7 @@ async function installCommandFile(logWarn: (message: string) => void): Promise<s
       return commandPath;
     }
     throw new Error(
-      `Unable to install the /adversarial-review command at ${commandPath}: ${errorMessage(error)}. Create the parent directory and grant write access, then restart OpenCode; the ${REVIEWER_AGENT_ID} agent was not registered.`,
+      `Unable to install the ${commandName} command at ${commandPath}: ${errorMessage(error)}. Create the parent directory and grant write access, then restart OpenCode. Neither reviewer agent was registered.`,
       { cause: error },
     );
   }
@@ -195,16 +227,21 @@ export default Plugin.define({
 
     if (typeof ctx.agent?.transform !== "function") {
       throw new Error(
-        `[${PLUGIN_ID}] agent.transform is unavailable; the ${REVIEWER_AGENT_ID} agent cannot be registered, so setup was aborted`,
+        `[${PLUGIN_ID}] agent.transform is unavailable; the ${REVIEWER_AGENT_ID_LIST} agents cannot be registered, so setup was aborted`,
       );
     }
 
-    const commandPath = await installCommandFile(logWarn);
+    const installations: Array<{ reviewer: ReviewerConfig; commandPath: string }> = [];
+    for (const reviewer of REVIEWERS) {
+      installations.push({ reviewer, commandPath: await installCommandFile(reviewer, logWarn) });
+    }
 
-    const registration = await ctx.agent.transform((editor) => {
-      configureReviewerAgent(editor, reviewerDescription(commandPath));
-    });
-    disposers.push(() => registration.dispose());
+    for (const { reviewer, commandPath } of installations) {
+      const registration = await ctx.agent.transform((editor) => {
+        configureReviewerAgent(editor, reviewer, reviewer.description(commandPath));
+      });
+      disposers.push(() => registration.dispose());
+    }
 
     if (typeof ctx.session?.hook === "function") {
       // Session hooks fire for every request in the host, so non-reviewer
@@ -216,7 +253,7 @@ export default Plugin.define({
         agent?: string;
         options: { temperature?: number };
       }) => {
-        if (event.agent === REVIEWER_AGENT_ID) {
+        if (event.agent !== undefined && REVIEWER_AGENT_IDS.has(event.agent)) {
           event.options.temperature = REVIEW_TEMPERATURE;
           return;
         }
@@ -224,7 +261,7 @@ export default Plugin.define({
         if (warnedHookAgents.has(observed)) return;
         warnedHookAgents.add(observed);
         logWarn(
-          `[${PLUGIN_ID}] review temperature hook skipped ${event.agent === undefined ? "an event with no agent" : `agent "${event.agent}"`}; temperature is pinned for "${REVIEWER_AGENT_ID}" only`,
+          `[${PLUGIN_ID}] review temperature hook skipped ${event.agent === undefined ? "an event with no agent" : `agent "${event.agent}"`}; temperature is pinned for ${REVIEWER_AGENT_ID_LIST} only`,
         );
       };
       const contextHook = await ctx.session.hook("context", pinReviewTemperature);

@@ -1,9 +1,15 @@
 # Adversarial-Review Re-orientation — Execution Plan
 
 Supersedes the remediation plan below in this same file. Remediation Phases 1–4
-are implemented and verified on branch `feat/adversarial-review-v2-port`
-(uncommitted). This plan re-orients delivery: the plugin owns the
+were implemented and verified on branch `feat/adversarial-review-v2-port`
+(committed as `e446bdf`). This plan re-orients delivery: the plugin owns the
 `adversarial-reviewer` agent; a host-discovered Markdown command owns routing.
+
+Status: Phases 1–3 implemented, reviewed (two rounds), and committed. The
+argument-injection gate below is resolved as an accepted paste-risk (user
+decision); README and package AGENTS.md carry the warning. Phase 4 is partly
+verified (reinstall + failure delivery confirmed live); branch-scope runs are
+pending a user test pass.
 
 Locked decisions (user): auto-install the command file at setup into the global
 commands dir (correct path `~/.config/opencode/commands/`, honoring
@@ -11,16 +17,23 @@ commands dir (correct path `~/.config/opencode/commands/`, honoring
 full context collection via shell blocks; remove the plugin `execute` command
 entirely; inherit parent model unless specified (ship no `model:` line).
 
-## SHIP-BLOCKER (decide before implementing)
+## SHIP-BLOCKER — resolved as accepted paste-risk (user decision)
 
 Argument injection in the template design. The host substitutes `$ARGUMENTS`
 *before* scanning for `!`-backtick blocks, so an argument containing a
-backtick block becomes an executed sixth shell block, outside reviewer tool
-permissions. Omitting `$ARGUMENTS` does not help (fallback appends raw args
-before shell matching). Do not ship the template against this evaluator
-without a host fix — which is out of scope — or a template design that keeps
-user arguments out of shell evaluation entirely. This is the first decision
-gate; everything below assumes it is resolved.
+`!`-plus-backtick block becomes an executed sixth shell block, outside
+reviewer tool permissions. Omitting `$ARGUMENTS` does not help (fallback
+appends raw args before shell matching). A host fix is out of scope and none
+is planned.
+
+Decision: accept as a human-invoked-surface paste-risk and ship with a
+warning (README + package AGENTS.md: "Injection warning (accepted
+paste-risk)"). Safe-invocation rule: never pass untrusted or pasted Markdown
+containing backtick blocks as command args; inspect args before invoking.
+Note: a canary without the `!` prefix (e.g. backtick-only `echo INJECTED`)
+correctly does nothing — only `!`-backtick forms execute. The full
+`!`-canary was skipped by user decision; the accepted risk stands as
+documented.
 
 ## Phase 1 — Command asset + auto-install
 
@@ -95,28 +108,42 @@ Acceptance: no remaining claims of plugin-collected context, validation,
 synthetic delivery, `options.model`, or command templates; docs describe the
 installed file as the single path.
 
-## Phase 4 — Live verification (after SHIP-BLOCKER resolved)
+## Phase 4 — Live verification (status after e446bdf)
 
 1. Restart host; `/adversarial-review` runs as a linked background child of the
    invoking session; parent model inherited with no model lines set.
-2. Injection canary as an argument appears literally, never executes (currently
-   expected to FAIL — the blocker).
-3. Disposable git fixture: staged/unstaged diff, untracked texts, newline
-   name, binary, escaping symlink, missing repo — compare against old
-   `collectGitContext` semantics; reviewer must not bless missing evidence.
-4. One success + one failed child + one malformed-completed run; observe
-   parent-side delivery for each.
-5. Root `typecheck && lint && test && build` green; no commits without explicit
-   instruction.
+   VERIFIED live (user session + reviewer run: valid JSON delivered).
+2. Injection canary: risk accepted (see SHIP-BLOCKER above). Backtick-only
+   canary correctly no-ops; full `!`-canary skipped by user decision.
+3. Disposable git fixture (staged/unstaged diff, untracked texts, newline
+   name, binary, escaping symlink, missing repo): SKIPPED by user decision.
+4. Success run observed live (valid JSON, completed delivery). Failed child
+   observed live — killing the child surfaces an error to the parent
+   (user-confirmed). Malformed-completed run not yet observed live.
+5. Package gates green (`bun test` 28 pass, typecheck, `biome ci`, smoke).
+   Command reinstall confirmed live by user (delete + restart reinstalls).
+   Branch-scope runs (`--scope branch`, `--base <ref>`) pending a user test
+   pass. Root `typecheck && lint && test && build` not yet run on this work.
 
-## Follow-ups (not this plan)
+## Follow-ups
 
-- Plain `/review` command. Release (`2.0.0` on `latest` per ram-monitor path).
-- Windows/macOS template port if platform scope widens.
+- NEXT: plain `/review` command/agent (queued; not yet planned in detail).
+- Release (`2.0.0` on `latest` per ram-monitor path): open — needs a `v2`
+  policy entry + major changeset → Version Packages PR → publish + registry
+  check, plus `docs/v1-plugins.md`, root AGENTS.md/README, and package
+  AGENTS.md authority updates.
+- Windows/macOS template port: DROPPED (user decision). The template stays
+  GNU/Linux + Bash only: the five `!`-backtick blocks assume a
+  Bash-compatible shell and GNU/git CLI behavior, execute through the invoking
+  user's shell outside any permission sandbox, and have no tested equivalent
+  for PowerShell/cmd or macOS BSD-tool differences. Claiming parity without a
+  tested port would be dishonest, and the hosts in scope are Linux, so the
+  port cost buys nothing right now. Revisit only if a non-Linux host needs
+  support.
 
 ---
 
-## SUPERSEDED: Remediation plan (implemented, uncommitted)
+## SUPERSEDED: Remediation plan (implemented, committed as e446bdf)
 
 Branch: `feat/adversarial-review-v2-port`. Session deletion out of scope.
 Plain `/review` is a follow-up.

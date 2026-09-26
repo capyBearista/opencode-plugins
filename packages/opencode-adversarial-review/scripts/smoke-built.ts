@@ -93,71 +93,94 @@ try {
     },
   });
 
-  const reviewer = agents.get("adversarial-reviewer");
-  assert(reviewer !== undefined, "reviewer agent was not registered");
-  assert(reviewer?.mode === "subagent", "reviewer agent is not a subagent");
-  assert(reviewer?.hidden === true, "reviewer agent is not hidden");
-  assert(
-    (reviewer?.description ?? "").includes("/adversarial-review"),
-    "reviewer description does not name the command",
-  );
-  assert(
-    (reviewer?.description ?? "").includes(join("commands", "adversarial-review.md")),
-    "reviewer description does not name the installed command template path",
-  );
-  assert(commandTransforms === 0, "the plugin registered a host command");
-  assert(
-    await Bun.file(join(configDir, "commands", "adversarial-review.md")).exists(),
-    "the command file was not installed into the isolated config directory",
-  );
+  const reviewCommands = [
+    ["adversarial-reviewer", "adversarial-review.md"],
+    ["reviewer", "review.md"],
+  ] as const;
 
-  const permissions = reviewer?.permissions ?? [];
-  assert(
-    permissions.every((rule) => rule.effect !== "ask"),
-    "reviewer permissions contain an ask rule",
-  );
-  const hasRule = (expected: PermissionRule) =>
-    permissions.some(
-      (rule) =>
-        rule.action === expected.action &&
-        rule.resource === expected.resource &&
-        rule.effect === expected.effect,
+  function assertReviewerContract(
+    agent: TestAgent | undefined,
+    agentId: string,
+    commandFile: string,
+  ): void {
+    assert(agent !== undefined, `${agentId} agent was not registered`);
+    assert(agent.mode === "subagent", `${agentId} agent is not a subagent`);
+    assert(agent.hidden === true, `${agentId} agent is not hidden`);
+    assert(
+      (agent.description ?? "").includes(`Run /${commandFile.replace(/\.md$/, "")} instead`),
+      `${agentId} description does not name its command`,
     );
-  assert(hasRule({ action: "read", resource: "*", effect: "allow" }), "read allow rule is missing");
-  assert(
-    hasRule({ action: "shell", resource: "git diff*", effect: "allow" }),
-    "git diff allow rule is missing",
-  );
-  assert(hasRule({ action: "edit", resource: "*", effect: "deny" }), "edit deny rule is missing");
-  assert(
-    hasRule({ action: "subagent", resource: "*", effect: "deny" }),
-    "subagent self-deny rule is missing",
-  );
-  assert(hasRule({ action: "skill", resource: "*", effect: "deny" }), "skill deny rule is missing");
-  assert(
-    hasRule({ action: "read", resource: "*.env", effect: "deny" }),
-    "env deny rule is missing",
-  );
-  assert(
-    hasRule({ action: "read", resource: "*.env.example", effect: "allow" }),
-    "env.example allow rule is missing",
-  );
-  assert(
-    hasRule({ action: "shell", resource: "git branch --show-current*", effect: "allow" }),
-    "narrowed git branch allow rule is missing",
-  );
-  assert(
-    hasRule({ action: "shell", resource: "git diff*--ext-diff*", effect: "deny" }),
-    "diff-engine deny rule is missing",
-  );
-  assert(
-    hasRule({ action: "grep", resource: "*.env", effect: "deny" }),
-    "grep env deny rule is missing",
-  );
-  assert(
-    hasRule({ action: "glob", resource: "*.env.example", effect: "allow" }),
-    "glob env.example allow rule is missing",
-  );
+    assert(
+      (agent.description ?? "").includes(join("commands", commandFile)),
+      `${agentId} description does not name the installed command template path`,
+    );
+
+    const permissions = agent.permissions ?? [];
+    assert(
+      permissions.every((rule) => rule.effect !== "ask"),
+      `${agentId} permissions contain an ask rule`,
+    );
+    const hasRule = (expected: PermissionRule) =>
+      permissions.some(
+        (rule) =>
+          rule.action === expected.action &&
+          rule.resource === expected.resource &&
+          rule.effect === expected.effect,
+      );
+    assert(
+      hasRule({ action: "read", resource: "*", effect: "allow" }),
+      `${agentId} read allow rule is missing`,
+    );
+    assert(
+      hasRule({ action: "shell", resource: "git diff*", effect: "allow" }),
+      `${agentId} git diff allow rule is missing`,
+    );
+    assert(
+      hasRule({ action: "edit", resource: "*", effect: "deny" }),
+      `${agentId} edit deny rule is missing`,
+    );
+    assert(
+      hasRule({ action: "subagent", resource: "*", effect: "deny" }),
+      `${agentId} subagent self-deny rule is missing`,
+    );
+    assert(
+      hasRule({ action: "skill", resource: "*", effect: "deny" }),
+      `${agentId} skill deny rule is missing`,
+    );
+    assert(
+      hasRule({ action: "read", resource: "*.env", effect: "deny" }),
+      `${agentId} env deny rule is missing`,
+    );
+    assert(
+      hasRule({ action: "read", resource: "*.env.example", effect: "allow" }),
+      `${agentId} env.example allow rule is missing`,
+    );
+    assert(
+      hasRule({ action: "shell", resource: "git branch --show-current*", effect: "allow" }),
+      `${agentId} narrowed git branch allow rule is missing`,
+    );
+    assert(
+      hasRule({ action: "shell", resource: "git diff*--ext-diff*", effect: "deny" }),
+      `${agentId} diff-engine deny rule is missing`,
+    );
+    assert(
+      hasRule({ action: "grep", resource: "*.env", effect: "deny" }),
+      `${agentId} grep env deny rule is missing`,
+    );
+    assert(
+      hasRule({ action: "glob", resource: "*.env.example", effect: "allow" }),
+      `${agentId} glob env.example allow rule is missing`,
+    );
+  }
+
+  assert(commandTransforms === 0, "the plugin registered a host command");
+  for (const [agentId, commandFile] of reviewCommands) {
+    assertReviewerContract(agents.get(agentId), agentId, commandFile);
+    assert(
+      await Bun.file(join(configDir, "commands", commandFile)).exists(),
+      `the ${commandFile} command was not installed into the isolated config directory`,
+    );
+  }
 
   assert(
     [...hooks.keys()].sort().join(",") === "context,generate",
@@ -168,14 +191,24 @@ try {
     agent: "adversarial-reviewer",
     options: {},
   };
+  const reviewAgentEvent: HookEvent = {
+    sessionID: "ses_smoke_agent_review",
+    agent: "reviewer",
+    options: {},
+  };
   const foreignEvent: HookEvent = { sessionID: "ses_smoke_foreign", agent: "build", options: {} };
   const anonymousEvent: HookEvent = { sessionID: "ses_smoke_unknown", options: {} };
   for (const hook of hooks.values()) {
     hook(reviewerEvent);
+    hook(reviewAgentEvent);
     hook(foreignEvent);
     hook(anonymousEvent);
   }
-  assert(reviewerEvent.options.temperature === 0.1, "reviewer temperature was not pinned");
+  assert(
+    reviewerEvent.options.temperature === 0.1,
+    "adversarial reviewer temperature was not pinned",
+  );
+  assert(reviewAgentEvent.options.temperature === 0.1, "review agent temperature was not pinned");
   assert(foreignEvent.options.temperature === undefined, "temperature leaked to a foreign agent");
   assert(
     anonymousEvent.options.temperature === undefined,
@@ -191,12 +224,12 @@ try {
 
   await cleanup?.();
   assert(
-    disposers.sort().join(",") === "agent,hook:context,hook:generate",
+    disposers.sort().join(",") === "agent,agent,hook:context,hook:generate",
     "cleanup missed a registration",
   );
 
   process.stdout.write(
-    "smoke: built server artifact loaded; reviewer agent, permissions, install, and reviewer-only hooks verified\n",
+    "smoke: built server artifact loaded; both reviewer agents, permissions, installs, and reviewer-only hooks verified\n",
   );
 } finally {
   if (previousConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
