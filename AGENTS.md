@@ -26,6 +26,7 @@ Scope: V1 packages. The three V2 ports use the Promise API instead; see the V2 b
 - **MUST NOT** use removed pre-1.15 plugin patterns like `WithInstance.provide()` or legacy string-based event buses.
 - **SHOULD** add Zod `.describe()` metadata for every custom tool argument so OpenCode 1.15.x preserves useful schema descriptions for the model.
 - **SHOULD** declare plugin metadata intentionally: `oc-plugin` for install targets and `peerDependencies`/`engines` that match the OpenCode version you support.
+- **MUST** avoid command names that collide with host built-ins: the command registry is last-write-wins, so a same-named plugin command silently shadows (or is shadowed by) the built-in with no warning — rename the plugin command or prove the winning order live before relying on it.
 
 ### V2 Boundary (MUST)
 
@@ -127,6 +128,9 @@ rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
 ## Git Workflow
 
 - Use Changesets: `bun changeset` to record intent
+- Never commit without explicit user instruction
+- Start commit subjects lowercase (`feat(x): …`) — the commitlint hook rejects capitalized subjects
+- After publishing, verify via direct registry curl — `npm view` can lag the CDN by ~60s
 - PRs require: typecheck, lint, test, build
 - Squash commits on merge
 

@@ -58,8 +58,9 @@ Model resolution is the host chain: command frontmatter `model` → configured a
 - Keep each prompt pair byte-for-byte in lockstep: `src/prompt.ts` ↔ `src/prompts/adversarial-review.md` and `src/prompts/review.md` (the tests assert both).
 - Keep the command templates free of doctrine: they carry the handoff, one pointer line, `$ARGUMENTS`, the snapshot caveat, and the five shell blocks only; put target-selection, focus-handling, evidence, and output rules in `src/prompt.ts` and its lockstep references. One guardrail exception: `review.md` keeps the single read-only sentence (`Review only: do not modify the repository; report findings and suggestions for the author to apply.`) — safety, not doctrine — and it is the only entry in the tests' doctrine-tripwire allowlist; `adversarial-review.md` must not carry it.
 - Keep `commands/adversarial-review.md` and `commands/review.md` shipped through the package.json `files` array (`"commands"`); they are loaded relative to the built entry as `../commands/`.
-- Keep each frontmatter minimal: `description`, `agent: <matching agent id>`, `subagent: true`, `managed_version: <current>`, and the ownership `metadata` line. No `model:` line. Both templates version together: when a shipped template changes, bump `managed_version` and add the previous version to `KNOWN_TEMPLATE_VERSIONS` and `CURRENT_TEMPLATE_VERSION` in `src/index.ts`.
+- Keep each frontmatter minimal: `description`, `agent: <matching agent id>`, `subagent: true`, `managed_version: <current>`, and the ownership `metadata` line. No `model:` line. Unknown frontmatter keys are ignored by the host schema, so additive `metadata` is safe. Both templates version together: when a shipped template changes, bump `managed_version` and add the previous version to `KNOWN_TEMPLATE_VERSIONS` and `CURRENT_TEMPLATE_VERSION` in `src/index.ts`.
 - When changing tool permissions, re-check the least-privilege model and both installed templates' shell blocks together.
+- Live-test loop: the host loads plugin code once at startup — after rebuilding, run `/reload` in the host (no restart needed) and re-sync the installed `~/.config/opencode/commands/*.md` copies before invoking the commands.
 - Platform posture: tested on GNU/Linux with a Bash-compatible shell; do not present other platforms as tested. The agent side (read/glob/grep/git through the host tool abstraction) is portable, and only the five snapshot blocks are shell-dependent. On POSIX sh each block ends `|| true` and renders partially with zero exit; on non-POSIX shells blocks may fail entirely — if the reviewer is reached, the snapshot caveat tells it to self-collect, so treat the snapshot as incomplete.
 
 ### Edge Cases
@@ -97,6 +98,7 @@ Model resolution is the host chain: command frontmatter `model` → configured a
 - Location: colocated
 - Framework: bun test
 - Running Tests: `bun test`
+- For rule changes (permissions, resolvers, parsers), require a red→green test demonstrating the old behavior fails first — this caught real regressions twice (over-broad `git branch*`, strict-parser fallback).
 - Install tests run setup in a subprocess with an isolated temp `HOME`; never write to the real config directory in tests or smoke.
 - Runtime smoke: `bun run smoke` verifies the built entry registers both reviewer agents, installs both command files, enforces the permission/description contract for each, and registers no session hooks (only agent disposers).
 
