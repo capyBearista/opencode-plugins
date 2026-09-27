@@ -10,6 +10,9 @@
 
 ---
 
+> **Status:** V1-only. Deprecated for OpenCode V2 — no V2 maintenance is planned.
+> Existing V1 users can keep using it; see the [V1 compatibility guide](../../docs/v1-plugins.md).
+
 ## Why?
 
 > I often find myself telling my agent to adopt an explanatory style or focus on teaching rather than implementing. I really needed a way to add persistent voice, review stance, or response structure without re-prompting every turn. This plugin keeps a chosen style active and appends it to the system prompt so response formatting stays consistent across the session.

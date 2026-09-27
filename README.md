@@ -72,7 +72,7 @@ release.
 | `opencode-agent-prompt-inheritance` | V1 `1.0.0`; server `opencode.json`, singular `plugin` | V2 port discontinued |
 | `opencode-agents-loader` | V1 `1.0.0`, frozen; server `opencode.json`, singular `plugin` | `2.0.0`; server `opencode.json`, plural `plugins`, channel `latest` (promotion pending verification) |
 | `opencode-double-tap-timeline` | V1 `1.0.1`, frozen; TUI `tui.json`, singular `plugin` | `2.0.0`; TUI `cli.json`, plural `plugins`, channel `latest` (promotion pending verification) |
-| `opencode-output-styles` | V1 `1.0.1`; server `opencode.json`, singular `plugin` | V1 only |
+| `opencode-output-styles` | V1 `1.0.1`; server `opencode.json`, singular `plugin` | V1 only; deprecated for V2 |
 | `opencode-ram-monitor` | V1 `1.1.0`; server and TUI (`opencode.json` and `tui.json`), singular `plugin` | `2.0.0`; server `opencode.json` + TUI `cli.json`, plural `plugins`, channel `latest` |
 
 ## Installation

@@ -38,7 +38,7 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 | `opencode-double-tap-timeline` | Ported: TUI plugin, plural `plugins` in `cli.json`; `2.0.0` on `latest` (promotion pending verification) |
 | `opencode-adversarial-review` | Ported: server plugin, plural `plugins` in `opencode.json`; `2.0.0` on `latest` |
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port discontinued |
-| `opencode-output-styles` | V1 only |
+| `opencode-output-styles` | V1 only; deprecated for V2 |
 | `opencode-ram-monitor` | Ported: dual server+TUI plugin, plural `plugins` (`opencode.json` + `cli.json`); `2.0.0` on `latest` |
 
 - **MUST** use the V2 Promise API in ports: `Plugin.define({ id, setup })` from `@opencode/plugin` 2.x. Do not carry V1 `server`/`config` hook signatures into a port.

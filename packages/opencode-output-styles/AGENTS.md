@@ -3,7 +3,7 @@
 **Technology**: TypeScript / OpenCode Plugin
 **Entry Point**: `src/index.ts`
 **Parent Context**: This extends [../../AGENTS.md](../../AGENTS.md)
-**Compatibility**: V1-only plugin (latest channel); there is no V2 port.
+**Compatibility**: V1-only plugin (latest channel); deprecated for OpenCode V2, no V2 maintenance planned. V1 users can keep using it.
 
 ## Quick Reference
 

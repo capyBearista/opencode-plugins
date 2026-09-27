@@ -12,7 +12,7 @@ The package READMEs for `opencode-agents-loader`, `opencode-double-tap-timeline`
 | `opencode-double-tap-timeline` | 1.0.1, frozen | V2 `2.0.0` moves to `latest` (promotion pending registry verification). No further 1.x from this line. |
 | `opencode-adversarial-review` | 1.0.0 | V1 `latest` is superseded: V2 `2.0.0` uses `latest`. Pin `1.0.0` for V1 hosts. |
 | `opencode-agent-prompt-inheritance` | 1.0.0 | Active V1 releases use `latest`; upstream prompt sync remains enabled. No V2 port. |
-| `opencode-output-styles` | 1.0.1 | Active V1 releases use `latest`. |
+| `opencode-output-styles` | 1.0.1 | Active V1 releases use `latest`. Deprecated for V2; no V2 maintenance planned. |
 | `opencode-ram-monitor` | 1.1.0 | V1 `latest` is superseded: V2 `2.0.0` uses `latest`. Pin `1.1.0` for V1 hosts. |
 
 The loader and timeline V1 releases are frozen and remain available by exact pin. Their `latest` tags move to V2 `2.0.0` once the pending registry promotion is verified; `opencode-adversarial-review` and `opencode-ram-monitor` already point `latest` at their V2 releases.
