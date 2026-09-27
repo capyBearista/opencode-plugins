@@ -19,23 +19,24 @@ Subdirectories contain specialized files that extend these rules.
 
 ### Plugin Development (MUST)
 
-Scope: V1 packages. The three V2 ports use the Promise API instead; see the V2 boundary below.
+Scope: V1 packages. The four V2 ports use the Promise API instead; see the V2 boundary below.
 
 - **MUST** keep server and TUI entrypoints split. If a plugin exposes both, publish separate `./server` and `./tui` exports instead of exporting both from one module.
 - **MUST** verify the real runtime path when testing local plugins. Check both the package build output and the harness config that OpenCode actually loads.
 - **MUST NOT** use removed pre-1.15 plugin patterns like `WithInstance.provide()` or legacy string-based event buses.
 - **SHOULD** add Zod `.describe()` metadata for every custom tool argument so OpenCode 1.15.x preserves useful schema descriptions for the model.
 - **SHOULD** declare plugin metadata intentionally: `oc-plugin` for install targets and `peerDependencies`/`engines` that match the OpenCode version you support.
+- **MUST** avoid command names that collide with host built-ins: the command registry is last-write-wins, so a same-named plugin command silently shadows (or is shadowed by) the built-in with no warning — rename the plugin command or prove the winning order live before relying on it.
 
 ### V2 Boundary (MUST)
 
-Three packages have V2 ports; three remain V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
+Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
 
 | Package | V2 status |
 | --- | --- |
 | `opencode-agents-loader` | Ported: server plugin, plural `plugins` in `opencode.json` |
 | `opencode-double-tap-timeline` | Ported: TUI plugin, plural `plugins` in `cli.json` |
-| `opencode-adversarial-review` | V1 only |
+| `opencode-adversarial-review` | Ported (this branch, unreleased): server plugin, plural `plugins` in `opencode.json` |
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port discontinued |
 | `opencode-output-styles` | V1 only |
 | `opencode-ram-monitor` | Ported: dual server+TUI plugin, plural `plugins` (`opencode.json` + `cli.json`); `2.0.0` on `latest` |
@@ -127,6 +128,9 @@ rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
 ## Git Workflow
 
 - Use Changesets: `bun changeset` to record intent
+- Never commit without explicit user instruction
+- Start commit subjects lowercase (`feat(x): …`) — the commitlint hook rejects capitalized subjects
+- After publishing, verify via direct registry curl — `npm view` can lag the CDN by ~60s
 - PRs require: typecheck, lint, test, build
 - Squash commits on merge
 

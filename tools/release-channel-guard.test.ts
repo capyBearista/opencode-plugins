@@ -121,7 +121,7 @@ async function createFixture(
       [packageNames.inheritance]: { releaseClass: "v1", channel: "latest" },
       [packageNames.styles]: { releaseClass: "v1", channel: "latest" },
       [packageNames.ram]: { releaseClass: "v2", channel: "latest" },
-      [packageNames.review]: { releaseClass: "v1", channel: "latest" },
+      [packageNames.review]: { releaseClass: "v2", channel: "latest" },
     },
   });
   await mkdir(path.join(root, ".changeset"), { recursive: true });
@@ -449,6 +449,34 @@ describe("release-channel-guard policy matrix", () => {
       buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
       "stable package version >=2.0.0",
     );
+  });
+
+  test("R2 an unpublished adversarial-review major 2 plans v2 under latest", async () => {
+    const cwd = await createFixture({ [packageNames.review]: "2.0.0" });
+    let invocation: readonly string[] | undefined;
+
+    const plan = await runReleaseGuard({
+      cwd,
+      mode: "publish",
+      env: publishEnvironment(),
+      registryClient: createRegistryClient(),
+      testOnlyNoGitTag: true,
+      runChangesets: async (args) => {
+        invocation = args;
+        return 0;
+      },
+    });
+
+    expect(plan.channel).toBe("latest");
+    expect(plan.unpublished).toEqual([
+      expect.objectContaining({
+        name: packageNames.review,
+        version: "2.0.0",
+        releaseClass: "v2",
+        channel: "latest",
+      }),
+    ]);
+    expect(invocation).toEqual(["publish", "--tag", "latest", "--no-git-tag"]);
   });
 
   test("R3 an unpublished V2-class release plans latest in one invocation", async () => {
