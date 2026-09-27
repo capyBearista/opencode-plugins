@@ -135,6 +135,27 @@ const REVIEWER_PERMISSIONS: readonly PermissionRule[] = [
   // like it does through read/glob/grep; this allow must stay after the two
   // denies above (last-match-wins).
   { action: "shell", resource: "git show*:*.env.example", effect: "allow" },
+  // Order re-assertion: the allow above is full-string anchored, so it also
+  // matches any command ending in `.env.example` and overrides every earlier
+  // rule that command matches. The `git show` engine-flag denies and the
+  // secret-then-more-args denies are therefore repeated after it: the engine
+  // patterns must outrank the trailing allow for `git show --output=... /
+  // --ext-diff ... <rev>:.env.example`, and the `.env` patterns must catch a
+  // secret colon-path followed by any further argument (multi-object exfil and
+  // trailing flags such as `git show HEAD:.env --stat`). These duplicates are
+  // intentional; the earlier copies sit before the allow and lose to it.
+  //
+  // Pattern shape notes: the inner `*` in `:*.env` mirrors the original
+  // `git show*:*.env` deny so directory-prefixed secrets are covered, not just
+  // a leaf at the repository root. The `* *` tail on the `.env.*` deny is
+  // deliberate: the host folds a trailing `" .*"` pattern into an optional
+  // argument group, so a single trailing ` *` would also match a bare
+  // `.env.example` read; the doubled pair makes the following argument required.
+  { action: "shell", resource: "git show*--ext-diff*", effect: "deny" },
+  { action: "shell", resource: "git show*--textconv*", effect: "deny" },
+  { action: "shell", resource: "git show*--output*", effect: "deny" },
+  { action: "shell", resource: "git show*:*.env *", effect: "deny" },
+  { action: "shell", resource: "git show*:*.env.* * *", effect: "deny" },
   { action: "read", resource: "*.env", effect: "deny" },
   { action: "read", resource: "*.env.*", effect: "deny" },
   { action: "read", resource: "*.env.example", effect: "allow" },
@@ -156,15 +177,17 @@ function hasRule(rules: readonly PermissionRule[], rule: PermissionRule): boolea
 }
 
 // Rules are merged additively: host-defined rules are preserved, exact
-// duplicates are skipped, and pre-existing host denies are re-appended after
-// the plugin rules. Evaluation is last-match-wins, so a host deny must outrank
-// any plugin allow for the same resource.
+// duplicates of an inherited host rule are skipped, and pre-existing host
+// denies are re-appended after the plugin rules. Evaluation is last-match-wins,
+// so a host deny must outrank any plugin allow for the same resource.
+// Duplicates inside `rules` itself are kept on purpose: a later copy re-asserts
+// a rule that an intermediate allow would otherwise override.
 function applyRules(agent: AgentInfo, rules: readonly PermissionRule[]): void {
   const inherited = Array.isArray(agent.permissions) ? agent.permissions : [];
   const hostDenies = inherited.filter((rule) => rule.effect === "deny");
   const merged = inherited.filter((rule) => rule.effect !== "deny");
   for (const rule of rules) {
-    if (!hasRule(merged, rule) && !hasRule(hostDenies, rule)) merged.push(rule);
+    if (!hasRule(inherited, rule)) merged.push(rule);
   }
   agent.permissions = [...merged, ...hostDenies];
 }
