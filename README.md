@@ -57,8 +57,7 @@ Zero-dependency RAM monitoring for OpenCode sessions. Shows live session memory 
 
 The four OpenCode V2 ports target **2.0.0** on **`latest`**. `opencode-adversarial-review` and
 `opencode-ram-monitor` are already published there (V1 hosts must pin ram-monitor `1.1.0`);
-`opencode-agents-loader` and `opencode-double-tap-timeline` are moving there from the retired
-`opencode2` channel, and that registry promotion is pending verification. Do not use `@v2`: npm
+the loader and timeline registry promotion is pending verification. Do not use `@v2`: npm
 parses that literal as a semver range, not as the intended channel.
 
 The V1 releases remain separate and available. The loader is frozen at `1.0.0` and the
