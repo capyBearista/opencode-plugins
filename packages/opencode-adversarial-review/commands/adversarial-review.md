@@ -2,8 +2,8 @@
 description: "Adversarial code review: challenges the implementation. Args: [<sha|pr-url|pr-number>] [--base <ref>] [--scope auto|working-tree|branch] [focus ...]"
 agent: adversarial-reviewer
 subagent: true
-managed_version: 1
-metadata: Managed by @capybearista/opencode-adversarial-review. Keep the managed_version stamp to receive bundled-template updates on restart; remove it to take ownership and your version is then preserved with a warning; a stamp newer than the shipped template is also preserved.
+managed_version: 2
+metadata: Managed by @capybearista/opencode-adversarial-review. Keep the managed_version stamp to receive bundled-template updates on /reload or restart; remove it to take ownership and your version is then preserved with a warning; a stamp newer than the shipped template is also preserved.
 ---
 
 # Adversarial review handoff

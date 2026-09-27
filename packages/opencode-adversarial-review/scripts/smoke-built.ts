@@ -21,8 +21,10 @@ type TestAgent = {
 
 type SmokeLog = { level?: string; message?: string };
 
-const DO_NOT_INVOKE_DESCRIPTION =
-  "Do not invoke this agent directly. It is invocable only by the user.";
+const ADVERSARIAL_REVIEWER_DESCRIPTION =
+  "Do not invoke this agent directly. It is the adversarial code-review agent, invocable only by the user.";
+const CONSTRUCTIVE_REVIEWER_DESCRIPTION =
+  "Do not invoke this agent directly. It is the constructive code-review agent, invocable only by the user.";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`smoke: ${message}`);
@@ -112,16 +114,20 @@ try {
   });
 
   const reviewCommands = [
-    ["adversarial-reviewer", "adversarial-review.md"],
-    ["reviewer", "review.md"],
+    ["adversarial-reviewer", "adversarial-review.md", ADVERSARIAL_REVIEWER_DESCRIPTION],
+    ["constructive-reviewer", "constructive-review.md", CONSTRUCTIVE_REVIEWER_DESCRIPTION],
   ] as const;
 
-  function assertReviewerContract(agent: TestAgent | undefined, agentId: string): void {
+  function assertReviewerContract(
+    agent: TestAgent | undefined,
+    agentId: string,
+    description: string,
+  ): void {
     assert(agent !== undefined, `${agentId} agent was not registered`);
     assert(agent.mode === "subagent", `${agentId} agent is not a subagent`);
     assert(agent.hidden === true, `${agentId} agent is not hidden`);
     assert(
-      agent.description === DO_NOT_INVOKE_DESCRIPTION,
+      agent.description === description,
       `${agentId} description does not match the static do-not-invoke text`,
     );
 
@@ -255,8 +261,8 @@ try {
   }
 
   assert(commandTransforms === 0, "the plugin registered a host command");
-  for (const [agentId, commandFile] of reviewCommands) {
-    assertReviewerContract(agents.get(agentId), agentId);
+  for (const [agentId, commandFile, description] of reviewCommands) {
+    assertReviewerContract(agents.get(agentId), agentId, description);
     assert(
       await Bun.file(join(configDir, "commands", commandFile)).exists(),
       `the ${commandFile} command was not installed into the isolated config directory`,

@@ -1,14 +1,14 @@
 ---
 description: "Constructive code review: correctness and risk. Args: [<sha|pr-url|pr-number>] [--base <ref>] [--scope auto|working-tree|branch]"
-agent: reviewer
+agent: constructive-reviewer
 subagent: true
-managed_version: 1
-metadata: Managed by @capybearista/opencode-adversarial-review. Keep the managed_version stamp to receive bundled-template updates on restart; remove it to take ownership and your version is then preserved with a warning; a stamp newer than the shipped template is also preserved.
+managed_version: 2
+metadata: Managed by @capybearista/opencode-adversarial-review. Keep the managed_version stamp to receive bundled-template updates on /reload or restart; remove it to take ownership and your version is then preserved with a warning; a stamp newer than the shipped template is also preserved.
 ---
 
 # Review handoff
 
-You are the reviewer for this repository. Review the change for correctness first, then for material maintainability risk, and return the Markdown report defined in your system prompt.
+You are the constructive reviewer for this repository. Review the change for correctness first, then for material maintainability risk, and return the Markdown report defined in your system prompt.
 
 Review only: do not modify the repository; report findings and suggestions for the author to apply.
 

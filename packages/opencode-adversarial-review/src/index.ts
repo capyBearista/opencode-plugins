@@ -13,12 +13,13 @@ const REVIEWER_COLOR = "#f59e0b";
 
 // Both command templates version together. The integer `managed_version`
 // frontmatter stamp is the ownership marker: keeping it means the plugin
-// refreshes the file from the bundled template on restart, removing it takes
-// ownership and the file is preserved with a warning. Unknown or newer stamps
-// are preserved too, so a downgrade never overwrites a newer plugin's file.
-export const CURRENT_TEMPLATE_VERSION = 1;
+// refreshes the file from the bundled template on `/reload` or restart,
+// removing it takes ownership and the file is preserved with a warning.
+// Unknown or newer stamps are preserved too, so a downgrade never overwrites a
+// newer plugin's file.
+export const CURRENT_TEMPLATE_VERSION = 2;
 // Every version this build knows how to refresh in place, oldest first.
-export const KNOWN_TEMPLATE_VERSIONS: readonly number[] = [1];
+export const KNOWN_TEMPLATE_VERSIONS: readonly number[] = [1, 2];
 // O_NOFOLLOW closes the lstat-to-read and lstat-to-write races on the refresh
 // path: a symlink swapped in after the check makes the next operation fail
 // with ELOOP instead of following or truncating the link target. O_CREAT
@@ -35,8 +36,9 @@ type ReviewerConfig = {
   systemPrompt: string;
 };
 
-const DO_NOT_INVOKE_DESCRIPTION =
-  "Do not invoke this agent directly. It is invocable only by the user.";
+function doNotInvokeDescription(kind: string): string {
+  return `Do not invoke this agent directly. It is the ${kind} code-review agent, invocable only by the user.`;
+}
 
 // One entry per reviewer. Setup loops both the install and the registration so
 // every reviewer shares one set of mechanics and differs only in identity,
@@ -45,13 +47,13 @@ const REVIEWERS: readonly ReviewerConfig[] = [
   {
     agentId: "adversarial-reviewer",
     commandFilename: "adversarial-review.md",
-    description: DO_NOT_INVOKE_DESCRIPTION,
+    description: doNotInvokeDescription("adversarial"),
     systemPrompt: ADVERSARIAL_REVIEWER_SYSTEM_PROMPT,
   },
   {
-    agentId: "reviewer",
-    commandFilename: "review.md",
-    description: DO_NOT_INVOKE_DESCRIPTION,
+    agentId: "constructive-reviewer",
+    commandFilename: "constructive-review.md",
+    description: doNotInvokeDescription("constructive"),
     systemPrompt: REVIEWER_SYSTEM_PROMPT,
   },
 ];
@@ -175,6 +177,20 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function disposeRegistrations(
+  disposers: Array<() => Promise<void> | void>,
+  logWarn: (message: string) => void,
+): Promise<void> {
+  const results = await Promise.allSettled(disposers.map(async (dispose) => dispose()));
+  for (const result of results) {
+    if (result.status === "rejected") {
+      logWarn(
+        `[${PLUGIN_ID}] Failed to dispose an agent registration: ${errorMessage(result.reason)}. The host may retain the registration until plugins reload.`,
+      );
+    }
+  }
+}
+
 type HostLogLevel = "error" | "warn" | "info";
 
 type HostLogSink = (input: { service: string; level: HostLogLevel; message: string }) => unknown;
@@ -208,7 +224,8 @@ function createHostLogger(ctx: PluginContext, level: HostLogLevel): (message: st
 }
 
 function commandFilePath(commandFilename: string): string {
-  const configDirectory = process.env.OPENCODE_CONFIG_DIR ?? join(homedir(), ".config", "opencode");
+  const override = process.env.OPENCODE_CONFIG_DIR?.trim();
+  const configDirectory = override ? override : join(homedir(), ".config", "opencode");
   return join(configDirectory, "commands", commandFilename);
 }
 
@@ -280,7 +297,7 @@ async function installCommandFile(
   }
   const installFailure = (error: unknown): Error =>
     new Error(
-      `Unable to install the ${commandName} command at ${commandPath}: ${errorMessage(error)}. Create the parent directory and grant write access, then restart OpenCode. Neither reviewer agent was registered.`,
+      `Unable to install the ${commandName} command at ${commandPath}: ${errorMessage(error)}. Create the parent directory and grant write access, then run /reload. Neither reviewer agent was registered.`,
       { cause: error },
     );
 
@@ -304,6 +321,7 @@ async function installCommandFile(
   // is atomic with the read. ELOOP means a symlink was swapped in after lstat.
   let handle: FileHandle | undefined;
   let installed: string;
+  let closeFailure: unknown;
   try {
     handle = await open(commandPath, READ_FLAGS);
     installed = await handle.readFile("utf8");
@@ -314,8 +332,16 @@ async function installCommandFile(
     }
     throw installFailure(error);
   } finally {
-    await handle?.close();
+    // A close failure must not replace an in-flight read failure; it is
+    // captured here and re-raised below only when the read succeeded.
+    try {
+      await handle?.close();
+    } catch (error) {
+      closeFailure = error;
+    }
   }
+  // Fail-closed on purpose: a close failure aborts setup rather than continuing silently.
+  if (closeFailure !== undefined) throw installFailure(closeFailure);
 
   const installedVersion = managedVersionOf(installed);
   if (
@@ -355,19 +381,25 @@ export default Plugin.define({
 
     warnIfNoFollowUnavailable(logWarn, constants.O_NOFOLLOW);
 
+    // Load-bearing split: every command file must install before any agent registers.
     for (const reviewer of REVIEWERS) {
       await installCommandFile(reviewer, logWarn, logInfo);
     }
 
     for (const reviewer of REVIEWERS) {
-      const registration = await ctx.agent.transform((editor) => {
-        configureReviewerAgent(editor, reviewer);
-      });
-      disposers.push(() => registration.dispose());
+      try {
+        const registration = await ctx.agent.transform((editor) => {
+          configureReviewerAgent(editor, reviewer);
+        });
+        disposers.push(() => registration.dispose());
+      } catch (error) {
+        // Registration is all-or-nothing: dispose whatever registered before the
+        // failure so a failed setup never leaves a half-registered reviewer pair.
+        await disposeRegistrations(disposers, logWarn);
+        throw error;
+      }
     }
 
-    return async () => {
-      for (const dispose of disposers) await dispose();
-    };
+    return () => disposeRegistrations(disposers, logWarn);
   },
 });

@@ -19,7 +19,7 @@ Subdirectories contain specialized files that extend these rules.
 
 ### Plugin Development (MUST)
 
-Scope: V1 packages. The three V2 ports use the Promise API instead; see the V2 boundary below.
+Scope: V1 packages. The four V2 ports use the Promise API instead; see the V2 boundary below.
 
 - **MUST** keep server and TUI entrypoints split. If a plugin exposes both, publish separate `./server` and `./tui` exports instead of exporting both from one module.
 - **MUST** verify the real runtime path when testing local plugins. Check both the package build output and the harness config that OpenCode actually loads.
@@ -30,13 +30,13 @@ Scope: V1 packages. The three V2 ports use the Promise API instead; see the V2 b
 
 ### V2 Boundary (MUST)
 
-Three packages have V2 ports; three remain V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
+Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
 
 | Package | V2 status |
 | --- | --- |
 | `opencode-agents-loader` | Ported: server plugin, plural `plugins` in `opencode.json` |
 | `opencode-double-tap-timeline` | Ported: TUI plugin, plural `plugins` in `cli.json` |
-| `opencode-adversarial-review` | V1 only |
+| `opencode-adversarial-review` | Ported (this branch, unreleased): server plugin, plural `plugins` in `opencode.json` |
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port discontinued |
 | `opencode-output-styles` | V1 only |
 | `opencode-ram-monitor` | Ported: dual server+TUI plugin, plural `plugins` (`opencode.json` + `cli.json`); `2.0.0` on `latest` |
