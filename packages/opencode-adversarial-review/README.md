@@ -88,6 +88,8 @@ On setup, both command files install at `<OPENCODE_CONFIG_DIR ?? ~/.config/openc
 
 > [!NOTE]
 > The installed command files are managed via a `managed_version` stamp in their frontmatter. Keep the stamp and the file refreshes from the bundled template on `/reload`; remove it to take ownership — the file is then left untouched with a warning. Unknown or newer stamps are likewise preserved (downgrades never clobber). A failure partway can leave the first file as a harmless orphan; it is reconciled on the next `/reload`, and registration still waits for both files. Delete a file and `/reload` to force-reinstall; uninstall the plugin *and* delete both files to fully remove the commands.
+>
+> The same ownership rule cleans up an upgrade leftover: a pre-rename build installed the second command as `commands/review.md` with `agent: reviewer`, an agent this version no longer registers, so the host discovers it as a broken `/review`. Setup removes that exact file only when it carries `agent: reviewer` plus a `managed_version` stamp this build knows; any other `review.md` is preserved, with a warning when it carries the old agent id. Setup never deletes a file on a failed refresh unless its `O_TRUNC` open already ran — an unreadable/unwritable managed file is left intact and setup fails loudly instead.
 
 ### Updating
 
@@ -131,12 +133,13 @@ Both reviewers are sandboxed and unattended; the single accepted risk is pasted 
 
 **Pasted arguments become executable template content.** `$ARGUMENTS` is substituted before the snapshot blocks run, so argument text can execute as shell. Inspect arguments before invoking, and never pass untrusted or pasted Markdown containing backtick blocks.
 
-One shared sandbox: `edit`/`write`/`patch`, `subagent`, `skill`, `webfetch`/`websearch`, `question` denied (zero ask — reviewers run unattended); shell limited to 13 read-only `git` patterns plus `gh pr view*`/`gh pr diff*` and the `gh auth status*` diagnostic (token-printing and all other `gh` denied); `read`/`grep`/`glob` allowed except `.env`/`.env.*` (`.env.example` allowed). See `AGENTS.md` for the full rule inventory.
+One shared sandbox: `edit`/`write`/`patch`, `subagent`, `skill`, `webfetch`/`websearch`, `question` denied (zero ask — reviewers run unattended); shell limited to 13 read-only `git` patterns plus `gh pr view*`/`gh pr diff*` and the `gh auth status*` diagnostic (token-printing and all other `gh` denied); `read`/`grep`/`glob` allowed except `.env`/`.env.*` (`.env.example` allowed, as is `git show <rev>:<path>` of a `.env.example` blob). See `AGENTS.md` for the full rule inventory.
 
 ## Troubleshooting
 
-- **Setup failed installing a command file**: create (or fix permissions on) `<config>/commands/`, then `/reload`.
+- **Setup failed installing a command file**: create (or fix permissions on) `<config>/commands/`, then `/reload`. A readable-but-unwritable managed file is left untouched, never deleted.
 - **"Leaving it untouched" warning**: the file is user-owned or carries an unknown/newer stamp — edit in place, or delete to reinstall.
+- **Broken `/review` after upgrading**: a pre-rename build's `commands/review.md` references the removed `reviewer` agent. Setup removes it when it carries a known stamp; an unstamped copy is preserved with a warning — delete that file manually.
 - **File replaced on `/reload`**: it kept a known stamp and was refreshed; remove the stamp to take ownership.
 - **"No changes to review"**: stage changes or pass `--base`.
 - **PR target fails**: needs authed `gh`; the reviewer reports that plainly (stderr verbatim on failure).

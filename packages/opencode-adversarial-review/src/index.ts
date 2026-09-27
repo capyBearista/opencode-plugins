@@ -131,6 +131,10 @@ const REVIEWER_PERMISSIONS: readonly PermissionRule[] = [
   { action: "shell", resource: "git diff*--no-index*", effect: "deny" },
   { action: "shell", resource: "git show*:*.env", effect: "deny" },
   { action: "shell", resource: "git show*:*.env.*", effect: "deny" },
+  // `.env.example` is not secret material, so it stays readable at a revision
+  // like it does through read/glob/grep; this allow must stay after the two
+  // denies above (last-match-wins).
+  { action: "shell", resource: "git show*:*.env.example", effect: "allow" },
   { action: "read", resource: "*.env", effect: "deny" },
   { action: "read", resource: "*.env.*", effect: "deny" },
   { action: "read", resource: "*.env.example", effect: "allow" },
@@ -238,15 +242,19 @@ function commandFilePath(commandFilename: string): string {
 }
 
 export function managedVersionOf(markdown: string): number | undefined {
+  const value = frontmatterFieldOf(markdown, "managed_version");
+  if (value === undefined || !/^[0-9]+$/.test(value)) return undefined;
+  const version = Number(value);
+  return version > 0 ? version : undefined;
+}
+
+function frontmatterFieldOf(markdown: string, field: string): string | undefined {
   const block = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!block?.[1]) return undefined;
   for (const line of block[1].split("\n")) {
     const separator = line.indexOf(":");
-    if (separator <= 0 || line.slice(0, separator).trim() !== "managed_version") continue;
-    const value = line.slice(separator + 1).trim();
-    if (!/^[0-9]+$/.test(value)) return undefined;
-    const version = Number(value);
-    return version > 0 ? version : undefined;
+    if (separator <= 0 || line.slice(0, separator).trim() !== field) continue;
+    return line.slice(separator + 1).trim();
   }
   return undefined;
 }
@@ -360,22 +368,81 @@ async function installCommandFile(
     return;
   }
 
-  try {
-    await writeFile(commandPath, template, { flag: OVERWRITE_FLAGS });
-  } catch (error) {
+  // An explicit open separates a failed open (nothing was truncated, so the
+  // intact file must survive) from a failed handle write after O_TRUNC has
+  // already run (a truncated or partial file must be unlinked so later setups
+  // do not preserve it forever). ELOOP can only come from this open; writes to
+  // an already-open handle never re-resolve the path.
+  const overwrite = await open(commandPath, OVERWRITE_FLAGS).catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException).code === "ELOOP") {
       warnExistingFile(commandPath, logWarn);
-      return;
+      return undefined;
     }
-    // O_TRUNC means a failed overwrite can strand a truncated or partial file
-    // with no managed_version stamp, which later setups would preserve forever.
+    throw installFailure(error);
+  });
+  if (overwrite === undefined) return;
+  try {
+    await overwrite.writeFile(template);
+  } catch (error) {
     // Best-effort unlink returns the path to the fresh `wx` install; on a
     // symlink leaf it removes only the link, never the target.
     await unlink(commandPath).catch(() => {});
     throw installFailure(error);
+  } finally {
+    // Matching fsPromises.writeFile, a close failure after a successful write
+    // is not an install failure.
+    await overwrite.close().catch(() => {});
   }
   logInfo(
     `[${PLUGIN_ID}] Updating the managed command file at ${commandPath} from the bundled template (managed_version ${installedVersion}).`,
+  );
+}
+
+// A pre-rename build installed the second reviewer's command as `review.md`
+// with `agent: reviewer`, an id this build no longer registers; the host still
+// discovers that leftover as a broken /review command. Only that exact
+// filename is inspected, and it is deleted only when it is provably ours: the
+// old agent id plus a managed_version stamp this build knows. A missing or
+// unknown stamp could be a user's own file, so it is preserved with a loud
+// warning naming the file, the broken-command risk, and the manual fix.
+const PRE_RENAME_COMMAND_FILENAME = "review.md";
+const PRE_RENAME_REVIEWER_AGENT_ID = "reviewer";
+
+async function removeStalePreRenameCommand(
+  logWarn: (message: string) => void,
+  logInfo: (message: string) => void,
+): Promise<void> {
+  const stalePath = commandFilePath(PRE_RENAME_COMMAND_FILENAME);
+  let contents: string;
+  try {
+    contents = await readFile(stalePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    logWarn(
+      `[${PLUGIN_ID}] Unable to inspect ${stalePath} for a stale pre-rename /review command: ${errorMessage(error)}. If it is not yours, delete it manually so the host stops discovering a broken /review command.`,
+    );
+    return;
+  }
+  if (frontmatterFieldOf(contents, "agent") !== PRE_RENAME_REVIEWER_AGENT_ID) return;
+  const version = managedVersionOf(contents);
+  if (version === undefined || !KNOWN_TEMPLATE_VERSIONS.includes(version)) {
+    logWarn(
+      `[${PLUGIN_ID}] Found ${stalePath}, a leftover pre-rename /review command for the removed "${PRE_RENAME_REVIEWER_AGENT_ID}" agent without a managed_version stamp this build recognizes; leaving it untouched. That agent no longer exists, so /review is broken: delete that file manually to clear it.`,
+    );
+    return;
+  }
+  try {
+    await unlink(stalePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      logWarn(
+        `[${PLUGIN_ID}] Failed to remove the stale pre-rename command file at ${stalePath}: ${errorMessage(error)}. The "${PRE_RENAME_REVIEWER_AGENT_ID}" agent no longer exists, so /review is broken until you delete that file manually.`,
+      );
+    }
+    return;
+  }
+  logInfo(
+    `[${PLUGIN_ID}] Removed the stale pre-rename command file at ${stalePath} (managed_version ${version}); it registered /review for the removed "${PRE_RENAME_REVIEWER_AGENT_ID}" agent.`,
   );
 }
 
@@ -398,6 +465,8 @@ export default Plugin.define({
     for (const reviewer of REVIEWERS) {
       await installCommandFile(reviewer, logWarn, logInfo);
     }
+
+    await removeStalePreRenameCommand(logWarn, logInfo);
 
     for (const reviewer of REVIEWERS) {
       try {

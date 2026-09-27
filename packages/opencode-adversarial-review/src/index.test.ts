@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -65,6 +66,11 @@ const CONSTRUCTIVE_REVIEWER_DESCRIPTION =
   "Do not invoke this agent directly. It is the constructive code-review agent, invocable only by the user.";
 const MANAGED_VERSION_FIELD = "managed_version";
 const CURRENT_MANAGED_VERSION = "2";
+// The pre-rename build installed the second reviewer's command as review.md
+// with `agent: reviewer`, an id this build no longer registers. The host still
+// discovers that leftover as a broken /review command.
+const STALE_REVIEW_COMMAND_FILE_NAME = "review.md";
+const PRE_RENAME_REVIEWER_AGENT_ID = "reviewer";
 
 // The managed_version stamp and the ownership metadata wording are the only
 // frontmatter additions the packaged templates may carry; every other key must
@@ -364,25 +370,31 @@ function fsErrorMock(
   `;
 }
 
-// Fails only the refresh overwrite (numeric flags) while letting the atomic
-// `wx` first write reach the real filesystem, so a pre-staged managed file
-// takes the refresh path; the install unlinks that path on failure.
+// Fails the refresh write after its O_TRUNC open succeeded: the real open runs
+// first, truncating the file exactly as O_TRUNC does, then the returned
+// handle's write fails. Models the partial-write failure whose stranded file
+// must be unlinked so the next setup takes the fresh `wx` path.
 function refreshWriteErrorMock(error: { code: string; message: string } | undefined): string {
   if (error === undefined) return "";
   return `
     const { mock } = await import("bun:test");
     const fs = await import("node:fs/promises");
-    const realWriteFile = fs.writeFile.bind(fs);
+    const refreshConstants = (await import("node:fs")).constants;
+    const realRefreshOpen = fs.open.bind(fs);
     mock.module("node:fs/promises", () => ({
       ...fs,
-      writeFile: async (path, ...args) => {
-        const options = args[1];
-        if (options !== undefined && typeof options === "object" && options.flag === "wx") {
-          return realWriteFile(path, ...args);
-        }
-        const error = new Error(${JSON.stringify(error.message)});
-        error.code = ${JSON.stringify(error.code)};
-        throw error;
+      open: async (path, ...args) => {
+        const flags = args[0];
+        const handle = await realRefreshOpen(path, ...args);
+        if (typeof flags !== "number" || (flags & refreshConstants.O_TRUNC) === 0) return handle;
+        return {
+          writeFile: async () => {
+            const error = new Error(${JSON.stringify(error.message)});
+            error.code = ${JSON.stringify(error.code)};
+            throw error;
+          },
+          close: () => handle.close(),
+        };
       },
     }));
   `;
@@ -410,19 +422,26 @@ function lstatReportsRegularFileMock(fileName: string | undefined): string {
 }
 
 // Deletes the leaf right after its content is read, modeling the file
-// disappearing between the ownership check and the refresh write.
+// disappearing between the ownership check and the refresh write. Only read
+// opens are wrapped: the refresh's O_TRUNC open must keep its real handle and
+// recreate the path it finds missing.
 function deleteOnReadMock(fileName: string | undefined): string {
   if (fileName === undefined) return "";
   return `
     const { mock } = await import("bun:test");
     const fs = await import("node:fs/promises");
+    const deleteOnReadConstants = (await import("node:fs")).constants;
     const realOpen = fs.open.bind(fs);
     const realUnlink = fs.unlink.bind(fs);
     mock.module("node:fs/promises", () => ({
       ...fs,
       open: async (path, ...args) => {
+        const flags = args[0];
         const handle = await realOpen(path, ...args);
-        if (!String(path).endsWith(${JSON.stringify(`/${fileName}`)})) return handle;
+        const isReadOpen =
+          typeof flags === "number" &&
+          (flags & (deleteOnReadConstants.O_WRONLY | deleteOnReadConstants.O_RDWR)) === 0;
+        if (!isReadOpen || !String(path).endsWith(${JSON.stringify(`/${fileName}`)})) return handle;
         return {
           readFile: async (...readArgs) => {
             const contents = await handle.readFile(...readArgs);
@@ -1269,6 +1288,55 @@ describe("@capybearista/opencode-adversarial-review", () => {
     }
   });
 
+  // `git show <rev>:<path>` only prints a blob, so `.env.example` stays
+  // readable at a revision like it does through read/glob/grep. The allow must
+  // come after the `.env` / `.env.*` denies because the host evaluates rules
+  // last-match-wins. Its `*` wildcards are unanchored, exactly like the
+  // pre-existing read/glob/grep allows: `*.env.example` also matches
+  // `foo.env.example`, and the host matcher has no anchor syntax to tighten
+  // that, so the rule set keeps the same convention.
+  test("git show of a .env.example blob is allowed after the secret-path denies", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    const permissions = context.agents.get(REVIEWER_AGENT_ID)?.permissions ?? [];
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "git show*:*.env.example",
+      effect: "allow",
+    });
+
+    const envDenyIndex = permissions.findIndex(
+      (rule) =>
+        rule.action === "shell" && rule.resource === "git show*:*.env.*" && rule.effect === "deny",
+    );
+    const envExampleAllowIndex = permissions.findIndex(
+      (rule) =>
+        rule.action === "shell" &&
+        rule.resource === "git show*:*.env.example" &&
+        rule.effect === "allow",
+    );
+    expect(envDenyIndex).toBeGreaterThanOrEqual(0);
+    expect(envExampleAllowIndex).toBeGreaterThan(envDenyIndex);
+
+    const allowed = ["git show HEAD:.env.example", "git show HEAD:config/.env.example"];
+    for (const command of allowed) {
+      expect(effectiveEffect(permissions, "shell", command)).toBe("allow");
+    }
+
+    const denied = [
+      "git show HEAD:.env",
+      "git show HEAD:./.env",
+      "git show HEAD:config/.env",
+      "git show HEAD:.env.production",
+      "git show HEAD:config/.env.production",
+      "git show HEAD:.env.example.production",
+    ];
+    for (const command of denied) {
+      expect(effectiveEffect(permissions, "shell", command)).toBe("deny");
+    }
+  });
+
   test("gh is allowlisted to the read-only PR surface only", async () => {
     const context = createTestContext();
     await setupPlugin(context);
@@ -1772,6 +1840,115 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(recovery.ok).toBe(true);
     expect(await readFile(installed, "utf8")).toBe(await readFile(COMMAND_ASSET_PATH, "utf8"));
   });
+
+  // Regression: the refresh used to unlink unconditionally when its write
+  // failed, deleting a readable-but-unwritable managed file even though the
+  // O_TRUNC open never ran and no byte was lost. Only a handle write after a
+  // successful O_TRUNC open can strand a partial file; a failed open must
+  // preserve the intact file and still fail setup loudly.
+  test("a failed refresh open preserves a read-only managed file and fails setup", async () => {
+    // A root-run test cannot produce EACCES from file mode bits; the mock-based
+    // partial-write coverage still exercises the unlink path in that case.
+    if (typeof process.getuid === "function" && process.getuid() === 0) return;
+
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const installed = join(commands, COMMAND_FILE_NAME);
+    const stale = `---\ndescription: stale managed copy\nagent: ${REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: 1\n---\n\nstale body\n`;
+    await writeFile(installed, stale);
+    await chmod(installed, 0o444);
+
+    const result = await runSetupInSubprocess({ home });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toInclude("Unable to install the /adversarial-review command");
+    expect(result.error).toInclude(installed);
+    expect(result.error).toInclude("Neither reviewer agent was registered");
+    expect(result.agents).toHaveLength(0);
+    expect(await readFile(installed, "utf8")).toBe(stale);
+    await expect(stat(join(commands, CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME))).rejects.toThrow();
+  });
+
+  test("a stamped pre-rename review command is removed with an info log", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const stale = join(commands, STALE_REVIEW_COMMAND_FILE_NAME);
+    const staleContents = `---\ndescription: stale pre-rename review\nagent: ${PRE_RENAME_REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: 1\n---\n\nstale body\n`;
+    await writeFile(stale, staleContents);
+
+    const result = await runSetupInSubprocess({ home });
+
+    expect(result.ok).toBe(true);
+    expect(result.agents.map((agent) => agent.id).sort()).toEqual(
+      [REVIEWER_AGENT_ID, CONSTRUCTIVE_REVIEW_AGENT_ID].sort(),
+    );
+    await expect(stat(stale)).rejects.toThrow();
+    const removals = result.logs.filter(
+      (entry) => entry.level === "info" && entry.message.includes(stale),
+    );
+    expect(removals).toHaveLength(1);
+    expect(removals[0]?.message).toInclude("Removed");
+    expect(result.logs.some((entry) => entry.level === "warn")).toBe(false);
+    expect(await readFile(join(commands, COMMAND_FILE_NAME), "utf8")).toBe(
+      await readFile(COMMAND_ASSET_PATH, "utf8"),
+    );
+    expect(await readFile(join(commands, CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME), "utf8")).toBe(
+      await readFile(CONSTRUCTIVE_REVIEW_COMMAND_ASSET_PATH, "utf8"),
+    );
+  });
+
+  test("an unstamped or unknown-stamped pre-rename review command is preserved with a warning", async () => {
+    const variants = [
+      `---\ndescription: old unstamped review\nagent: ${PRE_RENAME_REVIEWER_AGENT_ID}\nsubagent: true\n---\n\nold body\n`,
+      `---\ndescription: newer pre-rename review\nagent: ${PRE_RENAME_REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: 99\n---\n\nnewer body\n`,
+    ];
+
+    for (const staleContents of variants) {
+      const home = await temporaryDirectory("adversarial-review-home-");
+      const commands = join(home, ".config", "opencode", "commands");
+      await mkdir(commands, { recursive: true });
+      const stale = join(commands, STALE_REVIEW_COMMAND_FILE_NAME);
+      await writeFile(stale, staleContents);
+
+      const result = await runSetupInSubprocess({ home });
+
+      expect(result.ok).toBe(true);
+      expect(await readFile(stale, "utf8")).toBe(staleContents);
+      const warnings = result.logs.filter(
+        (entry) => entry.level === "warn" && entry.message.includes(stale),
+      );
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]?.message).toInclude("broken");
+      expect(warnings[0]?.message).toInclude("delete that file manually");
+      expect(result.logs.some((entry) => entry.level === "info")).toBe(false);
+      expect(await readFile(join(commands, COMMAND_FILE_NAME), "utf8")).toBe(
+        await readFile(COMMAND_ASSET_PATH, "utf8"),
+      );
+    }
+  }, 30_000);
+
+  test("an unrelated user review command is preserved silently", async () => {
+    const variants = [
+      `---\ndescription: user command\nagent: my-own-reviewer\n---\n\nuser body\n`,
+      `# user notes\n\nnot a command\n`,
+    ];
+
+    for (const contents of variants) {
+      const home = await temporaryDirectory("adversarial-review-home-");
+      const commands = join(home, ".config", "opencode", "commands");
+      await mkdir(commands, { recursive: true });
+      const userFile = join(commands, STALE_REVIEW_COMMAND_FILE_NAME);
+      await writeFile(userFile, contents);
+
+      const result = await runSetupInSubprocess({ home });
+
+      expect(result.ok).toBe(true);
+      expect(await readFile(userFile, "utf8")).toBe(contents);
+      expect(result.logs).toHaveLength(0);
+    }
+  }, 30_000);
 
   test("removing the managed_version stamp takes ownership and preserves the file", async () => {
     const home = await temporaryDirectory("adversarial-review-home-");
