@@ -1,5 +1,11 @@
 # @capybearista/opencode-adversarial-review
 
+## 2.0.0
+
+### Major Changes
+
+- 914f49f: V2 port: agent-in-plugin re-orientation, a second constructive reviewer, and version-stamped command installs.
+
 ## 1.0.0
 
 ### Major Changes
