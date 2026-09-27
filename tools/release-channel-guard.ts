@@ -43,7 +43,7 @@ const APPROVED_POLICY: Record<string, PolicyEntry> = {
     channel: "latest",
   },
   "@capybearista/opencode-adversarial-review": {
-    releaseClass: "v1",
+    releaseClass: "v2",
     channel: "latest",
   },
 };

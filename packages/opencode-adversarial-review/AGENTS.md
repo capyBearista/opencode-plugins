@@ -5,7 +5,7 @@
 **Technology**: TypeScript / OpenCode Plugin
 **Entry Point**: `src/index.ts`
 **Parent Context**: This extends [../../AGENTS.md](../../AGENTS.md)
-**Compatibility**: V2 (`@opencode/plugin` 2.0.2, `Plugin.define`) — server entry only, no TUI. The release policy still lists the V1 `latest` line (`releaseClass: v1`) pending reclassification; keep V1 (singular `plugin` key) and V2 (plural `plugins` key) hosts apart.
+**Compatibility**: V2 (`@opencode/plugin` 2.0.2, `Plugin.define`) — server entry only, no TUI. The release policy now lists the V2 `latest` line (`releaseClass: v2`); the `2.0.0` release is still unreleased pending the Version Packages flow, so `@latest` resolves to the V1 `1.0.0` line until it publishes. Keep V1 (singular `plugin` key) and V2 (plural `plugins` key) hosts apart.
 
 This plugin provides **two code-review agents** for OpenCode: an adversarial reviewer (`/adversarial-review`, "break confidence, not validate") and a constructive reviewer (`/constructive-review`, correctness-first with suggestions). It ports the Codex CLI's review concepts to OpenCode's agent system.
 
