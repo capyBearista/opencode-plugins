@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
-import { lstat, open, readFile, writeFile } from "node:fs/promises";
+import { lstat, open, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Plugin } from "@opencode/plugin";
@@ -123,6 +123,14 @@ const REVIEWER_PERMISSIONS: readonly PermissionRule[] = [
   { action: "shell", resource: "git stash show*--ext-diff*", effect: "deny" },
   { action: "shell", resource: "git stash show*--textconv*", effect: "deny" },
   { action: "shell", resource: "git stash show*--output*", effect: "deny" },
+  // `git diff --no-index` reads arbitrary paths and `git show <rev>:<path>`
+  // prints a blob directly, bypassing the read/glob/grep `.env` denies. These
+  // denies must stay after the `git diff*` / `git show*` allows. Only the
+  // colon-path `.env` / `.env.*` leaf forms are covered; other secret files
+  // such as `*.pem` remain readable and are a known limitation.
+  { action: "shell", resource: "git diff*--no-index*", effect: "deny" },
+  { action: "shell", resource: "git show*:*.env", effect: "deny" },
+  { action: "shell", resource: "git show*:*.env.*", effect: "deny" },
   { action: "read", resource: "*.env", effect: "deny" },
   { action: "read", resource: "*.env.*", effect: "deny" },
   { action: "read", resource: "*.env.example", effect: "allow" },
@@ -359,6 +367,11 @@ async function installCommandFile(
       warnExistingFile(commandPath, logWarn);
       return;
     }
+    // O_TRUNC means a failed overwrite can strand a truncated or partial file
+    // with no managed_version stamp, which later setups would preserve forever.
+    // Best-effort unlink returns the path to the fresh `wx` install; on a
+    // symlink leaf it removes only the link, never the target.
+    await unlink(commandPath).catch(() => {});
     throw installFailure(error);
   }
   logInfo(

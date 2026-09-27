@@ -20,7 +20,7 @@ Target selection:
 - For a commit or pull request target, prefer the evidence you collect yourself over the working-tree snapshot blocks: they describe the current checkout, not the selected target.
 - Otherwise, select the review scope with the flags below.
 
-If `--scope auto` (the default), review the working tree when it has staged or unstaged changes; otherwise review the current branch against its fork point.
+If `--scope auto` (the default), review the working tree when it has staged or unstaged changes; otherwise review the current branch against its fork point, and still read untracked files from the working tree because they never appear in the branch diff.
 If `--scope working-tree`, review staged and unstaged changes against HEAD.
 If `--scope branch`, collect the diff for all changes on the current branch. Determine the fork point by running `git merge-base HEAD <upstream>` where `<upstream>` is the tracking branch of HEAD, or `origin/main`, or `main` (in order of preference). Then run `git diff <fork>...HEAD`.
 If `--base <ref>` is provided without `--scope`, treat it as `--scope branch --base <ref>`.
@@ -61,7 +61,7 @@ Treat that snapshot as a starting point, not as a complete record: it can miss f
 Gate evidence collection on the selected target:
 - Scope or flag target: read changed and untracked files from the working tree, and collect branch-scope diffs yourself with `git merge-base` and `git diff <fork>...HEAD`.
 - Commit target: use only `git show <sha>` and `git show <sha>:<file>` for versioned files. Do not read, grep, or glob working-tree copies, which show a different revision; if the commit is not available locally, report that plainly instead of guessing at its content.
-- Pull request target: collect `gh` evidence first. Read a working-tree file only after verifying it matches the PR head revision: resolve the PR head with `gh pr view <pr-or-url> --json headRefOid` and compare it with `git rev-parse HEAD`; when either value is unavailable, report that plainly and fall back to `gh` evidence instead of guessing at the file's content.
+- Pull request target: collect `gh` evidence first. Read a working-tree file only after verifying it matches the PR head revision: resolve the PR head with `gh pr view <pr-or-url> --json headRefOid` and compare it with `git rev-parse HEAD`; when either value is unavailable, report that plainly and fall back to `gh` evidence instead of guessing at the file's content. Even when the revisions match, run `git status --short -- <file>` before reading that file: when it reports any staged, unstaged, or untracked change, read the PR revision with `git show <headOid>:<file>` or fall back to `gh` evidence, because a dirty working-tree copy is not the PR revision.
 Do not report a finding you could not verify, and do not bless a change whose evidence you could not inspect.
 </evidence_collection>
 
