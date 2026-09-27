@@ -2,7 +2,7 @@
 
 For anyone running these plugins on an OpenCode V1 host.
 
-The package READMEs for `opencode-agents-loader`, `opencode-double-tap-timeline`, and `opencode-ram-monitor` describe their published V2 releases. This guide retains setup instructions for the frozen V1 versions.
+The package READMEs for `opencode-agents-loader`, `opencode-double-tap-timeline`, `opencode-ram-monitor`, and `opencode-adversarial-review` describe their published V2 releases. This guide retains setup instructions for the frozen V1 versions.
 
 ## Status
 
@@ -10,7 +10,7 @@ The package READMEs for `opencode-agents-loader`, `opencode-double-tap-timeline`
 | --- | --- | --- |
 | `opencode-agents-loader` | 1.0.0, frozen | V2 2.0.0 uses `opencode2`. No further 1.x from this line. |
 | `opencode-double-tap-timeline` | 1.0.1, frozen | V2 2.0.0 uses `opencode2`. No further 1.x from this line. |
-| `opencode-adversarial-review` | 1.0.0 | V2 `2.0.0` pending on `latest` (changeset in flight); until published, Active V1 releases use `latest`. Pin `1.0.0` for V1 hosts. |
+| `opencode-adversarial-review` | 1.0.0 | V1 `latest` is superseded: V2 `2.0.0` uses `latest`. Pin `1.0.0` for V1 hosts. |
 | `opencode-agent-prompt-inheritance` | 1.0.0 | Active V1 releases use `latest`; upstream prompt sync remains enabled. No V2 port. |
 | `opencode-output-styles` | 1.0.1 | Active V1 releases use `latest`. |
 | `opencode-ram-monitor` | 1.1.0 | V1 `latest` is superseded: V2 `2.0.0` uses `latest`. Pin `1.1.0` for V1 hosts. |
