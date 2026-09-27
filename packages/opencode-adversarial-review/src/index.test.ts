@@ -14,7 +14,12 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import plugin from "./index.js";
+import plugin, {
+  CURRENT_TEMPLATE_VERSION,
+  isManagedUpgrade,
+  KNOWN_TEMPLATE_VERSIONS,
+  managedVersionOf,
+} from "./index.js";
 
 type TestPermission = { action: string; resource: string; effect: string };
 
@@ -54,6 +59,19 @@ const MARKDOWN_VERBATIM_RULE =
   "Return only the Markdown report, verbatim. Do not wrap the report in markdown fences or add commentary outside the report.";
 const DO_NOT_INVOKE_DESCRIPTION =
   "Do not invoke this agent directly. It is invocable only by the user.";
+const MANAGED_VERSION_FIELD = "managed_version";
+const CURRENT_MANAGED_VERSION = "1";
+
+// The managed_version stamp and the ownership metadata wording are the only
+// frontmatter additions the packaged templates may carry; every other key must
+// stay in this allowlist.
+const COMMAND_FRONTMATTER_KEYS = [
+  "description",
+  "agent",
+  "subagent",
+  "metadata",
+  MANAGED_VERSION_FIELD,
+] as const;
 
 // The shared deterministic resolver block is byte-identical across both
 // prompts and both prompt references; only the remainder sentence (focus area
@@ -331,18 +349,93 @@ function fsErrorMock(
   `;
 }
 
-async function runSetupInSubprocess(configuration: {
+// Models the lstat-to-read race: `lstat` reports the leaf as a regular file
+// even while a symlink is present, so only the O_NOFOLLOW read can catch the
+// swap.
+function lstatReportsRegularFileMock(fileName: string | undefined): string {
+  if (fileName === undefined) return "";
+  return `
+    const { mock } = await import("bun:test");
+    const fs = await import("node:fs/promises");
+    const realLstat = fs.lstat.bind(fs);
+    mock.module("node:fs/promises", () => ({
+      ...fs,
+      lstat: async (path, ...args) => {
+        if (String(path).endsWith(${JSON.stringify(`/${fileName}`)})) {
+          return { isSymbolicLink: () => false };
+        }
+        return realLstat(path, ...args);
+      },
+    }));
+  `;
+}
+
+// Deletes the leaf right after its content is read, modeling the file
+// disappearing between the ownership check and the refresh write.
+function deleteOnReadMock(fileName: string | undefined): string {
+  if (fileName === undefined) return "";
+  return `
+    const { mock } = await import("bun:test");
+    const fs = await import("node:fs/promises");
+    const realOpen = fs.open.bind(fs);
+    const realUnlink = fs.unlink.bind(fs);
+    mock.module("node:fs/promises", () => ({
+      ...fs,
+      open: async (path, ...args) => {
+        const handle = await realOpen(path, ...args);
+        if (!String(path).endsWith(${JSON.stringify(`/${fileName}`)})) return handle;
+        return {
+          readFile: async (...readArgs) => {
+            const contents = await handle.readFile(...readArgs);
+            await realUnlink(path);
+            return contents;
+          },
+          close: () => handle.close(),
+        };
+      },
+    }));
+  `;
+}
+
+// Removes O_NOFOLLOW from the fs constants, modeling a platform (for example
+// Windows) where the symlink-race guard is unavailable.
+function missingNoFollowMock(enabled: boolean | undefined): string {
+  if (!enabled) return "";
+  return `
+    const { mock } = await import("bun:test");
+    const fs = await import("node:fs");
+    mock.module("node:fs", () => ({
+      ...fs,
+      constants: { ...fs.constants, O_NOFOLLOW: undefined },
+    }));
+  `;
+}
+
+type SetupSubprocessConfiguration = {
   home: string;
   opencodeConfigDir?: string;
   readFileError?: { code: string; message: string; onlyFor?: string };
   writeFileError?: { code: string; message: string; onlyFor?: string };
-}): Promise<SubprocessSetup> {
+  maskLstatFor?: string;
+  deleteOnRead?: string;
+  noFollowUnavailable?: boolean;
+};
+
+async function runSetupInSubprocess(
+  configuration: SetupSubprocessConfiguration,
+): Promise<SubprocessSetup> {
   const pluginURL = pathToFileURL(join(PACKAGE_ROOT, "src", "index.ts")).href;
   const writeFileMock = fsErrorMock("writeFile", configuration.writeFileError);
   const readFileMock = fsErrorMock("readFile", configuration.readFileError);
+  const lstatMock = lstatReportsRegularFileMock(configuration.maskLstatFor);
+  const openMock = deleteOnReadMock(configuration.deleteOnRead);
+  const noFollowMock = missingNoFollowMock(configuration.noFollowUnavailable);
   const script = `
     ${writeFileMock}
     ${readFileMock}
+    ${lstatMock}
+    ${openMock}
+    ${noFollowMock}
     const { default: plugin } = await import(${JSON.stringify(pluginURL)});
     const agents = [];
     const hooks = [];
@@ -1285,12 +1378,14 @@ describe("@capybearista/opencode-adversarial-review", () => {
     ).toBe(adversarialAsset);
     const adversarialFrontmatter = frontmatterOf(adversarialAsset);
     expect(adversarialFrontmatter.description).toBeString();
-    expect(adversarialFrontmatter.description).toInclude("adversarial");
+    expect(adversarialFrontmatter.description).toInclude("Adversarial");
     expect(adversarialFrontmatter.description).toInclude(
       "Args: [<sha|pr-url|pr-number>] [--base <ref>] [--scope auto|working-tree|branch] [focus ...]",
     );
     expect(adversarialFrontmatter.agent).toBe(REVIEWER_AGENT_ID);
     expect(adversarialFrontmatter.subagent).toBe("true");
+    expect(adversarialFrontmatter[MANAGED_VERSION_FIELD]).toBe(CURRENT_MANAGED_VERSION);
+    expect(adversarialFrontmatter.metadata).toInclude(MANAGED_VERSION_FIELD);
     expect("model" in adversarialFrontmatter).toBe(false);
 
     const reviewAsset = await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8");
@@ -1308,6 +1403,8 @@ describe("@capybearista/opencode-adversarial-review", () => {
     );
     expect(reviewFrontmatter.agent).toBe(REVIEW_AGENT_ID);
     expect(reviewFrontmatter.subagent).toBe("true");
+    expect(reviewFrontmatter[MANAGED_VERSION_FIELD]).toBe(CURRENT_MANAGED_VERSION);
+    expect(reviewFrontmatter.metadata).toInclude(MANAGED_VERSION_FIELD);
     expect("model" in reviewFrontmatter).toBe(false);
     expect(reviewAsset).not.toInclude("acknowledged");
 
@@ -1369,6 +1466,247 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(
       await readFile(join(context.configDir, "commands", REVIEW_COMMAND_FILE_NAME), "utf8"),
     ).toBe(await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8"));
+  });
+
+  test("packaged command templates carry the managed_version stamp and ownership metadata", async () => {
+    for (const assetPath of [COMMAND_ASSET_PATH, REVIEW_COMMAND_ASSET_PATH]) {
+      const asset = await readFile(assetPath, "utf8");
+      const frontmatter = frontmatterOf(asset);
+      expect(frontmatter[MANAGED_VERSION_FIELD]).toBe(CURRENT_MANAGED_VERSION);
+      expect(frontmatter.metadata).toInclude(PACKAGE_NAME);
+      expect(frontmatter.metadata).toInclude(MANAGED_VERSION_FIELD);
+      expect(frontmatter.metadata).toInclude("take ownership");
+      expect(frontmatter.metadata).toInclude("preserved");
+      expect(frontmatter.metadata).toInclude("newer than the shipped template");
+      expect(frontmatter.metadata).not.toInclude("overridden");
+      for (const key of Object.keys(frontmatter)) {
+        expect(COMMAND_FRONTMATTER_KEYS).toContain(
+          key as (typeof COMMAND_FRONTMATTER_KEYS)[number],
+        );
+      }
+    }
+  });
+
+  describe("managed version handling", () => {
+    test("parses only canonical positive decimal integer stamps", () => {
+      const stamped = (value: string) =>
+        `---\ndescription: x\n${MANAGED_VERSION_FIELD}: ${value}\n---\nbody\n`;
+
+      expect(managedVersionOf(stamped("1"))).toBe(1);
+      expect(managedVersionOf(stamped("42"))).toBe(42);
+      expect(managedVersionOf("body only\n")).toBeUndefined();
+      expect(managedVersionOf("---\ndescription: x\n---\nbody\n")).toBeUndefined();
+      for (const value of ["1.0", "+1", "0x1", "1e2", "", "0", "-1"]) {
+        expect(managedVersionOf(stamped(value))).toBeUndefined();
+      }
+    });
+
+    test("refreshes known stamps no newer than the shipped template", () => {
+      expect(isManagedUpgrade(1, [1, 2], 2)).toBe(true);
+      expect(isManagedUpgrade(2, [1, 2], 2)).toBe(true);
+      expect(isManagedUpgrade(1, [1], 1)).toBe(true);
+      expect(isManagedUpgrade(3, [1, 2], 2)).toBe(false);
+      expect(isManagedUpgrade(4, [1, 2], 2)).toBe(false);
+      expect(isManagedUpgrade(0, [1, 2], 2)).toBe(false);
+    });
+
+    test("lists every version from 1 up to the shipped template version as refreshable", () => {
+      for (let version = 1; version < CURRENT_TEMPLATE_VERSION; version += 1) {
+        expect(KNOWN_TEMPLATE_VERSIONS).toContain(version);
+      }
+      expect(KNOWN_TEMPLATE_VERSIONS).toContain(CURRENT_TEMPLATE_VERSION);
+      expect(KNOWN_TEMPLATE_VERSIONS).not.toContain(CURRENT_TEMPLATE_VERSION + 1);
+    });
+  });
+
+  test("a stamped managed command file is refreshed in place with an info log", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const installed = join(commands, COMMAND_FILE_NAME);
+    const stale = `---\ndescription: stale managed copy\nagent: ${REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: 1\n---\n\nstale body\n`;
+    await writeFile(installed, stale);
+
+    const result = await runSetupInSubprocess({ home });
+
+    expect(result.ok).toBe(true);
+    expect(result.agents.map((agent) => agent.id).sort()).toEqual(
+      [REVIEWER_AGENT_ID, REVIEW_AGENT_ID].sort(),
+    );
+    expect(await readFile(installed, "utf8")).toBe(await readFile(COMMAND_ASSET_PATH, "utf8"));
+    const updates = result.logs.filter(
+      (entry) => entry.level === "info" && entry.message.includes(installed),
+    );
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.message).toInclude(`${MANAGED_VERSION_FIELD} 1`);
+    expect(result.logs.some((entry) => entry.level === "warn")).toBe(false);
+    expect(await readFile(join(commands, REVIEW_COMMAND_FILE_NAME), "utf8")).toBe(
+      await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8"),
+    );
+  });
+
+  test("removing the managed_version stamp takes ownership and preserves the file", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const installed = join(commands, COMMAND_FILE_NAME);
+    const asset = await readFile(COMMAND_ASSET_PATH, "utf8");
+    const owned = asset.replace(`\n${MANAGED_VERSION_FIELD}: 1\n`, "\n");
+    await writeFile(installed, owned);
+
+    const result = await runSetupInSubprocess({ home });
+
+    expect(result.ok).toBe(true);
+    expect(await readFile(installed, "utf8")).toBe(owned);
+    const warnings = result.logs.filter(
+      (entry) => entry.level === "warn" && entry.message.includes(installed),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toInclude("stale or customized");
+    expect(result.logs.some((entry) => entry.level === "info")).toBe(false);
+  });
+
+  test("a command file stamped with a newer managed version is preserved with a warning", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const installed = join(commands, COMMAND_FILE_NAME);
+    const future = `---\ndescription: future managed copy\nagent: ${REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: 99\n---\n\nfuture body\n`;
+    await writeFile(installed, future);
+
+    const result = await runSetupInSubprocess({ home });
+
+    expect(result.ok).toBe(true);
+    expect(await readFile(installed, "utf8")).toBe(future);
+    const warnings = result.logs.filter(
+      (entry) => entry.level === "warn" && entry.message.includes(installed),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toInclude("stale or customized");
+    expect(result.logs.some((entry) => entry.level === "info")).toBe(false);
+  });
+
+  test("non-canonical managed_version stamps are preserved with a warning", async () => {
+    for (const stamp of ["1.0", "+1", "0x1", "1e2", "", "0", "-1"]) {
+      const home = await temporaryDirectory("adversarial-review-home-");
+      const commands = join(home, ".config", "opencode", "commands");
+      await mkdir(commands, { recursive: true });
+      const installed = join(commands, COMMAND_FILE_NAME);
+      const contents = `---\ndescription: malformed stamp\nagent: ${REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: ${stamp}\n---\n\nbody\n`;
+      await writeFile(installed, contents);
+
+      const result = await runSetupInSubprocess({ home });
+
+      expect(result.ok).toBe(true);
+      expect(await readFile(installed, "utf8")).toBe(contents);
+      const warnings = result.logs.filter(
+        (entry) => entry.level === "warn" && entry.message.includes(installed),
+      );
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]?.message).toInclude("stale or customized");
+      expect(result.logs.some((entry) => entry.level === "info")).toBe(false);
+    }
+  }, 30_000);
+
+  test("setup warns once and continues when O_NOFOLLOW is unavailable", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    await mkdir(join(home, ".config", "opencode", "commands"), { recursive: true });
+
+    const result = await runSetupInSubprocess({ home, noFollowUnavailable: true });
+
+    expect(result.ok).toBe(true);
+    expect(result.agents.map((agent) => agent.id).sort()).toEqual(
+      [REVIEWER_AGENT_ID, REVIEW_AGENT_ID].sort(),
+    );
+    const warnings = result.logs.filter(
+      (entry) => entry.level === "warn" && entry.message.includes("O_NOFOLLOW"),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(
+      await readFile(join(home, ".config", "opencode", "commands", COMMAND_FILE_NAME), "utf8"),
+    ).toBe(await readFile(COMMAND_ASSET_PATH, "utf8"));
+  });
+
+  test("a symlink swapped in after lstat is caught by the no-follow read", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const installed = join(commands, COMMAND_FILE_NAME);
+    const missingTarget = join(home, "missing-target.md");
+    await symlink(missingTarget, installed);
+
+    // The dangling symlink would turn a following read into ENOENT and abort
+    // setup; the O_NOFOLLOW read fails with ELOOP and preserves the path.
+    const result = await runSetupInSubprocess({ home, maskLstatFor: COMMAND_FILE_NAME });
+
+    expect(result.ok).toBe(true);
+    expect((await lstat(installed)).isSymbolicLink()).toBe(true);
+    expect(await readlink(installed)).toBe(missingTarget);
+    const warnings = result.logs.filter(
+      (entry) => entry.level === "warn" && entry.message.includes(installed),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toInclude("leaving it untouched");
+  });
+
+  test("a managed file deleted between the check and the refresh is recreated", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const installed = join(commands, COMMAND_FILE_NAME);
+    const stale = `---\ndescription: stale managed copy\nagent: ${REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: 1\n---\n\nstale body\n`;
+    await writeFile(installed, stale);
+
+    const result = await runSetupInSubprocess({ home, deleteOnRead: COMMAND_FILE_NAME });
+
+    expect(result.ok).toBe(true);
+    expect(await readFile(installed, "utf8")).toBe(await readFile(COMMAND_ASSET_PATH, "utf8"));
+    const updates = result.logs.filter(
+      (entry) => entry.level === "info" && entry.message.includes(installed),
+    );
+    expect(updates).toHaveLength(1);
+  });
+
+  test("a symlinked path to a stamped managed file is never followed or overwritten", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const decoy = join(home, "managed-decoy.md");
+    const managed = `---\ndescription: managed decoy\nagent: ${REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: 1\n---\n\ndecoy body\n`;
+    await writeFile(decoy, managed);
+    const installed = join(commands, COMMAND_FILE_NAME);
+    await symlink(decoy, installed);
+
+    const result = await runSetupInSubprocess({ home });
+
+    expect(result.ok).toBe(true);
+    expect((await lstat(installed)).isSymbolicLink()).toBe(true);
+    expect(await readlink(installed)).toBe(decoy);
+    expect(await readFile(decoy, "utf8")).toBe(managed);
+    expect(result.logs.some((entry) => entry.level === "info")).toBe(false);
+  });
+
+  test("a managed refresh falls back to console.info when the host sink fails", async () => {
+    const context = createTestContext({
+      hostLog: () => {
+        throw new Error("sink unavailable");
+      },
+    });
+    const configDir = await isolatedConfigDirectory();
+    const installed = join(configDir, "commands", COMMAND_FILE_NAME);
+    await writeFile(
+      installed,
+      `---\ndescription: stale managed copy\nagent: ${REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: 1\n---\n\nstale body\n`,
+    );
+    const infoSpy = spyOn(console, "info").mockImplementation(() => {});
+
+    const cleanup = await setupPlugin(context, configDir);
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      `[${PLUGIN_ID}] Updating the managed command file at ${installed} from the bundled template (${MANAGED_VERSION_FIELD} 1).`,
+    );
+    infoSpy.mockRestore();
+    await cleanup?.();
   });
 
   test("a second setup preserves hand-edited bytes and warns about the existing file", async () => {

@@ -1,4 +1,6 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
+import { lstat, open, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Plugin } from "@opencode/plugin";
@@ -8,6 +10,23 @@ import { ADVERSARIAL_REVIEWER_SYSTEM_PROMPT, REVIEWER_SYSTEM_PROMPT } from "./pr
 const PLUGIN_ID = "capybearista.opencode-adversarial-review";
 // Hex is required; plugin-defined agents do not resolve theme color names.
 const REVIEWER_COLOR = "#f59e0b";
+
+// Both command templates version together. The integer `managed_version`
+// frontmatter stamp is the ownership marker: keeping it means the plugin
+// refreshes the file from the bundled template on restart, removing it takes
+// ownership and the file is preserved with a warning. Unknown or newer stamps
+// are preserved too, so a downgrade never overwrites a newer plugin's file.
+export const CURRENT_TEMPLATE_VERSION = 1;
+// Every version this build knows how to refresh in place, oldest first.
+export const KNOWN_TEMPLATE_VERSIONS: readonly number[] = [1];
+// O_NOFOLLOW closes the lstat-to-read and lstat-to-write races on the refresh
+// path: a symlink swapped in after the check makes the next operation fail
+// with ELOOP instead of following or truncating the link target. O_CREAT
+// tolerates the file disappearing between the EEXIST check and the refresh.
+// Platforms without O_NOFOLLOW fall back to the lstat check and setup warns.
+const OVERWRITE_FLAGS =
+  constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0);
+const READ_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
 
 type ReviewerConfig = {
   agentId: string;
@@ -156,18 +175,22 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-type HostLogSink = (input: {
-  service: string;
-  level: "error" | "warn";
-  message: string;
-}) => unknown;
+type HostLogLevel = "error" | "warn" | "info";
+
+type HostLogSink = (input: { service: string; level: HostLogLevel; message: string }) => unknown;
 
 // @opencode/plugin 2.0.2 exposes no logging domain on the plugin context, so
-// console.error / console.warn are the fallback. Hosts that add an `app.log` sink
-// receive the same messages as structured entries; wording never changes
-// between the two paths.
-function createHostLogger(ctx: PluginContext, level: "error" | "warn"): (message: string) => void {
-  const fallback = level === "error" ? console.error : console.warn;
+// console.error / console.warn / console.info are the fallback. Hosts that add
+// an `app.log` sink receive the same messages as structured entries; wording
+// never changes between the two paths. The fallback console method is captured
+// once per createHostLogger call, so replace console methods before setup.
+function createHostLogger(ctx: PluginContext, level: HostLogLevel): (message: string) => void {
+  const fallbacks: Record<HostLogLevel, (...args: unknown[]) => void> = {
+    error: console.error,
+    warn: console.warn,
+    info: console.info,
+  };
+  const fallback = fallbacks[level];
   const sink = (ctx.app as unknown as { log?: unknown } | undefined)?.log;
   if (typeof sink !== "function") {
     return (message) => fallback(message);
@@ -189,14 +212,59 @@ function commandFilePath(commandFilename: string): string {
   return join(configDirectory, "commands", commandFilename);
 }
 
-// Write-once: `wx` is atomic, refuses to replace anything already at the path
-// (including symlinks), and the plugin never reads or rewrites an existing file.
-// Parent-directory trust: the containing `commands/` directory is assumed
-// trustworthy. A symlinked parent could redirect the write outside the config
-// directory; the no-symlink-following guarantee covers the leaf file only.
+export function managedVersionOf(markdown: string): number | undefined {
+  const block = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!block?.[1]) return undefined;
+  for (const line of block[1].split("\n")) {
+    const separator = line.indexOf(":");
+    if (separator <= 0 || line.slice(0, separator).trim() !== "managed_version") continue;
+    const value = line.slice(separator + 1).trim();
+    if (!/^[0-9]+$/.test(value)) return undefined;
+    const version = Number(value);
+    return version > 0 ? version : undefined;
+  }
+  return undefined;
+}
+
+export function isManagedUpgrade(
+  installedVersion: number,
+  knownVersions: readonly number[],
+  currentVersion: number,
+): boolean {
+  return knownVersions.includes(installedVersion) && installedVersion <= currentVersion;
+}
+
+// On platforms without `constants.O_NOFOLLOW` (for example Windows) the refresh
+// read and write keep the earlier `lstat` check but cannot close the symlink
+// swap race around it. Surface the degradation once instead of failing loud.
+function warnIfNoFollowUnavailable(
+  logWarn: (message: string) => void,
+  noFollowFlag: number | undefined,
+): void {
+  if (noFollowFlag === undefined) {
+    logWarn(
+      `[${PLUGIN_ID}] O_NOFOLLOW is unavailable on this platform; managed command file refreshes keep the lstat check on the leaf file but cannot close the symlink-swap race around it.`,
+    );
+  }
+}
+
+function warnExistingFile(commandPath: string, logWarn: (message: string) => void): void {
+  logWarn(
+    `[${PLUGIN_ID}] ${commandPath} already exists; leaving it untouched. It may be stale or customized: edit it in place, delete it to reinstall the bundled template, or delete it after removing the plugin to uninstall.`,
+  );
+}
+
+// `wx` makes the first write atomic and refuses to replace anything already at
+// the path; the EEXIST path decides between a managed refresh (a known
+// `managed_version` stamp no newer than the shipped template) and a preserve-
+// and-warn for user-owned, unknown, or newer content. Parent-directory trust:
+// the containing `commands/` directory is assumed trustworthy. A symlinked
+// parent could redirect the write outside the config directory; the
+// no-symlink-following guarantee covers the leaf file only.
 async function installCommandFile(
   reviewer: ReviewerConfig,
   logWarn: (message: string) => void,
+  logInfo: (message: string) => void,
 ): Promise<void> {
   const commandPath = commandFilePath(reviewer.commandFilename);
   const commandName = `/${reviewer.commandFilename.replace(/\.md$/, "")}`;
@@ -210,20 +278,66 @@ async function installCommandFile(
       { cause: error },
     );
   }
-  try {
-    await writeFile(commandPath, template, { flag: "wx" });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      logWarn(
-        `[${PLUGIN_ID}] ${commandPath} already exists; leaving it untouched. It may be stale or customized: edit it in place, delete it to reinstall the bundled template, or delete it after removing the plugin to uninstall.`,
-      );
-      return;
-    }
-    throw new Error(
+  const installFailure = (error: unknown): Error =>
+    new Error(
       `Unable to install the ${commandName} command at ${commandPath}: ${errorMessage(error)}. Create the parent directory and grant write access, then restart OpenCode. Neither reviewer agent was registered.`,
       { cause: error },
     );
+
+  try {
+    await writeFile(commandPath, template, { flag: "wx" });
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw installFailure(error);
   }
+
+  // lstat, not stat: a symlinked leaf is never followed, read, or truncated.
+  const stats = await lstat(commandPath).catch((error: unknown) => {
+    throw installFailure(error);
+  });
+  if (stats.isSymbolicLink()) {
+    warnExistingFile(commandPath, logWarn);
+    return;
+  }
+
+  // `open`, not `readFile`: READ_FLAGS carries O_NOFOLLOW so the symlink check
+  // is atomic with the read. ELOOP means a symlink was swapped in after lstat.
+  let handle: FileHandle | undefined;
+  let installed: string;
+  try {
+    handle = await open(commandPath, READ_FLAGS);
+    installed = await handle.readFile("utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+      warnExistingFile(commandPath, logWarn);
+      return;
+    }
+    throw installFailure(error);
+  } finally {
+    await handle?.close();
+  }
+
+  const installedVersion = managedVersionOf(installed);
+  if (
+    installedVersion === undefined ||
+    !isManagedUpgrade(installedVersion, KNOWN_TEMPLATE_VERSIONS, CURRENT_TEMPLATE_VERSION)
+  ) {
+    warnExistingFile(commandPath, logWarn);
+    return;
+  }
+
+  try {
+    await writeFile(commandPath, template, { flag: OVERWRITE_FLAGS });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+      warnExistingFile(commandPath, logWarn);
+      return;
+    }
+    throw installFailure(error);
+  }
+  logInfo(
+    `[${PLUGIN_ID}] Updating the managed command file at ${commandPath} from the bundled template (managed_version ${installedVersion}).`,
+  );
 }
 
 export default Plugin.define({
@@ -231,6 +345,7 @@ export default Plugin.define({
   async setup(ctx) {
     const disposers: Array<() => Promise<void> | void> = [];
     const logWarn = createHostLogger(ctx, "warn");
+    const logInfo = createHostLogger(ctx, "info");
 
     if (typeof ctx.agent?.transform !== "function") {
       throw new Error(
@@ -238,8 +353,10 @@ export default Plugin.define({
       );
     }
 
+    warnIfNoFollowUnavailable(logWarn, constants.O_NOFOLLOW);
+
     for (const reviewer of REVIEWERS) {
-      await installCommandFile(reviewer, logWarn);
+      await installCommandFile(reviewer, logWarn, logInfo);
     }
 
     for (const reviewer of REVIEWERS) {
