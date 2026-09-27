@@ -1337,6 +1337,115 @@ describe("@capybearista/opencode-adversarial-review", () => {
     }
   });
 
+  // The `.env.example` allow is full-string anchored, so it also matches any
+  // longer command that merely ends in `.env.example`. Evaluation is
+  // last-match-wins, so those commands would otherwise override the earlier
+  // engine-flag and colon-path `.env` denies: `git show HEAD:.env
+  // HEAD:.env.example` prints the secret blob, and `git show --output=/tmp/x
+  // HEAD:.env.example` writes through an engine flag. The plugin therefore
+  // re-asserts the `git show` engine-flag denies and adds secret-then-more-args
+  // denies after the allow. The duplicate patterns are intentional: the earlier
+  // copies sit before the allow and lose to it, and the plugin's rule merge
+  // keeps intra-list duplicates (only an inherited host rule suppresses a
+  // plugin rule).
+  //
+  // Pattern shapes deviate from the naive `git show*:.env *` /
+  // `git show*:.env.* *` for two verified matcher reasons: the inner `*` in
+  // `:*.env` covers directory-prefixed secrets (a colon directly before `.env`
+  // only covers a repository-root leaf), and the `* *` tail is required because
+  // the host folds a trailing `" .*"` pattern into an optional argument group,
+  // so a single trailing ` *` would also match a bare `.env.example` read.
+  //
+  // Known remaining limitation (pre-existing posture, out of scope): `git diff`
+  // has no secret-path denies at all, so it can still print `.env` contents.
+  test("git show engine-flag and secret denies stay effective after the .env.example allow", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    const permissions = context.agents.get(REVIEWER_AGENT_ID)?.permissions ?? [];
+    const envExampleAllowIndex = permissions.findIndex(
+      (rule) =>
+        rule.action === "shell" &&
+        rule.resource === "git show*:*.env.example" &&
+        rule.effect === "allow",
+    );
+    expect(envExampleAllowIndex).toBeGreaterThanOrEqual(0);
+
+    // Last matching rule wins, so each re-asserted deny must have its final
+    // occurrence after the trailing allow.
+    const lastDenyIndex = (resource: string) =>
+      permissions.reduce(
+        (found, rule, index) =>
+          rule.action === "shell" && rule.resource === resource && rule.effect === "deny"
+            ? index
+            : found,
+        -1,
+      );
+    const reAsserted: Array<[string, string]> = [
+      ["git show*--ext-diff*", "git show --ext-diff HEAD:.env.example"],
+      ["git show*--textconv*", "git show --textconv HEAD:.env.example"],
+      ["git show*--output*", "git show --output=/tmp/x HEAD:.env.example"],
+      ["git show*:*.env *", "git show HEAD:.env HEAD:.env.example"],
+      ["git show*:*.env.* * *", "git show HEAD:.env.production HEAD:.env.example"],
+    ];
+    for (const [resource, command] of reAsserted) {
+      expect(lastDenyIndex(resource)).toBeGreaterThan(envExampleAllowIndex);
+      expect(wildcardMatch(command, resource)).toBe(true);
+    }
+    // The engine-flag patterns are duplicated on purpose; the secret-then-more
+    // -args patterns are new and appear once.
+    for (const resource of ["git show*--ext-diff*", "git show*--textconv*", "git show*--output*"]) {
+      expect(
+        permissions.filter(
+          (rule) => rule.action === "shell" && rule.resource === resource && rule.effect === "deny",
+        ),
+      ).toHaveLength(2);
+    }
+
+    // Matcher unit: the secret-then-more-args patterns never match a plain
+    // `.env.example` read or a non-secret path, and the inner `*` covers
+    // directory-prefixed secrets.
+    for (const command of [
+      "git show HEAD:.env.example",
+      "git show HEAD:config/.env.example",
+      "git show HEAD:src/environment.ts",
+      "git show HEAD:src/foo.ts",
+    ]) {
+      expect(wildcardMatch(command, "git show*:*.env *")).toBe(false);
+      expect(wildcardMatch(command, "git show*:*.env.* * *")).toBe(false);
+    }
+    expect(wildcardMatch("git show HEAD:config/.env --stat", "git show*:*.env *")).toBe(true);
+
+    const allowed = [
+      "git show abc123",
+      "git show HEAD:src/foo.ts",
+      "git show HEAD:src/environment.ts",
+      "git show HEAD:.env.example",
+      "git show HEAD:config/.env.example",
+    ];
+    for (const command of allowed) {
+      expect(effectiveEffect(permissions, "shell", command)).toBe("allow");
+    }
+
+    const denied = [
+      "git show HEAD:.env HEAD:.env.example",
+      "git show HEAD:.env.production HEAD:.env.example",
+      "git show --output=/tmp/x HEAD:.env.example",
+      "git show --ext-diff HEAD:.env.example",
+      "git show HEAD:.env --stat",
+      "git show HEAD:.env",
+      "git show HEAD:.env.production",
+      // Directory-prefixed forms of the same holes; the inner `*` in the
+      // `:*.env` denies covers these too.
+      "git show HEAD:config/.env HEAD:.env.example",
+      "git show HEAD:config/.env.production HEAD:.env.example",
+      "git show HEAD:config/.env --stat",
+    ];
+    for (const command of denied) {
+      expect(effectiveEffect(permissions, "shell", command)).toBe("deny");
+    }
+  });
+
   test("gh is allowlisted to the read-only PR surface only", async () => {
     const context = createTestContext();
     await setupPlugin(context);
