@@ -10,6 +10,9 @@
 
 ---
 
+> **Status:** Currently V1-only. A V2 port is TBD — no V2 release is available
+> or promised. The V1 prompt-sync workflow remains enabled.
+
 ## Why?
 
 > Custom agents are useful, but they should add task-specific guidance without throwing away the model-family rules OpenCode already provides. This plugin restores that inheritance so reviewer or specialist agents can keep the base prompt and still steer behavior.

@@ -19,7 +19,7 @@ The root [README](../README.md) and package READMEs describe current installatio
 
 `packages/opencode-agent-prompt-inheritance/src/prompt/*.txt` are synced from upstream `anomalyco/opencode` (`packages/opencode/src/session/prompt/`, nine files). The `sync:prompts` script and the Sync OpenCode Prompts workflow fetch them and open PRs. Treat the copies as generated: do not hand-edit them outside the sync.
 
-The V1 prompt-sync workflow stays on. There is no V2 prompt-inheritance port.
+The V1 prompt-sync workflow stays on. A V2 port is TBD; no V2 release is available or promised.
 
 ## Bundled skill references
 

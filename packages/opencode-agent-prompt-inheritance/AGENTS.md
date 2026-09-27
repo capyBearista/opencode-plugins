@@ -6,7 +6,7 @@
 
 This package preserves the base provider system prompt when a custom agent sets its own instructions. It hooks `experimental.chat.system.transform`, discovers the active agent from session history, and stitches provider prompt text before or after the custom agent prompt.
 
-**V1-only**: V2 prompt inheritance is discontinued — do not port the transform hook to a V2 plugin.
+**V1-only**: a V2 port is TBD — no V2 release is available or promised. The V1 prompt-sync workflow remains enabled.
 
 ## Quick Reference
 
