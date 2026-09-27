@@ -365,8 +365,8 @@ function fsErrorMock(
 }
 
 // Fails only the refresh overwrite (numeric flags) while letting the atomic
-// `wx` first write reach the real filesystem, so a pre-staged managed file is
-// preserved when its refresh overwrite fails.
+// `wx` first write reach the real filesystem, so a pre-staged managed file
+// takes the refresh path; the install unlinks that path on failure.
 function refreshWriteErrorMock(error: { code: string; message: string } | undefined): string {
   if (error === undefined) return "";
   return `
@@ -792,6 +792,9 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(system).toInclude("<structured_output_contract>");
     expect(system).toInclude("If `--scope auto` (the default)");
     expect(system).toInclude("review the working tree when it has staged or unstaged changes");
+    expect(system).toInclude(
+      "still read untracked files from the working tree because they never appear in the branch diff",
+    );
     expectDeterministicResolver(system, RESOLVER_REMAINDER_ADVERSARIAL);
     expect(system).toInclude("A pull request URL always wins");
     expect(system).toInclude("an all-decimal number is a PR number");
@@ -825,6 +828,8 @@ describe("@capybearista/opencode-adversarial-review", () => {
     );
     expect(system).toInclude("Pull request target: collect `gh` evidence first");
     expect(system).toInclude("verifying it matches the PR head revision");
+    expect(system).toInclude("run `git status --short -- <file>` before reading that file");
+    expect(system).toInclude("a dirty working-tree copy is not the PR revision");
     expect(system).toInclude("resolve the PR head with `gh pr view <pr-or-url> --json headRefOid`");
     expect(system).toInclude("compare it with `git rev-parse HEAD`");
     expect(system).toInclude(
@@ -869,6 +874,9 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(system).toInclude("never use `echo`");
     expect(system).toInclude("If `--scope auto` (the default)");
     expect(system).toInclude("review the working tree when it has staged or unstaged changes");
+    expect(system).toInclude(
+      "still read untracked files from the working tree because they never appear in the branch diff",
+    );
     expect(system).toInclude("<report_contract>");
     expect(system).toInclude(
       "the first line must be exactly `Verdict: approve` or `Verdict: needs-attention`",
@@ -906,6 +914,8 @@ describe("@capybearista/opencode-adversarial-review", () => {
     );
     expect(system).toInclude("Pull request target: gather `gh` evidence first");
     expect(system).toInclude("verifying it matches the PR head revision");
+    expect(system).toInclude("run `git status --short -- <file>` before reading that file");
+    expect(system).toInclude("a dirty working-tree copy is not the PR revision");
     expect(system).toInclude("resolve the PR head with `gh pr view <pr-or-url> --json headRefOid`");
     expect(system).toInclude("compare it with `git rev-parse HEAD`");
     expect(system).toInclude(
@@ -1200,6 +1210,61 @@ describe("@capybearista/opencode-adversarial-review", () => {
       "git stash show --output=/tmp/stash.diff",
     ];
     for (const command of dangerous) {
+      expect(effectiveEffect(permissions, "shell", command)).toBe("deny");
+    }
+  });
+
+  // `git diff --no-index` reads arbitrary paths and `git show <rev>:<path>`
+  // prints a blob directly, bypassing the read/glob/grep `.env` denies; both
+  // denies must stay after the `git diff*` / `git show*` allows. Only the
+  // colon-path `.env` / `.env.*` leaf forms are covered; other secret files
+  // such as `*.pem` remain readable and are a known limitation.
+  test("git secret-path exfiltration is denied after the read-only allows", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    const permissions = context.agents.get(REVIEWER_AGENT_ID)?.permissions ?? [];
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "git diff*--no-index*",
+      effect: "deny",
+    });
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "git show*:*.env",
+      effect: "deny",
+    });
+    expect(permissions).toContainEqual({
+      action: "shell",
+      resource: "git show*:*.env.*",
+      effect: "deny",
+    });
+
+    const allowed = [
+      "git diff HEAD",
+      "git show HEAD",
+      "git show 0123456789abcdef0123456789abcdef01234567",
+      "git show HEAD:src/foo.ts",
+      "git show HEAD:./src/foo.ts",
+      "git show HEAD:src/environment.ts",
+      "git show HEAD:src/env.ts",
+    ];
+    for (const command of allowed) {
+      expect(effectiveEffect(permissions, "shell", command)).toBe("allow");
+    }
+
+    const denied = [
+      "git diff --no-index /dev/null .env",
+      "git diff --no-index .env /dev/null",
+      "git diff HEAD --no-index .env /dev/null",
+      "git show HEAD:.env",
+      "git show HEAD:./.env",
+      "git show HEAD:config/.env",
+      "git show HEAD:config/./.env",
+      "git show HEAD:.env.production",
+      "git show HEAD:config/.env.production",
+    ];
+    for (const command of denied) {
       expect(effectiveEffect(permissions, "shell", command)).toBe("deny");
     }
   });
@@ -1675,7 +1740,11 @@ describe("@capybearista/opencode-adversarial-review", () => {
     );
   });
 
-  test("a failed refresh overwrite preserves the managed file and registers neither agent", async () => {
+  // The refresh write uses O_TRUNC, so a mid-write failure can strand a
+  // truncated or stamp-less partial file that later setups would preserve
+  // forever. Setup unlinks that path on failure so the next run takes the
+  // fresh `wx` path; unlink on a symlink leaf removes only the link.
+  test("a failed refresh overwrite unlinks the partial file and registers neither agent", async () => {
     const home = await temporaryDirectory("adversarial-review-home-");
     const commands = join(home, ".config", "opencode", "commands");
     await mkdir(commands, { recursive: true });
@@ -1696,8 +1765,12 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(result.error).toInclude(installed);
     expect(result.error).toInclude("Neither reviewer agent was registered");
     expect(result.agents).toHaveLength(0);
-    expect(await readFile(installed, "utf8")).toBe(stale);
+    await expect(stat(installed)).rejects.toThrow();
     await expect(stat(join(commands, CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME))).rejects.toThrow();
+
+    const recovery = await runSetupInSubprocess({ home });
+    expect(recovery.ok).toBe(true);
+    expect(await readFile(installed, "utf8")).toBe(await readFile(COMMAND_ASSET_PATH, "utf8"));
   });
 
   test("removing the managed_version stamp takes ownership and preserves the file", async () => {
