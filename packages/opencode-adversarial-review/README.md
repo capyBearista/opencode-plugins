@@ -81,9 +81,6 @@ Targets the V2 Promise plugin API (`@opencode/plugin` **2.0.2**); not compatible
 
 Server entry only, so `cli.json` needs no entry. Or via CLI: `opencode2 plugin add @capybearista/opencode-adversarial-review`. V1 hosts use the singular `"plugin"` key and the V1 line — see the [V1 plugin guide](../../docs/v1-plugins.md).
 
-> [!IMPORTANT]
-> The V2 port is unreleased until `2.0.0` publishes. Until then `@latest` still resolves to the V1 `1.0.0` line, which requires a V1 host. This package publishes `2.0.0` to the `latest` tag, not the `opencode2` channel.
-
 On setup, both command files install at `<OPENCODE_CONFIG_DIR ?? ~/.config/opencode>/commands/{adversarial-review.md,constructive-review.md}`. The directory must already exist; if a file cannot install, setup fails loudly and **neither** agent is registered.
 
 > [!NOTE]
