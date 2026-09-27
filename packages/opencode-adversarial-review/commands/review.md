@@ -1,8 +1,9 @@
 ---
-description: "Run a constructive code review for correctness and risk. Args: [<sha|pr-url|pr-number>] [--base <ref>] [--scope auto|working-tree|branch]"
+description: "Constructive code review: correctness and risk. Args: [<sha|pr-url|pr-number>] [--base <ref>] [--scope auto|working-tree|branch]"
 agent: reviewer
 subagent: true
-metadata: This command is managed by @capybearista/opencode-adversarial-review. Alter it as you please, but note it will get overridden if you update the plugin.
+managed_version: 1
+metadata: Managed by @capybearista/opencode-adversarial-review. Keep the managed_version stamp to receive bundled-template updates on restart; remove it to take ownership and your version is then preserved with a warning; a stamp newer than the shipped template is also preserved.
 ---
 
 # Review handoff
