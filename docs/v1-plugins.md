@@ -8,14 +8,14 @@ The package READMEs for `opencode-agents-loader`, `opencode-double-tap-timeline`
 
 | Package | V1 version shown here | Release policy |
 | --- | --- | --- |
-| `opencode-agents-loader` | 1.0.0, frozen | V2 2.0.0 uses `opencode2`. No further 1.x from this line. |
-| `opencode-double-tap-timeline` | 1.0.1, frozen | V2 2.0.0 uses `opencode2`. No further 1.x from this line. |
+| `opencode-agents-loader` | 1.0.0, frozen | V2 `2.0.0` moves to `latest` (promotion pending registry verification). No further 1.x from this line. |
+| `opencode-double-tap-timeline` | 1.0.1, frozen | V2 `2.0.0` moves to `latest` (promotion pending registry verification). No further 1.x from this line. |
 | `opencode-adversarial-review` | 1.0.0 | V1 `latest` is superseded: V2 `2.0.0` uses `latest`. Pin `1.0.0` for V1 hosts. |
 | `opencode-agent-prompt-inheritance` | 1.0.0 | Active V1 releases use `latest`; upstream prompt sync remains enabled. No V2 port. |
 | `opencode-output-styles` | 1.0.1 | Active V1 releases use `latest`. |
 | `opencode-ram-monitor` | 1.1.0 | V1 `latest` is superseded: V2 `2.0.0` uses `latest`. Pin `1.1.0` for V1 hosts. |
 
-The loader and timeline `latest` tags remain frozen after V2 publication too. This freeze does not apply to the other two packages.
+The loader and timeline V1 releases are frozen and remain available by exact pin. Their `latest` tags move to V2 `2.0.0` once the pending registry promotion is verified; `opencode-adversarial-review` and `opencode-ram-monitor` already point `latest` at their V2 releases.
 
 ## Requirements
 
@@ -41,12 +41,12 @@ For the frozen loader, use `@capybearista/opencode-agents-loader@1.0.0` in the V
 
 ## Pinning and updates
 
-Pin an exact version for a fixed setup. For loader and timeline, `@latest` remains at the frozen versions above. For the other packages, it selects the current V1 release when first resolved. Bare names and `@latest` normalize to the same V1 target; switching between them is not an upgrade.
+Pin an exact version for a fixed setup. For loader and timeline, `@latest` moves to V2 `2.0.0` once the pending registry promotion is verified; pin the exact V1 versions above for a V1 host. For the other packages, it selects the current V1 release when first resolved. Bare names and `@latest` normalize to the same V1 target; switching between them is not an upgrade.
 
 Restarting OpenCode does not fetch a newer release for an already cached target. To move an actively maintained V1 plugin to another release, stop active sessions, select a different exact version, and use `opencode plugin --force <package>@<version>` to replace the configured entry. `--force` does not refresh cached files for the same `@latest` specifier. Loader and timeline have no further V1 releases planned. Do not delete cache directories or plugin-managed files as routine update maintenance.
 
 ## V2 boundary
 
-The three V2 ports use the plural `"plugins"` key: loader belongs in server `opencode.json`, while timeline belongs in TUI `cli.json`. Ram-monitor is a dual plugin (server `opencode.json` plus TUI `cli.json`). Local directory loading uses `server.js` and `tui.js`, respectively. Loader and timeline `2.0.0` releases are published under the `opencode2` tag; ram-monitor `2.0.0` is published under `latest`.
+The four V2 ports use the plural `"plugins"` key: loader and adversarial-review belong in server `opencode.json`, timeline belongs in TUI `cli.json`, and ram-monitor is a dual plugin (server `opencode.json` plus TUI `cli.json`). Local directory loading uses `server.js` and `tui.js`, respectively. All four target `2.0.0` on `latest`; ram-monitor and adversarial-review are already published there, while loader and timeline are moving to `latest` from the retired `opencode2` channel, with that registry promotion pending verification.
 
 Keep the lines apart: V1 and V2 may share a default configuration directory, and these plugin releases do not migrate it for you. Use separate profiles for side-by-side testing. V2 provides explicit plugin `check` and `update` actions; a restart alone does not upgrade a cached target, and exact pins stay fixed.

@@ -108,16 +108,8 @@ async function createFixture(
   await writeJson(path.join(root, "tools", "release-channels.json"), {
     registry: PUBLIC_REGISTRY,
     packages: {
-      [packageNames.agents]: {
-        releaseClass: "frozen-v1-v2",
-        frozenLatest: "1.0.0",
-        channel: "opencode2",
-      },
-      [packageNames.timeline]: {
-        releaseClass: "frozen-v1-v2",
-        frozenLatest: "1.0.1",
-        channel: "opencode2",
-      },
+      [packageNames.agents]: { releaseClass: "v2", channel: "latest" },
+      [packageNames.timeline]: { releaseClass: "v2", channel: "latest" },
       [packageNames.inheritance]: { releaseClass: "v1", channel: "latest" },
       [packageNames.styles]: { releaseClass: "v1", channel: "latest" },
       [packageNames.ram]: { releaseClass: "v2", channel: "latest" },
@@ -303,7 +295,7 @@ describe("release-channel-guard policy matrix", () => {
     expect(invocations).toBe(0);
   });
 
-  test("R2 two unpublished V2 releases select opencode2 in one invocation", async () => {
+  test("R2 two unpublished V2 releases select latest in one invocation", async () => {
     const cwd = await createFixture({
       [packageNames.agents]: "2.0.0",
       [packageNames.timeline]: "2.0.0",
@@ -322,12 +314,12 @@ describe("release-channel-guard policy matrix", () => {
       },
     });
 
-    expect(plan.channel).toBe("opencode2");
+    expect(plan.channel).toBe("latest");
     expect(plan.unpublished.map((pkg) => pkg.name)).toEqual([
       packageNames.agents,
       packageNames.timeline,
     ]);
-    expect(invocation).toEqual(["publish", "--tag", "opencode2", "--no-git-tag"]);
+    expect(invocation).toEqual(["publish", "--tag", "latest", "--no-git-tag"]);
   });
 
   test("R15 accepts a future stable 3.0 package version on OpenCode 2", async () => {
@@ -335,7 +327,7 @@ describe("release-channel-guard policy matrix", () => {
 
     const plan = await buildReleasePlan({ cwd, registryClient: createRegistryClient() });
 
-    expect(plan.channel).toBe("opencode2");
+    expect(plan.channel).toBe("latest");
     expect(plan.unpublished).toEqual([
       expect.objectContaining({
         name: packageNames.agents,
@@ -345,7 +337,7 @@ describe("release-channel-guard policy matrix", () => {
     ]);
   });
 
-  test("R3 a remaining unpublished V2 package keeps opencode2 after partial publication", async () => {
+  test("R3 a remaining unpublished V2 package stays on latest after partial publication", async () => {
     const cwd = await createFixture({
       [packageNames.agents]: "2.0.0",
       [packageNames.timeline]: "2.0.1",
@@ -356,8 +348,77 @@ describe("release-channel-guard policy matrix", () => {
 
     const plan = await buildReleasePlan({ cwd, registryClient: registry });
 
-    expect(plan.channel).toBe("opencode2");
+    expect(plan.channel).toBe("latest");
     expect(plan.unpublished.map((pkg) => pkg.name)).toEqual([packageNames.timeline]);
+  });
+
+  test("an already-published 2.0.0 with the old V1 latest is a no-op", async () => {
+    const cwd = await createFixture({ [packageNames.agents]: "2.0.0" });
+    const registry = createRegistryClient({
+      [packageNames.agents]: snapshot(["1.0.0", "2.0.0"], "1.0.0", { opencode2: "2.0.0" }),
+    });
+
+    const plan = await buildReleasePlan({ cwd, registryClient: registry });
+
+    expect(plan.channel).toBe("noop");
+    expect(plan.unpublished).toHaveLength(0);
+    expect(plan.packages.find((pkg) => pkg.name === packageNames.agents)).toEqual(
+      expect.objectContaining({
+        version: "2.0.0",
+        releaseClass: "v2",
+        channel: "latest",
+        published: true,
+      }),
+    );
+  });
+
+  test("the retired frozen policy fails exact-match validation", async () => {
+    const cwd = await createFixture();
+    const policyFile = path.join(cwd, "tools", "release-channels.json");
+    const policy = JSON.parse(await readFile(policyFile, "utf8")) as {
+      packages: Record<string, unknown>;
+    };
+    policy.packages[packageNames.agents] = {
+      releaseClass: "frozen-v1-v2",
+      frozenLatest: "1.0.0",
+      channel: "opencode2",
+    };
+    await writeJson(policyFile, policy);
+
+    await expectGuardRejects(
+      buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
+      "does not match the approved release class",
+    );
+  });
+
+  test("a partial plan publishes only the unpublished package", async () => {
+    const cwd = await createFixture({
+      [packageNames.agents]: "2.0.0",
+      [packageNames.timeline]: "2.0.1",
+    });
+    const registry = createRegistryClient({
+      [packageNames.agents]: snapshot(["1.0.0", "2.0.0"], "2.0.0"),
+    });
+    let invocation: readonly string[] | undefined;
+
+    const plan = await runReleaseGuard({
+      cwd,
+      mode: "publish",
+      env: publishEnvironment(),
+      registryClient: registry,
+      testOnlyNoGitTag: true,
+      runChangesets: async (args) => {
+        invocation = args;
+        return 0;
+      },
+    });
+
+    expect(plan.channel).toBe("latest");
+    expect(plan.unpublished.map((pkg) => pkg.name)).toEqual([packageNames.timeline]);
+    expect(plan.packages.find((pkg) => pkg.name === packageNames.agents)).toEqual(
+      expect.objectContaining({ version: "2.0.0", published: true }),
+    );
+    expect(invocation).toEqual(["publish", "--tag", "latest", "--no-git-tag"]);
   });
 
   test("R4 one ordinary V1 update selects latest", async () => {
@@ -546,24 +607,62 @@ describe("release-channel-guard policy matrix", () => {
     expect(invocations).toBe(0);
   });
 
-  test("R4 frozen OpenCode 2 and V2-class releases cannot share one publish", async () => {
+  test("R4 unpublished V2-class releases publish together under latest", async () => {
     const cwd = await createFixture({
       [packageNames.agents]: "2.0.0",
       [packageNames.ram]: "2.0.0",
     });
+    let invocation: readonly string[] | undefined;
 
-    await expectGuardRejects(
-      buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
-      "mixed unpublished release classes",
-    );
+    const plan = await runReleaseGuard({
+      cwd,
+      mode: "publish",
+      env: publishEnvironment(),
+      registryClient: createRegistryClient(),
+      testOnlyNoGitTag: true,
+      runChangesets: async (args) => {
+        invocation = args;
+        return 0;
+      },
+    });
+
+    expect(plan.channel).toBe("latest");
+    expect(plan.unpublished.map((pkg) => pkg.name)).toEqual([
+      packageNames.agents,
+      packageNames.ram,
+    ]);
+    expect(invocation).toEqual(["publish", "--tag", "latest", "--no-git-tag"]);
   });
 
-  test("R7 frozen V1 packages cannot continue with an unpublished V1 version", async () => {
+  test("R4 mixed unpublished V1/V2 releases reject under the promoted policy", async () => {
+    const cwd = await createFixture({
+      [packageNames.agents]: "2.0.0",
+      [packageNames.inheritance]: "1.0.1",
+    });
+    let invocations = 0;
+
+    await expectGuardRejects(
+      runReleaseGuard({
+        cwd,
+        mode: "publish",
+        env: publishEnvironment(),
+        registryClient: createRegistryClient(),
+        runChangesets: async () => {
+          invocations++;
+          return 0;
+        },
+      }),
+      "mixed unpublished release classes",
+    );
+    expect(invocations).toBe(0);
+  });
+
+  test("R7 an unpublished V1 version cannot continue under the V2 release class", async () => {
     const cwd = await createFixture({ [packageNames.agents]: "1.0.1" });
 
     await expectGuardRejects(
       buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
-      "frozen V1 baseline",
+      "stable package version >=2.0.0",
     );
   });
 
@@ -617,12 +716,12 @@ describe("release-channel-guard policy matrix", () => {
     );
   });
 
-  test("R8 explains the OpenCode 2 stable version threshold", async () => {
-    const cwd = await createFixture({ [packageNames.agents]: "1.0.1" });
+  test("R8 explains the V2 stable version threshold", async () => {
+    const cwd = await createFixture({ [packageNames.timeline]: "1.0.2" });
 
     await expectGuardRejects(
       buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
-      "stable package version >=2.0.0 for OpenCode 2",
+      "may only publish a stable package version >=2.0.0 from the V2 release class",
     );
   });
 
@@ -709,7 +808,7 @@ describe("release-channel-guard policy matrix", () => {
     );
   });
 
-  test("R9 frozen latest tag missing or moved rejects", async () => {
+  test("R9 missing or invalid latest tag rejects", async () => {
     const missing = await createFixture();
     await expectGuardRejects(
       buildReleasePlan({
@@ -718,19 +817,45 @@ describe("release-channel-guard policy matrix", () => {
           [packageNames.agents]: snapshot(["1.0.0"], undefined),
         }),
       }),
-      "latest",
+      "missing latest",
     );
 
-    const moved = await createFixture();
+    const invalid = await createFixture();
     await expectGuardRejects(
       buildReleasePlan({
-        cwd: moved,
+        cwd: invalid,
         registryClient: createRegistryClient({
-          [packageNames.timeline]: snapshot(["1.0.1", "1.0.2"], "1.0.2"),
+          [packageNames.timeline]: snapshot(["1.0.1"], "9.9.9"),
         }),
       }),
-      "frozen latest",
+      "invalid latest",
     );
+  });
+
+  test("R9 a promoted 2.0.0 latest without the retired opencode2 tag is valid", async () => {
+    const cwd = await createFixture({
+      [packageNames.agents]: "2.0.0",
+      [packageNames.timeline]: "2.0.0",
+    });
+    const registry = createRegistryClient({
+      [packageNames.agents]: snapshot(["1.0.0", "2.0.0"], "2.0.0"),
+      [packageNames.timeline]: snapshot(["1.0.1", "2.0.0"], "2.0.0"),
+    });
+
+    const plan = await buildReleasePlan({ cwd, registryClient: registry });
+
+    expect(plan.channel).toBe("noop");
+    expect(plan.unpublished).toHaveLength(0);
+    for (const name of [packageNames.agents, packageNames.timeline]) {
+      expect(plan.packages.find((pkg) => pkg.name === name)).toEqual(
+        expect.objectContaining({
+          version: "2.0.0",
+          releaseClass: "v2",
+          channel: "latest",
+          published: true,
+        }),
+      );
+    }
   });
 
   test("R9 registry auth, server, malformed, empty, and timeout failures reject before publish", async () => {
@@ -789,9 +914,9 @@ describe("release-channel-guard policy matrix", () => {
       },
     });
 
-    expect(plan.channel).toBe("opencode2");
+    expect(plan.channel).toBe("latest");
     expect(invocations).toBe(0);
-    expect(output.join("\n")).toContain("opencode2");
+    expect(output.join("\n")).toContain("latest");
   });
 
   test("publish requires CI, main, and all pinned toolchain gates", async () => {
@@ -1055,7 +1180,7 @@ describe("R12 isolated npm configuration", () => {
     try {
       built.env.npm_config_registry = "https://evil.example/";
       await expectGuardRejects(
-        runChangesets(["publish", "--tag", "opencode2"], built.env, fixture),
+        runChangesets(["publish", "--tag", "latest"], built.env, fixture),
         "npm configuration check requires one consistent registry",
       );
       expect(await Bun.file(marker).exists()).toBe(false);
@@ -1100,10 +1225,10 @@ describe("R13 cleanup failure handling", () => {
       },
     });
     try {
-      expect(plan.channel).toBe("opencode2");
+      expect(plan.channel).toBe("latest");
       expect(invocations).toBe(1);
       expect(warnings).toEqual([removalWarning]);
-      expect(printed.join("\n")).toContain("opencode2");
+      expect(printed.join("\n")).toContain("latest");
       expect(printed.join("\n")).not.toContain("could not remove");
       expect(await pathExists(environmentDirectory)).toBe(true);
     } finally {
@@ -1389,7 +1514,7 @@ function publishedPackageNames(registry: LoopbackRegistry) {
 }
 
 describe("R11 disposable real Changesets publication", () => {
-  test("publishes V2 under opencode2, preserves frozen latest, then publishes V1 under latest", async () => {
+  test("publishes V2 under latest, then publishes a V1 update under latest", async () => {
     const registry = new LoopbackRegistry();
     const registryUrl = await registry.start();
     const fixture = await createFixture({
@@ -1413,24 +1538,24 @@ describe("R11 disposable real Changesets publication", () => {
         testOnlyRegistry: registryUrl,
         testOnlyNoGitTag: true,
       });
-      expect(first.channel).toBe("opencode2");
+      expect(first.channel).toBe("latest");
       expect(
         registry.publishes
           .map(({ name, version, tag }) => ({ name, version, tag }))
           .sort((left, right) => left.name.localeCompare(right.name)),
       ).toEqual(
         [
-          { name: packageNames.agents, version: "2.0.0", tag: "opencode2" },
-          { name: packageNames.timeline, version: "2.0.0", tag: "opencode2" },
+          { name: packageNames.agents, version: "2.0.0", tag: "latest" },
+          { name: packageNames.timeline, version: "2.0.0", tag: "latest" },
         ].sort((left, right) => left.name.localeCompare(right.name)),
       );
       expect(publishedPackageNames(registry)).toEqual(
         [packageNames.agents, packageNames.timeline].sort(),
       );
-      expect(registry.packages.get(packageNames.agents)?.distTags.latest).toBe("1.0.0");
-      expect(registry.packages.get(packageNames.timeline)?.distTags.latest).toBe("1.0.1");
-      expect(registry.packages.get(packageNames.agents)?.distTags.opencode2).toBe("2.0.0");
-      expect(registry.packages.get(packageNames.timeline)?.distTags.opencode2).toBe("2.0.0");
+      expect(registry.packages.get(packageNames.agents)?.distTags.latest).toBe("2.0.0");
+      expect(registry.packages.get(packageNames.timeline)?.distTags.latest).toBe("2.0.0");
+      expect(registry.packages.get(packageNames.agents)?.distTags.opencode2).toBeUndefined();
+      expect(registry.packages.get(packageNames.timeline)?.distTags.opencode2).toBeUndefined();
 
       await updateManifest(fixture, packageNames.styles, { version: "1.0.2" });
       const second = await runReleaseGuard({
@@ -1451,8 +1576,8 @@ describe("R11 disposable real Changesets publication", () => {
       expect(publishedPackageNames(registry)).toEqual(
         [packageNames.agents, packageNames.timeline, packageNames.styles].sort(),
       );
-      expect(registry.packages.get(packageNames.agents)?.distTags.latest).toBe("1.0.0");
-      expect(registry.packages.get(packageNames.timeline)?.distTags.latest).toBe("1.0.1");
+      expect(registry.packages.get(packageNames.agents)?.distTags.latest).toBe("2.0.0");
+      expect(registry.packages.get(packageNames.timeline)?.distTags.latest).toBe("2.0.0");
       expect(registry.packages.get(packageNames.inheritance)?.distTags.latest).toBe("1.0.0");
       expect(registry.requests.some((request) => request.method === "PUT")).toBe(true);
       expect(await Bun.file(path.join(fixture, ".git", "refs")).exists()).toBe(false);

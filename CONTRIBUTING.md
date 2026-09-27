@@ -35,18 +35,18 @@ For changes intended for the next package release, add a changeset with `bun run
 
 ### Release channels
 
-- Loader and timeline V2 releases use `opencode2`. Their V1 `latest` tags remain frozen at `1.0.0` and `1.0.1`, respectively. `opencode2` identifies host compatibility, not the package major number.
-- The other four V1 packages continue to publish under `latest`.
+- The four V2 ports publish under `latest`. Loader and timeline `2.0.0` are moving there from the retired `opencode2` channel; that registry promotion is pending verification. Ram-monitor and adversarial-review `2.0.0` are already on `latest`.
+- The two V1-only packages (`opencode-agent-prompt-inheritance`, `opencode-output-styles`) continue to publish under `latest`. The loader and timeline V1 releases stay available at `1.0.0` and `1.0.1` by exact pin.
 - Keep V1 and V2 version/release batches separate. The guard checks **all unpublished public workspace versions**, not just the packages named in a changeset or Git diff. A mixed batch is rejected before publishing.
 - The initial V2 preparation contains exactly two major changesets, moving loader and timeline to `2.0.0`. It must not bump the other packages.
 
 Publishing is CI-only. The release workflow uses the `npm-publish` environment and npm trusted publishing, and runs `bun run changeset:publish` through the pinned Changesets Action. Version application and publication require maintainer authorization; do not run a real-registry publish locally.
 
-Run `bun run release:check` to inspect the complete unpublished set and selected channel. It queries public registry metadata but does not publish or create Git tags. It rejects unsupported package/version combinations, moved frozen tags, ambiguous batches, and failed or malformed registry responses.
+Run `bun run release:check` to inspect the complete unpublished set and selected channel. It queries public registry metadata but does not publish or create Git tags. It rejects unsupported package/version combinations, ambiguous batches, and failed or malformed registry responses.
 
 ### Publication failures
 
-npm publication is not atomic across packages. If a job fails, inspect registry versions, dist-tags, and CI output before retrying. A retry can publish the remaining packages in a homogeneous batch, but Git tags or GitHub releases from a partially completed job may need separate reconciliation. Do not bypass the guard or move a frozen `latest` tag to recover a failed release.
+npm publication is not atomic across packages. If a job fails, inspect registry versions, dist-tags, and CI output before retrying. A retry can publish the remaining packages in a homogeneous batch, but Git tags or GitHub releases from a partially completed job may need separate reconciliation. Do not bypass the guard or move a `latest` tag to recover a failed release.
 
 ## Commit Messages
 

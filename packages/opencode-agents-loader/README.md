@@ -11,8 +11,10 @@
 
 ## Release status
 
-Version **2.0.0** is published on the **`opencode2`** channel for OpenCode V2.
-The V1 `latest` release remains frozen at **1.0.0**. Do not install the V2 package in a V1 host.
+Version **2.0.0** is the V2 release for OpenCode V2 hosts. Its promotion to the **`latest`**
+tag is pending registry verification; until that is confirmed, install the exact `@2.0.0`
+pin. The V1 release remains frozen and available at **1.0.0**. Do not install the V2 package
+in a V1 host.
 
 See the [V1 plugin guide](../../docs/v1-plugins.md) for the frozen V1 setup and the
 [documentation index](../../docs/README.md) for repository-wide scope notes.
@@ -69,8 +71,8 @@ agent-source.ts
 
 ## Install
 
-Use `@opencode2` or the exact `@2.0.0` version for V2. `@latest` identifies the frozen V1
-line, and `@v2` is a semver range rather than a channel. The local recipe below is for
+Use the exact `@2.0.0` pin for V2; the move of `2.0.0` to `@latest` is pending registry
+verification. `@v2` is a semver range rather than a channel. The local recipe below is for
 development in an isolated V2 profile.
 
 ### Local V2 directory
@@ -103,23 +105,21 @@ the plural `plugins` key:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["@capybearista/opencode-agents-loader@opencode2"]
+  "plugins": ["@capybearista/opencode-agents-loader@2.0.0"]
 }
 ```
 
-Use `@2.0.0` instead of `@opencode2` for an exact pin. The V2 command definitions are separate
-from the V1 CLI:
+The V2 command definitions are separate from the V1 CLI:
 
 ```bash
-opencode2 plugin add @capybearista/opencode-agents-loader@opencode2
-opencode2 plugin check
+opencode plugin add @capybearista/opencode-agents-loader@2.0.0
+opencode plugin check
 ```
 
-`check` reports available updates without installing them. Use `opencode2 plugin update` with the
+`check` reports available updates without installing them. Use `opencode plugin update` with the
 configured target as its argument to update that package; omitting the target updates all configured
 mutable targets. Restarting the host does not upgrade a package, and exact pins remain fixed.
-The `opencode2` tag identifies OpenCode 2 compatibility, not the plugin's package major: later
-package majors can use the same channel.
+The `latest` tag moves to `2.0.0` once the pending registry promotion is verified.
 
 Keep this V2 profile separate from V1 configuration. Both hosts may use the default
 `~/.config/opencode/` directory. `OPENCODE_CONFIG_DIR` selects a separate configuration root;

@@ -45,23 +45,24 @@ bun --filter @capybearista/opencode-agents-loader test
 
 ## V2 Install, Channels, and Compatibility
 
-- This package is **V2-only**, version **2.0.0**, published on the **`opencode2`** channel for
-  OpenCode V2 hosts. The frozen V1 `latest` release stays at **1.0.0**; do not install the V2
-  package in a V1 host. See [../../docs/v1-plugins.md](../../docs/v1-plugins.md) for the frozen V1
-  setup and [./README.md](./README.md) for the full install recipe.
+- This package is **V2-only**, version **2.0.0**, moving to the **`latest`** tag for
+  OpenCode V2 hosts; that registry promotion is pending verification. The V1 release stays
+  frozen and available at **1.0.0**; do not install the V2 package in a V1 host. See
+  [../../docs/v1-plugins.md](../../docs/v1-plugins.md) for the frozen V1 setup and
+  [./README.md](./README.md) for the full install recipe.
 - Server plugins register in the V2 server profile (`~/.config/opencode/opencode.json`) under the
   **plural `"plugins"`** key:
 
   ```json
   {
     "$schema": "https://opencode.ai/config.json",
-    "plugins": ["@capybearista/opencode-agents-loader@opencode2"]
+    "plugins": ["@capybearista/opencode-agents-loader@2.0.0"]
   }
   ```
 
-  Use the exact `@2.0.0` pin instead of `@opencode2` for a fixed setup. `@latest` resolves the
-  frozen V1 line; `@v2` is a semver range, not a channel. V2 CLI actions are
-  `opencode2 plugin add`, `check`, and `update`; a restart alone does not upgrade a cached target.
+  Use the exact `@2.0.0` pin for a fixed setup; `latest` moves to `2.0.0` once the pending
+  registry promotion is verified. `@v2` is a semver range, not a channel. V2 CLI actions are
+  `opencode plugin add`, `check`, and `update`; a restart alone does not upgrade a cached target.
 - A filesystem directory target is resolved through the package-root `server.js` wrapper (which
   re-exports `dist/index.js`), so build before registering a local directory. Do not point the
   config at `server.js` or `dist/index.js` directly.

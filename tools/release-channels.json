@@ -2,14 +2,12 @@
   "registry": "https://registry.npmjs.org/",
   "packages": {
     "@capybearista/opencode-agents-loader": {
-      "releaseClass": "frozen-v1-v2",
-      "frozenLatest": "1.0.0",
-      "channel": "opencode2"
+      "releaseClass": "v2",
+      "channel": "latest"
     },
     "@capybearista/opencode-double-tap-timeline": {
-      "releaseClass": "frozen-v1-v2",
-      "frozenLatest": "1.0.1",
-      "channel": "opencode2"
+      "releaseClass": "v2",
+      "channel": "latest"
     },
     "@capybearista/opencode-agent-prompt-inheritance": {
       "releaseClass": "v1",

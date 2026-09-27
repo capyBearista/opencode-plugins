@@ -11,8 +11,9 @@
 
 ## Release status
 
-Version **2.0.0** is published on the **`opencode2`** channel for OpenCode V2.
-The V1 `latest` release remains frozen at **1.0.1**. The `@opencode/plugin` **2.0.0**
+Version **2.0.0** is the V2 release for OpenCode V2 hosts. Its promotion to the **`latest`**
+tag is pending registry verification; until that is confirmed, install the exact `@2.0.0`
+pin. The V1 release remains frozen and available at **1.0.1**. The `@opencode/plugin` **2.0.0**
 dependency identifies the SDK version, independently of this plugin's package version.
 
 See the [V1 plugin guide](../../docs/v1-plugins.md) for the frozen V1 setup and the
@@ -51,8 +52,8 @@ src/index.ts
 
 ## Install
 
-Use `@opencode2` or the exact `@2.0.0` version for V2. `@latest` identifies the frozen V1
-line, and `@v2` is a semver range rather than a channel. The local recipe below is for
+Use the exact `@2.0.0` pin for V2; the move of `2.0.0` to `@latest` is pending registry
+verification. `@v2` is a semver range rather than a channel. The local recipe below is for
 development in an isolated V2 profile.
 
 ### Local V2 directory
@@ -86,16 +87,15 @@ plural `plugins` key:
 ```json
 {
   "$schema": "https://opencode.ai/v2/cli.json",
-  "plugins": ["@capybearista/opencode-double-tap-timeline@opencode2"]
+  "plugins": ["@capybearista/opencode-double-tap-timeline@2.0.0"]
 }
 ```
 
-Use `@2.0.0` instead of `@opencode2` for an exact pin. The V2 command definitions are separate
-from the V1 CLI:
+The V2 command definitions are separate from the V1 CLI:
 
 ```bash
-opencode2 plugin add @capybearista/opencode-double-tap-timeline@opencode2
-opencode2 plugin check
+opencode plugin add @capybearista/opencode-double-tap-timeline@2.0.0
+opencode plugin check
 ```
 
 The V2 `plugin add` command routes this TUI-only package to `cli.json` automatically. Do not add
@@ -106,12 +106,12 @@ trial also needs separate home, data, state, and cache locations. The plugin doe
 ### Updates
 
 Restart is not an upgrade. For a mutable V2 registry target, `check` only reports whether a newer
-generation is available. Run `opencode2 plugin update` with the configured target as its argument
+generation is available. Run `opencode plugin update` with the configured target as its argument
 to update that package; omitting the target updates all configured mutable targets. A pinned exact
-version reports no update. The `opencode2` channel identifies host compatibility, not package major.
-No updater interval or automatic application of a mutable tag is promised. Do not delete the npm
-cache directory. A local-directory entry has no registry version to update: rebuild the package,
-then restart or otherwise reload the TUI. No general live-hot-reload guarantee is made.
+version reports no update. The `latest` tag moves to `2.0.0` once the pending registry promotion is
+verified. No updater interval or automatic application of a mutable tag is promised. Do not delete
+the npm cache directory. A local-directory entry has no registry version to update: rebuild the
+package, then restart or otherwise reload the TUI. No general live-hot-reload guarantee is made.
 
 The frozen V1 release uses the V1 host and `opencode plugin <module>` with an explicit `@1.0.1`
 spec. V1 cached loads remain cached; do not use the V2 `add`, `check`, or `update` commands on a

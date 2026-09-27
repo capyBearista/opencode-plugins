@@ -21,14 +21,12 @@ const MAX_NPM_OUTPUT_BYTES = 8 * 1024;
 const execFileAsync = promisify(execFile);
 const APPROVED_POLICY: Record<string, PolicyEntry> = {
   "@capybearista/opencode-agents-loader": {
-    releaseClass: "frozen-v1-v2",
-    frozenLatest: "1.0.0",
-    channel: "opencode2",
+    releaseClass: "v2",
+    channel: "latest",
   },
   "@capybearista/opencode-double-tap-timeline": {
-    releaseClass: "frozen-v1-v2",
-    frozenLatest: "1.0.1",
-    channel: "opencode2",
+    releaseClass: "v2",
+    channel: "latest",
   },
   "@capybearista/opencode-agent-prompt-inheritance": {
     releaseClass: "v1",
@@ -48,12 +46,11 @@ const APPROVED_POLICY: Record<string, PolicyEntry> = {
   },
 };
 
-type ReleaseClass = "v1" | "v2" | "frozen-v1-v2";
+type ReleaseClass = "v1" | "v2";
 type ReleaseChannel = "noop" | "latest" | "opencode2";
 
 type PolicyEntry = {
   releaseClass: ReleaseClass;
-  frozenLatest?: string;
   channel: Exclude<ReleaseChannel, "noop">;
 };
 
@@ -163,18 +160,6 @@ export async function buildReleasePlan(options: BuildPlanOptions = {}): Promise<
     );
     validateRegistrySnapshot(item.name, snapshot);
     const policyEntry = policy.packages[item.name];
-    if (policyEntry.releaseClass === "frozen-v1-v2") {
-      if (snapshot.distTags.latest !== policyEntry.frozenLatest) {
-        throw new ReleaseGuardError(
-          `${item.name} frozen latest tag must remain ${policyEntry.frozenLatest}`,
-        );
-      }
-      if (!hasVersion(snapshot, policyEntry.frozenLatest)) {
-        throw new ReleaseGuardError(
-          `${item.name} frozen latest version ${policyEntry.frozenLatest} is absent from the registry`,
-        );
-      }
-    }
 
     const published = hasVersion(snapshot, item.version);
     const major = majorVersion(item.version);
@@ -187,12 +172,7 @@ export async function buildReleasePlan(options: BuildPlanOptions = {}): Promise<
     packages.push({
       name: item.name,
       version: item.version,
-      releaseClass:
-        policyEntry.releaseClass === "frozen-v1-v2"
-          ? item.version === policyEntry.frozenLatest
-            ? "v1"
-            : "v2"
-          : policyEntry.releaseClass,
+      releaseClass: policyEntry.releaseClass,
       channel: policyEntry.channel,
       published,
     });
@@ -294,7 +274,7 @@ function validatePolicy(policy: ReleasePolicy) {
     if (
       rawEntry.releaseClass !== expected.releaseClass ||
       rawEntry.channel !== expected.channel ||
-      rawEntry.frozenLatest !== expected.frozenLatest
+      Object.hasOwn(rawEntry, "frozenLatest")
     ) {
       throw new ReleaseGuardError(
         `policy entry for ${name} does not match the approved release class`,
@@ -373,15 +353,6 @@ function validateManifest(item: WorkspacePackage, policy: PolicyEntry) {
   const major = majorVersion(item.version);
   if (policy.releaseClass === "v1" && major !== 1) {
     throw new ReleaseGuardError(`${item.name} must remain on V1 major 1`);
-  }
-  if (
-    policy.releaseClass === "frozen-v1-v2" &&
-    item.version !== policy.frozenLatest &&
-    (major === undefined || major < 2)
-  ) {
-    throw new ReleaseGuardError(
-      `${item.name} may only use its frozen V1 baseline or a stable package version >=2.0.0 for OpenCode 2`,
-    );
   }
   if (item.manifest.publishConfig !== undefined) {
     if (!isPlainObject(item.manifest.publishConfig)) {

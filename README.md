@@ -55,21 +55,23 @@ Zero-dependency RAM monitoring for OpenCode sessions. Shows live session memory 
 
 ## Compatibility and release status
 
-The OpenCode V2 releases of `opencode-agents-loader` and `opencode-double-tap-timeline`
-are available as **2.0.0** on the **`opencode2`** channel. The `opencode-ram-monitor`
-V2 release is available as **2.0.0** on **`latest`** (V1 hosts must pin `1.1.0`). Do not
-use `@v2`: npm parses that literal as a semver range, not as the intended channel.
+The four OpenCode V2 ports target **2.0.0** on **`latest`**. `opencode-agents-loader` and
+`opencode-double-tap-timeline` are moving there from the retired `opencode2` channel; that
+registry promotion is pending verification. `opencode-ram-monitor` V2 is available as
+**2.0.0** on **`latest`** (V1 hosts must pin `1.1.0`). Do not use `@v2`: npm parses that
+literal as a semver range, not as the intended channel.
 
-The V1 lines remain separate. The V1 `latest` tag is frozen at `1.0.0` for the loader and
-`1.0.1` for the timeline. The other three packages remain V1-only in this release;
-`opencode-agent-prompt-inheritance` has no V2 port.
+The V1 releases remain separate and available. The loader is frozen at `1.0.0` and the
+timeline at `1.0.1`; pin those exact versions on a V1 host.
+`opencode-agent-prompt-inheritance` and `opencode-output-styles` remain V1-only in this
+release.
 
 | Plugin | V1 host and release | V2 line in this release |
 | --- | --- | --- |
-| `opencode-adversarial-review` | V1 `1.0.0`; server `opencode.json`, singular `plugin` | V1 only |
+| `opencode-adversarial-review` | V1 `1.0.0`; server `opencode.json`, singular `plugin` | `2.0.0`; server `opencode.json`, plural `plugins`, channel `latest` |
 | `opencode-agent-prompt-inheritance` | V1 `1.0.0`; server `opencode.json`, singular `plugin` | V2 port discontinued |
-| `opencode-agents-loader` | V1 `1.0.0`, frozen; server `opencode.json`, singular `plugin` | `2.0.0`; server `opencode.json`, plural `plugins`, channel `opencode2` |
-| `opencode-double-tap-timeline` | V1 `1.0.1`, frozen; TUI `tui.json`, singular `plugin` | `2.0.0`; TUI `cli.json`, plural `plugins`, channel `opencode2` |
+| `opencode-agents-loader` | V1 `1.0.0`, frozen; server `opencode.json`, singular `plugin` | `2.0.0`; server `opencode.json`, plural `plugins`, channel `latest` (promotion pending verification) |
+| `opencode-double-tap-timeline` | V1 `1.0.1`, frozen; TUI `tui.json`, singular `plugin` | `2.0.0`; TUI `cli.json`, plural `plugins`, channel `latest` (promotion pending verification) |
 | `opencode-output-styles` | V1 `1.0.1`; server `opencode.json`, singular `plugin` | V1 only |
 | `opencode-ram-monitor` | V1 `1.1.0`; server and TUI (`opencode.json` and `tui.json`), singular `plugin` | `2.0.0`; server `opencode.json` + TUI `cli.json`, plural `plugins`, channel `latest` |
 
@@ -113,9 +115,9 @@ For V1 TUI plugins, use `tui.json` or `tui.jsonc` and the same singular key:
 
 ### V2 releases
 
-V2 uses plural `"plugins"` and separates server and TUI configuration. Use the `opencode2`
-channel or pin `2.0.0` explicitly for loader and timeline; ram-monitor `2.0.0` is on
-`latest`. For loader and timeline, `latest` remains on the frozen V1 versions.
+V2 uses plural `"plugins"` and separates server and TUI configuration. Pin loader and
+timeline to `2.0.0` explicitly until their promotion to `latest` is verified; ram-monitor
+`2.0.0` is on `latest`.
 
 V2 server profile, `~/.config/opencode/opencode.json`, contains the loader and ram-monitor:
 
@@ -123,7 +125,7 @@ V2 server profile, `~/.config/opencode/opencode.json`, contains the loader and r
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
-    "@capybearista/opencode-agents-loader@opencode2",
+    "@capybearista/opencode-agents-loader@2.0.0",
     "@capybearista/opencode-ram-monitor@latest"
   ]
 }
@@ -135,26 +137,26 @@ V2 TUI profile, `~/.config/opencode/cli.json`, contains the timeline and ram-mon
 {
   "$schema": "https://opencode.ai/v2/cli.json",
   "plugins": [
-    "@capybearista/opencode-double-tap-timeline@opencode2",
+    "@capybearista/opencode-double-tap-timeline@2.0.0",
     "@capybearista/opencode-ram-monitor@latest"
   ]
 }
 ```
 
-Replace `@opencode2` with `@2.0.0` when an exact V2 pin is preferred. In a side-by-side
-installation, use the V2 binary, `opencode2`. Its `plugin add` command routes the server-only
-loader to server configuration and the TUI-only timeline to `cli.json`:
+On an OpenCode V2 host, the `plugin add` command routes the server-only loader to server
+configuration and the TUI-only timeline to `cli.json`:
 
 ```bash
-opencode2 plugin add @capybearista/opencode-agents-loader@opencode2
-opencode2 plugin add @capybearista/opencode-double-tap-timeline@opencode2
+opencode plugin add @capybearista/opencode-agents-loader@2.0.0
+opencode plugin add @capybearista/opencode-double-tap-timeline@2.0.0
 # Check all configured plugins without updating them
-opencode2 plugin check
+opencode plugin check
 ```
 
-To install an update, run `opencode2 plugin update` with the configured target as its argument.
+To install an update, run `opencode plugin update` with the configured target as its argument.
 Omitting the target updates all configured mutable plugin targets. `check` only reports available
-updates. Restarting OpenCode is not an upgrade; exact pins remain fixed.
+updates. Restarting OpenCode is not an upgrade; exact pins remain fixed. The loader and timeline
+`latest` tags move to `2.0.0` once the pending registry promotion is verified.
 
 Do not overwrite a shared V1 configuration with these V2 examples or add a V2-only entry to a
 V1 singular `plugin` list. V1 and V2 may share the default `~/.config/opencode/` directory, so
