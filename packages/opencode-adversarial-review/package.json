@@ -1,6 +1,6 @@
 {
   "name": "@capybearista/opencode-adversarial-review",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Two code review agents for OpenCode — an adversarial reviewer (/adversarial-review) that challenges the implementation, and a constructive reviewer (/constructive-review) focused on correctness and suggestions",
   "author": "capyBearista <capybearista@gmail.com>",
   "repository": {
