@@ -109,7 +109,7 @@ the plural `plugins` key:
 }
 ```
 
-The V2 command definitions are separate from the V1 CLI:
+The V2 commands differ from the V1 `plugin <module>` form:
 
 ```bash
 opencode plugin add @capybearista/opencode-agents-loader@2.0.0
@@ -118,7 +118,8 @@ opencode plugin check
 
 `check` reports available updates without installing them. Use `opencode plugin update` with the
 configured target as its argument to update that package; omitting the target updates all configured
-mutable targets. Restarting the host does not upgrade a package, and exact pins remain fixed.
+mutable targets. Restarting the host or reloading configuration does not upgrade a package, and
+exact pins remain fixed.
 The `latest` tag moves to `2.0.0` once the pending registry promotion is verified.
 
 Keep this V2 profile separate from V1 configuration. Both hosts may use the default

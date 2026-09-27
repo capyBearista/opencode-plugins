@@ -68,7 +68,6 @@
 | Parsing               | `JSON.parse()` on final message                      | None                                                      |
 | Validation            | `validateReviewResultShape()` checks required fields | None                                                      |
 | Error rendering       | "Did not return valid structured JSON" + raw output  | N/A — user sees raw subagent response as-is               |
-| Reference schema file | `review-output.schema.json` (used at test time only) | `review-output.schema.json` (test + reference, identical) |
 
 **Key gap:** Inline-diff, TARGET_LABEL, COLLECTION_GUIDANCE, untracked files, and `--scope` all addressed. Remaining gaps: output validation, background execution, job persistence, stop-gate — none critical for the subagent-based architecture.
 

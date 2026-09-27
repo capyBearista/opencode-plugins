@@ -46,7 +46,7 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 - **MUST** use the plural `"plugins"` key and split host config: server plugins in `opencode.json`, TUI plugins in `cli.json`. V1 keeps the singular `"plugin"` key in `opencode.json` / `tui.json`.
 - **MUST NOT** write `@v2` as a specifier — npm parses it as a semver range. Use an exact `@2.0.0` pin until the pending loader and timeline promotion to `latest` is verified.
 - **MUST** keep V1 and V2 lines apart. The loader and timeline V1 releases are frozen but available by exact pin; their `latest` tags move to `2.0.0` once the registry promotion is verified. Both lines may share the default config directory, so use separate profiles (`OPENCODE_CONFIG_DIR`) for side-by-side testing.
-- **SHOULD** manage V2 targets with `opencode plugin check` / `opencode plugin update`; a restart alone does not upgrade a cached target, and exact pins stay fixed.
+- **SHOULD** manage V2 targets with `opencode plugin check` / `opencode plugin update`; a restart or reload alone does not upgrade a cached target, and exact pins stay fixed.
 - Channel source of truth: [`tools/release-channels.json`](tools/release-channels.json), enforced by [`tools/release-channel-guard.ts`](tools/release-channel-guard.ts).
 
 ### Bug Fix Workflow (MUST)

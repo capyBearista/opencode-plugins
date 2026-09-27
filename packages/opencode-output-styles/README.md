@@ -62,13 +62,7 @@ opencode plugin @capybearista/opencode-output-styles@latest       # project-loca
 
 ## Updating
 
-Simply run the following command while no active OpenCode sessions are running:
-
-```bash
-rm -rf ~/.cache/opencode/packages/'opencode-output-styles@latest'/
-```
-
-The next time you open OpenCode, the new version will be installed!
+Follow the [V1 plugin guide](../../docs/v1-plugins.md#pinning-and-updates) to update: an already configured target keeps its cached installation, and moving to another release means reinstalling with a different exact version. Do not delete cache directories as routine update maintenance.
 
 ## Usage
 

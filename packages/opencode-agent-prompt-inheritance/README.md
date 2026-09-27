@@ -76,11 +76,7 @@ opencode plugin @capybearista/opencode-agent-prompt-inheritance
 
 ## Updating
 
-Clear the cached package before restarting OpenCode:
-
-```bash
-rm -rf ~/.cache/opencode/packages/'opencode-agent-prompt-inheritance@latest'/
-```
+Follow the [V1 plugin guide](../../docs/v1-plugins.md#pinning-and-updates) to update: an already configured target keeps its cached installation, and moving to another release means reinstalling with a different exact version. Do not delete cache directories as routine update maintenance.
 
 ## Usage
 

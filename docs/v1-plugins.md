@@ -37,7 +37,7 @@ Through the V1 CLI:
 opencode plugin @capybearista/opencode-output-styles@latest
 ```
 
-For the frozen loader, use `@capybearista/opencode-agents-loader@1.0.0` in the V1 server config. For the frozen timeline, use `@capybearista/opencode-double-tap-timeline@1.0.1` in the V1 TUI config. The other three package READMEs retain their V1 usage instructions; see the root [README](../README.md) for links.
+For the frozen loader, use `@capybearista/opencode-agents-loader@1.0.0` in the V1 server config. For the frozen timeline, use `@capybearista/opencode-double-tap-timeline@1.0.1` in the V1 TUI config. The two V1-only package READMEs (`opencode-agent-prompt-inheritance`, `opencode-output-styles`) retain their V1 usage instructions; see the root [README](../README.md) for every package and its V1 pin.
 
 ## Pinning and updates
 
@@ -49,4 +49,4 @@ Restarting OpenCode does not fetch a newer release for an already cached target.
 
 The four V2 ports use the plural `"plugins"` key: loader and adversarial-review belong in server `opencode.json`, timeline belongs in TUI `cli.json`, and ram-monitor is a dual plugin (server `opencode.json` plus TUI `cli.json`). Local directory loading uses `server.js` and `tui.js`, respectively. All four target `2.0.0` on `latest`; ram-monitor and adversarial-review are already published there, while loader and timeline are moving to `latest` from the retired `opencode2` channel, with that registry promotion pending verification.
 
-Keep the lines apart: V1 and V2 may share a default configuration directory, and these plugin releases do not migrate it for you. Use separate profiles for side-by-side testing. V2 provides explicit plugin `check` and `update` actions; a restart alone does not upgrade a cached target, and exact pins stay fixed.
+Keep the lines apart: V1 and V2 may share a default configuration directory, and these plugin releases do not migrate it for you. Use separate profiles for side-by-side testing. V2 provides explicit plugin `check` and `update` actions; a restart or reload alone does not upgrade a cached target, and exact pins stay fixed.

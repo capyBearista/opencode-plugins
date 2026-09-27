@@ -35,7 +35,7 @@ For changes intended for the next package release, add a changeset with `bun run
 
 ### Release channels
 
-- The four V2 ports publish under `latest`. Loader and timeline `2.0.0` are moving there from the retired `opencode2` channel; that registry promotion is pending verification. Ram-monitor and adversarial-review `2.0.0` are already on `latest`.
+- The four V2 ports target `latest`. Loader and timeline `2.0.0` are moving there from the retired `opencode2` channel; that registry promotion is pending verification. Ram-monitor and adversarial-review `2.0.0` are already on `latest`.
 - The two V1-only packages (`opencode-agent-prompt-inheritance`, `opencode-output-styles`) continue to publish under `latest`. The loader and timeline V1 releases stay available at `1.0.0` and `1.0.1` by exact pin.
 - Keep V1 and V2 version/release batches separate. The guard checks **all unpublished public workspace versions**, not just the packages named in a changeset or Git diff. A mixed batch is rejected before publishing.
 - The initial V2 preparation contains exactly two major changesets, moving loader and timeline to `2.0.0`. It must not bump the other packages.

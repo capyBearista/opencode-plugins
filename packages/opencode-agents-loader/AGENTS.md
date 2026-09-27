@@ -62,7 +62,7 @@ bun --filter @capybearista/opencode-agents-loader test
 
   Use the exact `@2.0.0` pin for a fixed setup; `latest` moves to `2.0.0` once the pending
   registry promotion is verified. `@v2` is a semver range, not a channel. V2 CLI actions are
-  `opencode plugin add`, `check`, and `update`; a restart alone does not upgrade a cached target.
+  `opencode plugin add`, `check`, and `update`; a restart or reload alone does not upgrade a cached target.
 - A filesystem directory target is resolved through the package-root `server.js` wrapper (which
   re-exports `dist/index.js`), so build before registering a local directory. Do not point the
   config at `server.js` or `dist/index.js` directly.

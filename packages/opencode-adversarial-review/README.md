@@ -79,7 +79,7 @@ Targets the V2 Promise plugin API (`@opencode/plugin` **2.0.2**); not compatible
 }
 ```
 
-Server entry only, so `cli.json` needs no entry. Or via CLI: `opencode2 plugin add @capybearista/opencode-adversarial-review`. V1 hosts use the singular `"plugin"` key and the V1 line — see the [V1 plugin guide](../../docs/v1-plugins.md).
+Server entry only, so `cli.json` needs no entry. Or via CLI: `opencode plugin add @capybearista/opencode-adversarial-review`. V1 hosts use the singular `"plugin"` key and the V1 line — see the [V1 plugin guide](../../docs/v1-plugins.md).
 
 On setup, both command files install at `<OPENCODE_CONFIG_DIR ?? ~/.config/opencode>/commands/{adversarial-review.md,constructive-review.md}`. The directory must already exist; if a file cannot install, setup fails loudly and **neither** agent is registered.
 
@@ -90,11 +90,11 @@ On setup, both command files install at `<OPENCODE_CONFIG_DIR ?? ~/.config/openc
 
 ### Updating
 
-`opencode2 plugin check` / `opencode2 plugin update` move the configured target (restart alone upgrades nothing; stop active sessions first). Command-file refresh follows the stamp rules in the note above.
+`opencode plugin check` / `opencode plugin update` move the configured package target (a restart or configuration reload alone does not fetch a newer package; stop active sessions first). Command-file refresh follows the stamp rules in the note above.
 
 ### Uninstall
 
-Remove the plugin from `"plugins"` (or `opencode2 plugin remove @capybearista/opencode-adversarial-review`), then delete both installed command files — plugin removal does not delete them, and the host would otherwise keep discovering commands with no agents behind them.
+Remove the plugin from `"plugins"` (or `opencode plugin remove @capybearista/opencode-adversarial-review`), then delete both installed command files — plugin removal does not delete them, and the host would otherwise keep discovering commands with no agents behind them.
 
 ## Usage
 

@@ -64,13 +64,10 @@ Both files use the plural `"plugins"` key. For a local directory install, point 
 
 ## Updating
 
-Simply run the following command while no active OpenCode sessions are running:
-
-```bash
-rm -rf ~/.cache/opencode/packages/'opencode-ram-monitor@latest'/
-```
-
-The next time you open OpenCode, the new version will be installed!
+Run `opencode plugin check` to see whether a newer package is available, then
+`opencode plugin update` (with the configured target, or omit it to update all configured
+mutable targets) to install it. A restart or configuration reload alone does not upgrade a
+cached package. Do not delete the npm cache directory.
 
 ## Usage
 
@@ -116,12 +113,12 @@ File-key example:
 }
 ```
 
-Note: the host only delivers `options` for entries declared in the global `cli.json` (TUI) / `opencode.json` (server) plugin lists — restart OpenCode after changing them.
+Note: the host only delivers `options` for entries declared in the global `cli.json` (TUI) / `opencode.json` (server) plugin lists. The TUI re-reads the global `cli.json` when the file changes; the server profile applies changes on a configuration reload (`/reload` or `opencode reload`) or a restart.
 
 ## Troubleshooting
 
 - **Widget missing from sidebar**: Ensure the TUI plugin is registered in your `cli.json` `plugins` list (project `cli.json` files are not read by the host — use the global one).
-- **Refresh interval did not change**: Prefer plugin `options` (tuple/object entry form) and restart OpenCode — options only apply to declared entries and are read once at startup. File keys remain as fallback.
+- **Refresh interval did not change**: Prefer plugin `options` (tuple/object entry form) — options only apply to declared entries and are read when the plugin is set up. The TUI re-reads `cli.json` on save; the server profile needs a configuration reload or restart. File keys remain as fallback.
 - **Config warning shown in the sidebar**: A supported config file could not be parsed, so the widget is using the last valid value it found or the default `5000ms` interval.
 - **Active count seems off**: The plugin tokenizes command lines and parent links to find logical sessions. Deeply nested wrappers or unusual invocation aliases might still be missed.
 - **Sidebar numbers look higher than expected**: The sidebar shows both direct RSS and with-tools RSS. The with-tools column includes child processes spawned by the session.

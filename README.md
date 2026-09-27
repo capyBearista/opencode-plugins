@@ -55,16 +55,16 @@ Zero-dependency RAM monitoring for OpenCode sessions. Shows live session memory 
 
 ## Compatibility and release status
 
-The four OpenCode V2 ports target **2.0.0** on **`latest`**. `opencode-agents-loader` and
-`opencode-double-tap-timeline` are moving there from the retired `opencode2` channel; that
-registry promotion is pending verification. `opencode-ram-monitor` V2 is available as
-**2.0.0** on **`latest`** (V1 hosts must pin `1.1.0`). Do not use `@v2`: npm parses that
-literal as a semver range, not as the intended channel.
+The four OpenCode V2 ports target **2.0.0** on **`latest`**. `opencode-adversarial-review` and
+`opencode-ram-monitor` are already published there (V1 hosts must pin ram-monitor `1.1.0`);
+`opencode-agents-loader` and `opencode-double-tap-timeline` are moving there from the retired
+`opencode2` channel, and that registry promotion is pending verification. Do not use `@v2`: npm
+parses that literal as a semver range, not as the intended channel.
 
 The V1 releases remain separate and available. The loader is frozen at `1.0.0` and the
 timeline at `1.0.1`; pin those exact versions on a V1 host.
-`opencode-agent-prompt-inheritance` and `opencode-output-styles` remain V1-only in this
-release.
+`opencode-agent-prompt-inheritance` stays V1-only with a V2 port TBD, and
+`opencode-output-styles` stays V1-only, deprecated for V2 with no V2 maintenance planned.
 
 | Plugin | V1 host and release | V2 line in this release |
 | --- | --- | --- |
@@ -116,8 +116,8 @@ For V1 TUI plugins, use `tui.json` or `tui.jsonc` and the same singular key:
 ### V2 releases
 
 V2 uses plural `"plugins"` and separates server and TUI configuration. Pin loader and
-timeline to `2.0.0` explicitly until their promotion to `latest` is verified; ram-monitor
-`2.0.0` is on `latest`.
+timeline to `2.0.0` explicitly until their promotion to `latest` is verified; adversarial-review
+and ram-monitor `2.0.0` are already on `latest`.
 
 V2 server profile, `~/.config/opencode/opencode.json`, contains the loader and ram-monitor:
 
@@ -155,8 +155,9 @@ opencode plugin check
 
 To install an update, run `opencode plugin update` with the configured target as its argument.
 Omitting the target updates all configured mutable plugin targets. `check` only reports available
-updates. Restarting OpenCode is not an upgrade; exact pins remain fixed. The loader and timeline
-`latest` tags move to `2.0.0` once the pending registry promotion is verified.
+updates. Restarting OpenCode or reloading configuration is not an upgrade; exact pins remain fixed.
+The loader and timeline `latest` tags move to `2.0.0` once the pending registry promotion is
+verified.
 
 Do not overwrite a shared V1 configuration with these V2 examples or add a V2-only entry to a
 V1 singular `plugin` list. V1 and V2 may share the default `~/.config/opencode/` directory, so

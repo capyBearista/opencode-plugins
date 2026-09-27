@@ -91,7 +91,7 @@ plural `plugins` key:
 }
 ```
 
-The V2 command definitions are separate from the V1 CLI:
+The V2 commands differ from the V1 `plugin <module>` form:
 
 ```bash
 opencode plugin add @capybearista/opencode-double-tap-timeline@2.0.0
@@ -105,7 +105,7 @@ trial also needs separate home, data, state, and cache locations. The plugin doe
 
 ### Updates
 
-Restart is not an upgrade. For a mutable V2 registry target, `check` only reports whether a newer
+A restart or configuration reload is not an upgrade. For a mutable V2 registry target, `check` only reports whether a newer
 generation is available. Run `opencode plugin update` with the configured target as its argument
 to update that package; omitting the target updates all configured mutable targets. A pinned exact
 version reports no update. The `latest` tag moves to `2.0.0` once the pending registry promotion is
