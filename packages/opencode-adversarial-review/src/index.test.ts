@@ -30,6 +30,8 @@ type TestAgent = {
   description?: string;
   system?: string;
   color?: string;
+  model?: string;
+  temperature?: number;
   permissions?: TestPermission[];
 };
 
@@ -44,23 +46,25 @@ const PACKAGE_NAME = "@capybearista/opencode-adversarial-review";
 const REVIEWER_AGENT_ID = "adversarial-reviewer";
 const COMMAND_FILE_NAME = "adversarial-review.md";
 const COMMAND_ASSET_PATH = join(import.meta.dirname, "..", "commands", COMMAND_FILE_NAME);
-const REVIEW_AGENT_ID = "reviewer";
-const REVIEW_COMMAND_FILE_NAME = "review.md";
-const REVIEW_COMMAND_ASSET_PATH = join(
+const CONSTRUCTIVE_REVIEW_AGENT_ID = "constructive-reviewer";
+const CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME = "constructive-review.md";
+const CONSTRUCTIVE_REVIEW_COMMAND_ASSET_PATH = join(
   import.meta.dirname,
   "..",
   "commands",
-  REVIEW_COMMAND_FILE_NAME,
+  CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME,
 );
 const PACKAGE_ROOT = resolve(import.meta.dirname, "..");
 const JSON_VERBATIM_RULE =
   "Return only valid JSON, verbatim. Do not wrap the JSON in markdown fences or add commentary outside the JSON object.";
 const MARKDOWN_VERBATIM_RULE =
   "Return only the Markdown report, verbatim. Do not wrap the report in markdown fences or add commentary outside the report.";
-const DO_NOT_INVOKE_DESCRIPTION =
-  "Do not invoke this agent directly. It is invocable only by the user.";
+const ADVERSARIAL_REVIEWER_DESCRIPTION =
+  "Do not invoke this agent directly. It is the adversarial code-review agent, invocable only by the user.";
+const CONSTRUCTIVE_REVIEWER_DESCRIPTION =
+  "Do not invoke this agent directly. It is the constructive code-review agent, invocable only by the user.";
 const MANAGED_VERSION_FIELD = "managed_version";
-const CURRENT_MANAGED_VERSION = "1";
+const CURRENT_MANAGED_VERSION = "2";
 
 // The managed_version stamp and the ownership metadata wording are the only
 // frontmatter additions the packaged templates may carry; every other key must
@@ -147,11 +151,11 @@ const REVIEW_ONLY_TRIPWIRE_STEM = "Review only: do not modify the repository";
 
 // Guardrail vs doctrine: the review-only sentence is a read-only safety
 // constraint on the reviewer, not review doctrine, so it is the one exception
-// to the doctrine-free template rule. review.md carries the full sentence and
+// to the doctrine-free template rule. constructive-review.md carries the full sentence and
 // passes via this allowlist; the banned stem still fails for
 // adversarial-review.md and every other asset.
 const DOCTRINE_TRIPWIRE_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
-  [REVIEW_COMMAND_FILE_NAME]: [REVIEW_ONLY_GUARDRAIL],
+  [CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME]: [REVIEW_ONLY_GUARDRAIL],
 };
 const TEMPLATE_TRIPWIRE_PHRASES = [
   ...MOVED_DOCTRINE_PHRASES,
@@ -208,6 +212,8 @@ function frontmatterOf(markdown: string): Record<string, string> {
 type TestContextInput = {
   agents?: TestAgent[];
   hostLog?: TestHostLog;
+  failFirstAgentDispose?: boolean;
+  failSecondAgentTransform?: boolean;
 };
 
 function createTestContext(input: TestContextInput = {}) {
@@ -219,6 +225,7 @@ function createTestContext(input: TestContextInput = {}) {
   );
   const hooks = new Map<string, (event: HookEvent) => void>();
   const disposers: string[] = [];
+  let agentTransforms = 0;
   const commandTransforms: number[] = [];
   const logs: TestLogEntry[] = [];
   const hostLog =
@@ -251,9 +258,17 @@ function createTestContext(input: TestContextInput = {}) {
     },
     agent: {
       transform: async (callback: (value: typeof editor) => void) => {
+        agentTransforms += 1;
+        const transformIndex = agentTransforms;
+        if (input.failSecondAgentTransform && transformIndex === 2) {
+          throw new Error("second agent transform failed");
+        }
         callback(editor);
         return {
           dispose: async () => {
+            if (input.failFirstAgentDispose && transformIndex === 1) {
+              throw new Error("first agent dispose failed");
+            }
             disposers.push("agent");
           },
         };
@@ -349,6 +364,30 @@ function fsErrorMock(
   `;
 }
 
+// Fails only the refresh overwrite (numeric flags) while letting the atomic
+// `wx` first write reach the real filesystem, so a pre-staged managed file is
+// preserved when its refresh overwrite fails.
+function refreshWriteErrorMock(error: { code: string; message: string } | undefined): string {
+  if (error === undefined) return "";
+  return `
+    const { mock } = await import("bun:test");
+    const fs = await import("node:fs/promises");
+    const realWriteFile = fs.writeFile.bind(fs);
+    mock.module("node:fs/promises", () => ({
+      ...fs,
+      writeFile: async (path, ...args) => {
+        const options = args[1];
+        if (options !== undefined && typeof options === "object" && options.flag === "wx") {
+          return realWriteFile(path, ...args);
+        }
+        const error = new Error(${JSON.stringify(error.message)});
+        error.code = ${JSON.stringify(error.code)};
+        throw error;
+      },
+    }));
+  `;
+}
+
 // Models the lstat-to-read race: `lstat` reports the leaf as a regular file
 // even while a symlink is present, so only the O_NOFOLLOW read can catch the
 // swap.
@@ -397,6 +436,33 @@ function deleteOnReadMock(fileName: string | undefined): string {
   `;
 }
 
+// Models a read failure followed by a close failure: the close error must not
+// mask the read error the install path has to report.
+function failReadAndCloseMock(fileName: string | undefined): string {
+  if (fileName === undefined) return "";
+  return `
+    const { mock } = await import("bun:test");
+    const fs = await import("node:fs/promises");
+    const realOpen = fs.open.bind(fs);
+    mock.module("node:fs/promises", () => ({
+      ...fs,
+      open: async (path, ...args) => {
+        if (!String(path).endsWith(${JSON.stringify(`/${fileName}`)})) return realOpen(path, ...args);
+        return {
+          readFile: async () => {
+            const error = new Error("EACCES: permission denied, read");
+            error.code = "EACCES";
+            throw error;
+          },
+          close: async () => {
+            throw new Error("close failed after read error");
+          },
+        };
+      },
+    }));
+  `;
+}
+
 // Removes O_NOFOLLOW from the fs constants, modeling a platform (for example
 // Windows) where the symlink-race guard is unavailable.
 function missingNoFollowMock(enabled: boolean | undefined): string {
@@ -416,8 +482,10 @@ type SetupSubprocessConfiguration = {
   opencodeConfigDir?: string;
   readFileError?: { code: string; message: string; onlyFor?: string };
   writeFileError?: { code: string; message: string; onlyFor?: string };
+  refreshWriteError?: { code: string; message: string };
   maskLstatFor?: string;
   deleteOnRead?: string;
+  failReadAndClose?: string;
   noFollowUnavailable?: boolean;
 };
 
@@ -426,15 +494,19 @@ async function runSetupInSubprocess(
 ): Promise<SubprocessSetup> {
   const pluginURL = pathToFileURL(join(PACKAGE_ROOT, "src", "index.ts")).href;
   const writeFileMock = fsErrorMock("writeFile", configuration.writeFileError);
+  const refreshWriteMock = refreshWriteErrorMock(configuration.refreshWriteError);
   const readFileMock = fsErrorMock("readFile", configuration.readFileError);
   const lstatMock = lstatReportsRegularFileMock(configuration.maskLstatFor);
   const openMock = deleteOnReadMock(configuration.deleteOnRead);
+  const readAndCloseMock = failReadAndCloseMock(configuration.failReadAndClose);
   const noFollowMock = missingNoFollowMock(configuration.noFollowUnavailable);
   const script = `
     ${writeFileMock}
+    ${refreshWriteMock}
     ${readFileMock}
     ${lstatMock}
     ${openMock}
+    ${readAndCloseMock}
     ${noFollowMock}
     const { default: plugin } = await import(${JSON.stringify(pluginURL)});
     const agents = [];
@@ -626,19 +698,34 @@ describe("@capybearista/opencode-adversarial-review", () => {
     const context = createTestContext();
     await setupPlugin(context);
 
-    for (const agentId of [REVIEWER_AGENT_ID, REVIEW_AGENT_ID]) {
+    const expected = [
+      [REVIEWER_AGENT_ID, ADVERSARIAL_REVIEWER_DESCRIPTION],
+      [CONSTRUCTIVE_REVIEW_AGENT_ID, CONSTRUCTIVE_REVIEWER_DESCRIPTION],
+    ] as const;
+    for (const [agentId, description] of expected) {
       const agent = context.agents.get(agentId);
       expect(agent?.mode).toBe("subagent");
       expect(agent?.hidden).toBe(true);
-      expect(agent?.description).toBe(DO_NOT_INVOKE_DESCRIPTION);
+      expect(agent?.description).toBe(description);
     }
   });
 
-  test("reviewer description is the static do-not-invoke text", async () => {
+  test("adversarial reviewer description names its do-not-invoke role", async () => {
     const context = createTestContext();
     await setupPlugin(context);
 
-    expect(context.agents.get(REVIEWER_AGENT_ID)?.description).toBe(DO_NOT_INVOKE_DESCRIPTION);
+    expect(context.agents.get(REVIEWER_AGENT_ID)?.description).toBe(
+      ADVERSARIAL_REVIEWER_DESCRIPTION,
+    );
+  });
+
+  test("constructive reviewer description names its do-not-invoke role", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    expect(context.agents.get(CONSTRUCTIVE_REVIEW_AGENT_ID)?.description).toBe(
+      CONSTRUCTIVE_REVIEWER_DESCRIPTION,
+    );
   });
 
   test("existing reviewer configuration keeps system and color but not its description", async () => {
@@ -657,7 +744,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     const agent = context.agents.get(REVIEWER_AGENT_ID);
     expect(agent?.description).not.toBe("custom description");
-    expect(agent?.description).toBe(DO_NOT_INVOKE_DESCRIPTION);
+    expect(agent?.description).toBe(ADVERSARIAL_REVIEWER_DESCRIPTION);
     expect(agent?.system).toBe("custom system");
     expect(agent?.color).toBe("#123456");
     expect(agent?.mode).toBe("subagent");
@@ -668,7 +755,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     const context = createTestContext({
       agents: [
         {
-          id: REVIEW_AGENT_ID,
+          id: CONSTRUCTIVE_REVIEW_AGENT_ID,
           mode: "primary",
           description: "custom description",
           system: "custom system",
@@ -678,9 +765,9 @@ describe("@capybearista/opencode-adversarial-review", () => {
     });
     await setupPlugin(context);
 
-    const agent = context.agents.get(REVIEW_AGENT_ID);
+    const agent = context.agents.get(CONSTRUCTIVE_REVIEW_AGENT_ID);
     expect(agent?.description).not.toBe("custom description");
-    expect(agent?.description).toBe(DO_NOT_INVOKE_DESCRIPTION);
+    expect(agent?.description).toBe(CONSTRUCTIVE_REVIEWER_DESCRIPTION);
     expect(agent?.system).toBe("custom system");
     expect(agent?.color).toBe("#654321");
     expect(agent?.mode).toBe("subagent");
@@ -765,8 +852,10 @@ describe("@capybearista/opencode-adversarial-review", () => {
     const context = createTestContext();
     await setupPlugin(context);
 
-    const reference = await Bun.file(join(import.meta.dirname, "prompts", "review.md")).text();
-    const system = context.agents.get(REVIEW_AGENT_ID)?.system ?? "";
+    const reference = await Bun.file(
+      join(import.meta.dirname, "prompts", "constructive-review.md"),
+    ).text();
+    const system = context.agents.get(CONSTRUCTIVE_REVIEW_AGENT_ID)?.system ?? "";
 
     expect(system).toBe(`${reference.trimEnd()}\n\n${MARKDOWN_VERBATIM_RULE}`);
     expect(system).toInclude("Review only: do not modify the repository");
@@ -858,8 +947,11 @@ describe("@capybearista/opencode-adversarial-review", () => {
         },
       },
       {
-        template: await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8"),
-        prompt: await readFile(join(import.meta.dirname, "prompts", "review.md"), "utf8"),
+        template: await readFile(CONSTRUCTIVE_REVIEW_COMMAND_ASSET_PATH, "utf8"),
+        prompt: await readFile(
+          join(import.meta.dirname, "prompts", "constructive-review.md"),
+          "utf8",
+        ),
         anchors: {
           "Target selection": "Target selection:",
           "scope flags": "select the review scope with the flags below",
@@ -884,7 +976,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     await setupPlugin(context);
 
     expect(context.agents.get(REVIEWER_AGENT_ID)?.color).toMatch(/^#[0-9a-fA-F]{6}$/);
-    expect(context.agents.get(REVIEW_AGENT_ID)?.color).toMatch(/^#[0-9a-fA-F]{6}$/);
+    expect(context.agents.get(CONSTRUCTIVE_REVIEW_AGENT_ID)?.color).toMatch(/^#[0-9a-fA-F]{6}$/);
   });
 
   test("setup leaves every other agent's permissions untouched", async () => {
@@ -1024,7 +1116,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     await setupPlugin(context);
 
     const adversarial = context.agents.get(REVIEWER_AGENT_ID);
-    const review = context.agents.get(REVIEW_AGENT_ID);
+    const review = context.agents.get(CONSTRUCTIVE_REVIEW_AGENT_ID);
     expect(review?.permissions).toEqual(adversarial?.permissions);
 
     const permissions = review?.permissions ?? [];
@@ -1033,7 +1125,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(effectiveEffect(permissions, "shell", "git diff HEAD")).toBe("allow");
     expect(effectiveEffect(permissions, "shell", "git branch --show-current")).toBe("allow");
     expect(effectiveEffect(permissions, "shell", "git branch -D topic")).toBe("deny");
-    expect(effectiveEffect(permissions, "shell", "git diff HEAD --output=/tmp/review.diff")).toBe(
+    expect(effectiveEffect(permissions, "shell", "git diff HEAD --output=/tmp/out.diff")).toBe(
       "deny",
     );
     expect(effectiveEffect(permissions, "edit", "src/index.ts")).toBe("deny");
@@ -1096,13 +1188,13 @@ describe("@capybearista/opencode-adversarial-review", () => {
     const dangerous = [
       "git diff --ext-diff",
       "git diff HEAD --textconv",
-      "git diff HEAD --output=/tmp/review.diff",
+      "git diff HEAD --output=/tmp/out.diff",
       "git show HEAD --ext-diff",
       "git show --textconv HEAD",
-      "git show HEAD --output /tmp/review.diff",
+      "git show HEAD --output /tmp/out.diff",
       "git log -p --ext-diff -1",
       "git log --textconv -1",
-      "git log -1 --output=/tmp/review.log",
+      "git log -1 --output=/tmp/out.log",
       "git stash show -p --ext-diff",
       "git stash show --textconv",
       "git stash show --output=/tmp/stash.diff",
@@ -1280,7 +1372,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     await expect(setupPlugin(context)).rejects.toThrow(/agent\.transform is unavailable/);
     await expect(stat(join(context.configDir, "commands", COMMAND_FILE_NAME))).rejects.toThrow();
     await expect(
-      stat(join(context.configDir, "commands", REVIEW_COMMAND_FILE_NAME)),
+      stat(join(context.configDir, "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME)),
     ).rejects.toThrow();
   });
 
@@ -1293,6 +1385,18 @@ describe("@capybearista/opencode-adversarial-review", () => {
     await cleanup?.();
   });
 
+  test("registered reviewer configs pin neither a model nor a temperature", async () => {
+    const context = createTestContext();
+    await setupPlugin(context);
+
+    for (const agentId of [REVIEWER_AGENT_ID, CONSTRUCTIVE_REVIEW_AGENT_ID]) {
+      const agent = context.agents.get(agentId);
+      expect(agent).toBeDefined();
+      expect(Object.hasOwn(agent ?? {}, "model")).toBe(false);
+      expect(Object.hasOwn(agent ?? {}, "temperature")).toBe(false);
+    }
+  });
+
   test("setup succeeds without a session domain", async () => {
     const context = createTestContext();
     (context.ctx as { session?: unknown }).session = undefined;
@@ -1300,7 +1404,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     const cleanup = await setupPlugin(context);
 
     expect(context.agents.has(REVIEWER_AGENT_ID)).toBe(true);
-    expect(context.agents.has(REVIEW_AGENT_ID)).toBe(true);
+    expect(context.agents.has(CONSTRUCTIVE_REVIEW_AGENT_ID)).toBe(true);
     expect(context.hooks.size).toBe(0);
     await cleanup?.();
   });
@@ -1354,9 +1458,32 @@ describe("@capybearista/opencode-adversarial-review", () => {
     await cleanup?.();
 
     expect(context.agents.has(REVIEWER_AGENT_ID)).toBe(true);
-    expect(context.agents.has(REVIEW_AGENT_ID)).toBe(true);
+    expect(context.agents.has(CONSTRUCTIVE_REVIEW_AGENT_ID)).toBe(true);
     expect(context.hooks.size).toBe(0);
     expect(context.disposers.sort()).toEqual(["agent", "agent"]);
+  });
+
+  test("cleanup disposes the second registration when the first dispose throws", async () => {
+    const context = createTestContext({ failFirstAgentDispose: true });
+    const cleanup = await setupPlugin(context);
+
+    await cleanup?.();
+
+    expect(context.disposers).toEqual(["agent"]);
+    expect(context.logs).toContainEqual({
+      service: PLUGIN_ID,
+      level: "warn",
+      message: expect.stringContaining("first agent dispose failed"),
+    });
+  });
+
+  test("a failing second agent transform disposes the first registration and aborts setup", async () => {
+    const context = createTestContext({ failSecondAgentTransform: true });
+
+    await expect(setupPlugin(context)).rejects.toThrow("second agent transform failed");
+
+    expect(context.disposers).toEqual(["agent"]);
+    expect(context.agents.has(CONSTRUCTIVE_REVIEW_AGENT_ID)).toBe(false);
   });
 
   test("setup installs both command files under HOME and writes no agent file", async () => {
@@ -1367,7 +1494,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     expect(result.ok).toBe(true);
     expect(result.agents.map((agent) => agent.id).sort()).toEqual(
-      [REVIEWER_AGENT_ID, REVIEW_AGENT_ID].sort(),
+      [REVIEWER_AGENT_ID, CONSTRUCTIVE_REVIEW_AGENT_ID].sort(),
     );
     expect(result.hooks).toEqual([]);
     expect(result.commandTransforms).toBe(0);
@@ -1388,10 +1515,10 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(adversarialFrontmatter.metadata).toInclude(MANAGED_VERSION_FIELD);
     expect("model" in adversarialFrontmatter).toBe(false);
 
-    const reviewAsset = await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8");
+    const reviewAsset = await readFile(CONSTRUCTIVE_REVIEW_COMMAND_ASSET_PATH, "utf8");
     expect(
       await readFile(
-        join(home, ".config", "opencode", "commands", REVIEW_COMMAND_FILE_NAME),
+        join(home, ".config", "opencode", "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME),
         "utf8",
       ),
     ).toBe(reviewAsset);
@@ -1401,7 +1528,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(reviewFrontmatter.description).toInclude(
       "Args: [<sha|pr-url|pr-number>] [--base <ref>] [--scope auto|working-tree|branch]",
     );
-    expect(reviewFrontmatter.agent).toBe(REVIEW_AGENT_ID);
+    expect(reviewFrontmatter.agent).toBe(CONSTRUCTIVE_REVIEW_AGENT_ID);
     expect(reviewFrontmatter.subagent).toBe("true");
     expect(reviewFrontmatter[MANAGED_VERSION_FIELD]).toBe(CURRENT_MANAGED_VERSION);
     expect(reviewFrontmatter.metadata).toInclude(MANAGED_VERSION_FIELD);
@@ -1410,7 +1537,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     for (const [fileName, asset, pointerMarker] of [
       [COMMAND_FILE_NAME, adversarialAsset, "focus weighting"],
-      [REVIEW_COMMAND_FILE_NAME, reviewAsset, "scope flags"],
+      [CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME, reviewAsset, "scope flags"],
     ] as const) {
       expect(asset).toInclude("$ARGUMENTS");
       expect(asset.match(/!`[^`]+`/g) ?? []).toHaveLength(5);
@@ -1450,7 +1577,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     const bunCachePrefix = join(".bun", "");
     expect((await walkFiles(home)).filter((file) => !file.startsWith(bunCachePrefix))).toEqual([
       join(".config", "opencode", "commands", COMMAND_FILE_NAME),
-      join(".config", "opencode", "commands", REVIEW_COMMAND_FILE_NAME),
+      join(".config", "opencode", "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME),
     ]);
   });
 
@@ -1464,12 +1591,15 @@ describe("@capybearista/opencode-adversarial-review", () => {
       await readFile(COMMAND_ASSET_PATH, "utf8"),
     );
     expect(
-      await readFile(join(context.configDir, "commands", REVIEW_COMMAND_FILE_NAME), "utf8"),
-    ).toBe(await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8"));
+      await readFile(
+        join(context.configDir, "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME),
+        "utf8",
+      ),
+    ).toBe(await readFile(CONSTRUCTIVE_REVIEW_COMMAND_ASSET_PATH, "utf8"));
   });
 
   test("packaged command templates carry the managed_version stamp and ownership metadata", async () => {
-    for (const assetPath of [COMMAND_ASSET_PATH, REVIEW_COMMAND_ASSET_PATH]) {
+    for (const assetPath of [COMMAND_ASSET_PATH, CONSTRUCTIVE_REVIEW_COMMAND_ASSET_PATH]) {
       const asset = await readFile(assetPath, "utf8");
       const frontmatter = frontmatterOf(asset);
       expect(frontmatter[MANAGED_VERSION_FIELD]).toBe(CURRENT_MANAGED_VERSION);
@@ -1531,7 +1661,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     expect(result.ok).toBe(true);
     expect(result.agents.map((agent) => agent.id).sort()).toEqual(
-      [REVIEWER_AGENT_ID, REVIEW_AGENT_ID].sort(),
+      [REVIEWER_AGENT_ID, CONSTRUCTIVE_REVIEW_AGENT_ID].sort(),
     );
     expect(await readFile(installed, "utf8")).toBe(await readFile(COMMAND_ASSET_PATH, "utf8"));
     const updates = result.logs.filter(
@@ -1540,9 +1670,34 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(updates).toHaveLength(1);
     expect(updates[0]?.message).toInclude(`${MANAGED_VERSION_FIELD} 1`);
     expect(result.logs.some((entry) => entry.level === "warn")).toBe(false);
-    expect(await readFile(join(commands, REVIEW_COMMAND_FILE_NAME), "utf8")).toBe(
-      await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8"),
+    expect(await readFile(join(commands, CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME), "utf8")).toBe(
+      await readFile(CONSTRUCTIVE_REVIEW_COMMAND_ASSET_PATH, "utf8"),
     );
+  });
+
+  test("a failed refresh overwrite preserves the managed file and registers neither agent", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const installed = join(commands, COMMAND_FILE_NAME);
+    const stale = `---\ndescription: stale managed copy\nagent: ${REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: 1\n---\n\nstale body\n`;
+    await writeFile(installed, stale);
+
+    const result = await runSetupInSubprocess({
+      home,
+      refreshWriteError: {
+        code: "EACCES",
+        message: `EACCES: permission denied, open '${installed}'`,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toInclude("Unable to install the /adversarial-review command");
+    expect(result.error).toInclude(installed);
+    expect(result.error).toInclude("Neither reviewer agent was registered");
+    expect(result.agents).toHaveLength(0);
+    expect(await readFile(installed, "utf8")).toBe(stale);
+    await expect(stat(join(commands, CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME))).rejects.toThrow();
   });
 
   test("removing the managed_version stamp takes ownership and preserves the file", async () => {
@@ -1551,7 +1706,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     await mkdir(commands, { recursive: true });
     const installed = join(commands, COMMAND_FILE_NAME);
     const asset = await readFile(COMMAND_ASSET_PATH, "utf8");
-    const owned = asset.replace(`\n${MANAGED_VERSION_FIELD}: 1\n`, "\n");
+    const owned = asset.replace(`\n${MANAGED_VERSION_FIELD}: ${CURRENT_MANAGED_VERSION}\n`, "\n");
     await writeFile(installed, owned);
 
     const result = await runSetupInSubprocess({ home });
@@ -1616,7 +1771,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     expect(result.ok).toBe(true);
     expect(result.agents.map((agent) => agent.id).sort()).toEqual(
-      [REVIEWER_AGENT_ID, REVIEW_AGENT_ID].sort(),
+      [REVIEWER_AGENT_ID, CONSTRUCTIVE_REVIEW_AGENT_ID].sort(),
     );
     const warnings = result.logs.filter(
       (entry) => entry.level === "warn" && entry.message.includes("O_NOFOLLOW"),
@@ -1665,6 +1820,24 @@ describe("@capybearista/opencode-adversarial-review", () => {
       (entry) => entry.level === "info" && entry.message.includes(installed),
     );
     expect(updates).toHaveLength(1);
+  });
+
+  test("a close failure cannot mask the read error that aborted the install", async () => {
+    const home = await temporaryDirectory("adversarial-review-home-");
+    const commands = join(home, ".config", "opencode", "commands");
+    await mkdir(commands, { recursive: true });
+    const installed = join(commands, COMMAND_FILE_NAME);
+    const stale = `---\ndescription: stale managed copy\nagent: ${REVIEWER_AGENT_ID}\nsubagent: true\n${MANAGED_VERSION_FIELD}: 1\n---\n\nstale body\n`;
+    await writeFile(installed, stale);
+
+    const result = await runSetupInSubprocess({ home, failReadAndClose: COMMAND_FILE_NAME });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toInclude("Unable to install the /adversarial-review command");
+    expect(result.error).toInclude("EACCES: permission denied, read");
+    expect(result.error).not.toInclude("close failed");
+    expect(result.agents).toHaveLength(0);
+    expect(await readFile(installed, "utf8")).toBe(stale);
   });
 
   test("a symlinked path to a stamped managed file is never followed or overwritten", async () => {
@@ -1736,8 +1909,14 @@ describe("@capybearista/opencode-adversarial-review", () => {
   test("a pre-existing review command file keeps its bytes and warns without naming the wrong path", async () => {
     const home = await temporaryDirectory("adversarial-review-home-");
     await mkdir(join(home, ".config", "opencode", "commands"), { recursive: true });
-    const installed = join(home, ".config", "opencode", "commands", REVIEW_COMMAND_FILE_NAME);
-    const edited = `---\ndescription: custom review\nagent: ${REVIEW_AGENT_ID}\nsubagent: true\n---\n\ncustom body\n`;
+    const installed = join(
+      home,
+      ".config",
+      "opencode",
+      "commands",
+      CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME,
+    );
+    const edited = `---\ndescription: custom review\nagent: ${CONSTRUCTIVE_REVIEW_AGENT_ID}\nsubagent: true\n---\n\ncustom body\n`;
     await writeFile(installed, edited);
 
     const result = await runSetupInSubprocess({ home });
@@ -1779,7 +1958,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     await mkdir(commands, { recursive: true });
     const decoy = join(home, "review-decoy.md");
     await writeFile(decoy, "decoy bytes\n");
-    const installed = join(commands, REVIEW_COMMAND_FILE_NAME);
+    const installed = join(commands, CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME);
     await symlink(decoy, installed);
 
     const result = await runSetupInSubprocess({ home });
@@ -1803,15 +1982,35 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(await readFile(join(override, "commands", COMMAND_FILE_NAME), "utf8")).toBe(
       await readFile(COMMAND_ASSET_PATH, "utf8"),
     );
-    expect(await readFile(join(override, "commands", REVIEW_COMMAND_FILE_NAME), "utf8")).toBe(
-      await readFile(REVIEW_COMMAND_ASSET_PATH, "utf8"),
-    );
+    expect(
+      await readFile(join(override, "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME), "utf8"),
+    ).toBe(await readFile(CONSTRUCTIVE_REVIEW_COMMAND_ASSET_PATH, "utf8"));
     await expect(
       stat(join(home, ".config", "opencode", "commands", COMMAND_FILE_NAME)),
     ).rejects.toThrow();
     await expect(
-      stat(join(home, ".config", "opencode", "commands", REVIEW_COMMAND_FILE_NAME)),
+      stat(join(home, ".config", "opencode", "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME)),
     ).rejects.toThrow();
+  });
+
+  test("an empty or whitespace-only OPENCODE_CONFIG_DIR falls back to the HOME config directory", async () => {
+    for (const override of ["", "   "]) {
+      const home = await temporaryDirectory("adversarial-review-home-");
+      await mkdir(join(home, ".config", "opencode", "commands"), { recursive: true });
+
+      const result = await runSetupInSubprocess({ home, opencodeConfigDir: override });
+
+      expect(result.ok).toBe(true);
+      expect(
+        await readFile(join(home, ".config", "opencode", "commands", COMMAND_FILE_NAME), "utf8"),
+      ).toBe(await readFile(COMMAND_ASSET_PATH, "utf8"));
+      expect(
+        await readFile(
+          join(home, ".config", "opencode", "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME),
+          "utf8",
+        ),
+      ).toBe(await readFile(CONSTRUCTIVE_REVIEW_COMMAND_ASSET_PATH, "utf8"));
+    }
   });
 
   test("a missing commands parent fails setup with a path-bearing error and no agent", async () => {
@@ -1851,7 +2050,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
   test("a read-only filesystem review install failure registers neither agent", async () => {
     const home = await temporaryDirectory("adversarial-review-home-");
     const configDir = await isolatedConfigDirectory();
-    const reviewPath = join(configDir, "commands", REVIEW_COMMAND_FILE_NAME);
+    const reviewPath = join(configDir, "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME);
 
     const result = await runSetupInSubprocess({
       home,
@@ -1859,7 +2058,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
       writeFileError: {
         code: "EROFS",
         message: `EROFS: read-only file system, open '${reviewPath}'`,
-        onlyFor: REVIEW_COMMAND_FILE_NAME,
+        onlyFor: CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME,
       },
     });
 
@@ -1893,13 +2092,15 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(result.error).toInclude("Neither reviewer agent was registered");
     expect(result.agents).toHaveLength(0);
     await expect(stat(join(configDir, "commands", COMMAND_FILE_NAME))).rejects.toThrow();
-    await expect(stat(join(configDir, "commands", REVIEW_COMMAND_FILE_NAME))).rejects.toThrow();
+    await expect(
+      stat(join(configDir, "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME)),
+    ).rejects.toThrow();
   });
 
   test("an unreadable packaged review template leaves the first command on disk but registers neither agent", async () => {
     const home = await temporaryDirectory("adversarial-review-home-");
     const configDir = await isolatedConfigDirectory();
-    const assetPath = join(PACKAGE_ROOT, "commands", REVIEW_COMMAND_FILE_NAME);
+    const assetPath = join(PACKAGE_ROOT, "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME);
 
     const result = await runSetupInSubprocess({
       home,
@@ -1907,7 +2108,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
       readFileError: {
         code: "EACCES",
         message: `EACCES: permission denied, open '${assetPath}'`,
-        onlyFor: REVIEW_COMMAND_FILE_NAME,
+        onlyFor: CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME,
       },
     });
 
@@ -1918,6 +2119,8 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect(await readFile(join(configDir, "commands", COMMAND_FILE_NAME), "utf8")).toBe(
       await readFile(COMMAND_ASSET_PATH, "utf8"),
     );
-    await expect(stat(join(configDir, "commands", REVIEW_COMMAND_FILE_NAME))).rejects.toThrow();
+    await expect(
+      stat(join(configDir, "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME)),
+    ).rejects.toThrow();
   });
 });

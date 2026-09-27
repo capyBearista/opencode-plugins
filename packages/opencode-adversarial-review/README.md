@@ -24,19 +24,19 @@ One config drives two sandboxed subagents: agents register in memory, commands i
 
 One `REVIEWERS` config drives both agents; only identity, command file, and prompt differ:
 
-- **Agents**: setup registers the hidden `adversarial-reviewer` and `reviewer` subagents through `agent.transform`. Nothing is written to your agents directory.
-- **Commands**: setup installs `commands/adversarial-review.md` and `commands/review.md` into your OpenCode config directory. The host discovers them as `/adversarial-review` and `/review` and routes each to its reviewer with `subagent: true`.
-- **Prompts**: `src/prompt.ts` holds both system prompts; `src/prompts/adversarial-review.md` and `src/prompts/review.md` are their reference copies. All review doctrine — target selection, evidence rules, output contract — lives there, never in the command templates.
+- **Agents**: setup registers the hidden `adversarial-reviewer` and `constructive-reviewer` subagents through `agent.transform`. Nothing is written to your agents directory.
+- **Commands**: setup installs `commands/adversarial-review.md` and `commands/constructive-review.md` into your OpenCode config directory. The host discovers them as `/adversarial-review` and `/constructive-review` and routes each to its reviewer with `subagent: true`.
+- **Prompts**: `src/prompt.ts` holds both system prompts; `src/prompts/adversarial-review.md` and `src/prompts/constructive-review.md` are their reference copies. All review doctrine — target selection, evidence rules, output contract — lives there, never in the command templates.
 
 ```mermaid
 graph TB
     subgraph Host [OpenCode Host]
-        User([User]) -->|"/adversarial-review / /review"| Command[Installed Command Templates]
+        User([User]) -->|"/adversarial-review / /constructive-review"| Command[Installed Command Templates]
         Command -->|"$ARGUMENTS + five shell blocks"| Reviewer
     end
 
     subgraph Plugin [Plugin]
-        Setup[setup] -->|agent.transform| Reviewer{"adversarial-reviewer<br/>reviewer<br/>hidden subagents"}
+        Setup[setup] -->|agent.transform| Reviewer{"adversarial-reviewer<br/>constructive-reviewer<br/>hidden subagents"}
         Setup -->|"atomic install; stamped refresh"| Command
     end
 
@@ -59,7 +59,7 @@ graph TB
 
 - **Two reviewers**: adversarial (reasons *not* to ship) and constructive (correctness first, then suggestions).
 - **Reviewer-collected evidence**: changed files, untracked files, and branch diffs are inspected with read-only tools; only verified findings are reported.
-- **Auto-installed commands**: both slash commands are written on first setup; stamped files refresh on restart, user-owned edits are preserved (see note below).
+- **Auto-installed commands**: both slash commands are written on first setup; stamped files refresh on `/reload`, user-owned edits are preserved (see note below).
 - **Targets**: `--scope`, `--base`, bare commit SHA, or PR URL/number on both commands.
 - **No pinned temperature or model**: both inherit from the invoking chain.
 
@@ -81,10 +81,13 @@ Targets the V2 Promise plugin API (`@opencode/plugin` **2.0.2**); not compatible
 
 Server entry only, so `cli.json` needs no entry. Or via CLI: `opencode2 plugin add @capybearista/opencode-adversarial-review`. V1 hosts use the singular `"plugin"` key and the V1 line — see the [V1 plugin guide](../../docs/v1-plugins.md).
 
-On setup, both command files install at `<OPENCODE_CONFIG_DIR ?? ~/.config/opencode>/commands/{adversarial-review.md,review.md}`. The directory must already exist; if a file cannot install, setup fails loudly and **neither** agent is registered.
+> [!IMPORTANT]
+> The V2 port is unreleased until `2.0.0` publishes. Until then `@latest` still resolves to the V1 `1.0.0` line, which requires a V1 host. This package publishes `2.0.0` to the `latest` tag, not the `opencode2` channel.
+
+On setup, both command files install at `<OPENCODE_CONFIG_DIR ?? ~/.config/opencode>/commands/{adversarial-review.md,constructive-review.md}`. The directory must already exist; if a file cannot install, setup fails loudly and **neither** agent is registered.
 
 > [!NOTE]
-> The installed command files are managed via a `managed_version` stamp in their frontmatter. Keep the stamp and the file refreshes from the bundled template on restart; remove it to take ownership — the file is then left untouched with a warning. Unknown or newer stamps are likewise preserved (downgrades never clobber). A failure partway can leave the first file as a harmless orphan; it is reconciled on the next restart, and registration still waits for both files. Delete a file and restart to force-reinstall; uninstall the plugin *and* delete both files to fully remove the commands.
+> The installed command files are managed via a `managed_version` stamp in their frontmatter. Keep the stamp and the file refreshes from the bundled template on `/reload`; remove it to take ownership — the file is then left untouched with a warning. Unknown or newer stamps are likewise preserved (downgrades never clobber). A failure partway can leave the first file as a harmless orphan; it is reconciled on the next `/reload`, and registration still waits for both files. Delete a file and `/reload` to force-reinstall; uninstall the plugin *and* delete both files to fully remove the commands.
 
 ### Updating
 
@@ -96,17 +99,17 @@ Remove the plugin from `"plugins"` (or `opencode2 plugin remove @capybearista/op
 
 ## Usage
 
-Both commands accept `--scope auto|working-tree|branch`, `--base <ref>`, a bare commit SHA, or a PR URL/number. A PR URL always wins; otherwise the first bare token decides (all-decimal → PR, 7+ hex chars with a letter → commit); an explicit target beats the flags. `/adversarial-review` treats remaining text as a focus area; `/review` ignores trailing non-flag text (no focus support).
+Both commands accept `--scope auto|working-tree|branch`, `--base <ref>`, a bare commit SHA, or a PR URL/number. A PR URL always wins; otherwise the first bare token decides (all-decimal → PR, 7+ hex chars with a letter → commit); an explicit target beats the flags. `/adversarial-review` treats remaining text as a focus area; `/constructive-review` ignores trailing non-flag text (no focus support).
 
 ```bash
 /adversarial-review                  # working tree (or branch, if tree is clean)
 /adversarial-review --scope branch   # current branch since fork point
 /adversarial-review 4f2a9c1e         # a commit
 /adversarial-review 42               # PR #42 (bare number; hex SHAs stay commits)
-/review --scope working-tree         # constructive pass, working tree only
-/review --scope branch              # constructive pass, current branch since fork point
-/review 4f2a9c1e                    # constructive pass, a commit
-/review 42                          # constructive pass, PR #42
+/constructive-review --scope working-tree  # constructive pass, working tree only
+/constructive-review --scope branch        # constructive pass, current branch since fork point
+/constructive-review 4f2a9c1e              # constructive pass, a commit
+/constructive-review 42                    # constructive pass, PR #42
 ```
 
 ## Configuration
@@ -117,7 +120,7 @@ Nothing is pinned — model and temperature are both inherited. Resolution order
 {
   "agents": {
     "adversarial-reviewer": { "model": "openrouter/openai/gpt-6-sol" },
-    "reviewer": { "model": "openrouter/openai/gpt-6-sol" }
+    "constructive-reviewer": { "model": "openrouter/openai/gpt-6-sol" }
   }
 }
 ```
@@ -126,13 +129,15 @@ Nothing is pinned — model and temperature are both inherited. Resolution order
 
 Both reviewers are sandboxed and unattended; the single accepted risk is pasted arguments (below). Details:
 
+**Pasted arguments become executable template content.** `$ARGUMENTS` is substituted before the snapshot blocks run, so argument text can execute as shell. Inspect arguments before invoking, and never pass untrusted or pasted Markdown containing backtick blocks.
+
 One shared sandbox: `edit`/`write`/`patch`, `subagent`, `skill`, `webfetch`/`websearch`, `question` denied (zero ask — reviewers run unattended); shell limited to 13 read-only `git` patterns plus `gh pr view*`/`gh pr diff*` and the `gh auth status*` diagnostic (token-printing and all other `gh` denied); `read`/`grep`/`glob` allowed except `.env`/`.env.*` (`.env.example` allowed). See `AGENTS.md` for the full rule inventory.
 
 ## Troubleshooting
 
-- **Setup failed installing a command file**: create (or fix permissions on) `<config>/commands/`, then restart.
+- **Setup failed installing a command file**: create (or fix permissions on) `<config>/commands/`, then `/reload`.
 - **"Leaving it untouched" warning**: the file is user-owned or carries an unknown/newer stamp — edit in place, or delete to reinstall.
-- **File replaced on restart**: it kept a known stamp and was refreshed; remove the stamp to take ownership.
+- **File replaced on `/reload`**: it kept a known stamp and was refreshed; remove the stamp to take ownership.
 - **"No changes to review"**: stage changes or pass `--base`.
 - **PR target fails**: needs authed `gh`; the reviewer reports that plainly (stderr verbatim on failure).
 - **Large diffs**: use a model with a bigger context window; reviewers also read files as they work.
