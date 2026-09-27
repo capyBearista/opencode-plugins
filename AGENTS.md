@@ -133,6 +133,10 @@ rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
 - After publishing, verify via direct registry curl — `npm view` can lag the CDN by ~60s
 - PRs require: typecheck, lint, test, build
 - Squash commits on merge
+- Safety-net-blocked git forms have recoverable equivalents: `git stash -u` before `worktree remove` (never `--force`), `git update-ref` for pointer-only moves on verified-identical trees, `git merge --ff-only` where ancestry allows, `git branch -d` (never `-D` in chained commands)
+- Merge commits also need conventional messages — the commitlint hook rejects empty subject/type on merges too
+- `git log --all -- <path>` also lists merges that deleted the path; prove artifact absence with `git rev-list --objects --all --reflog` plus `git cat-file -e <blob>`, not log output
+- Release-channel policy edits never move npm dist-tags (guard returns `noop` for published versions); promotion is an authenticated `npm dist-tag` op — E401 in unattended sessions means handing exact commands to an operator
 
 ## Testing Requirements
 - **Unit tests**: colocated (bun test)
