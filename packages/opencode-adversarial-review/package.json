@@ -1,7 +1,7 @@
 {
   "name": "@capybearista/opencode-adversarial-review",
   "version": "1.0.0",
-  "description": "Adversarial code review for OpenCode — challenges implementation approach, finds auth gaps, race conditions, and data loss",
+  "description": "Two code review agents for OpenCode — an adversarial reviewer (/adversarial-review) that challenges the implementation, and a constructive reviewer (/constructive-review) focused on correctness and suggestions",
   "author": "capyBearista <capybearista@gmail.com>",
   "repository": {
     "type": "git",
@@ -13,15 +13,18 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "commands",
+    "dist",
+    "server.js"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "typecheck": "tsc --noEmit",
     "check": "bunx @biomejs/biome check --write .",
     "lint": "bunx @biomejs/biome check .",
     "ci": "bunx @biomejs/biome ci .",
-    "test": "bun test"
+    "test": "bun test",
+    "smoke": "bun run build && bun scripts/smoke-built.ts"
   },
   "exports": {
     ".": {
@@ -30,10 +33,10 @@
     }
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3"
+    "@opencode/plugin": "2.0.2"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": ">=1.15.3",
+    "@opencode/plugin": "2.0.2",
     "@tsconfig/node22": "^22.0.0",
     "@types/bun": "latest",
     "typescript": "^6.0.3"
