@@ -2,7 +2,7 @@
 
 **Technology**: TypeScript / OpenCode plugin (V2 TUI API: `@opencode/plugin/tui`)
 **Entry Point**: `src/index.ts` — built to `dist/index.js`, surfaced by the named `./tui` export and the package-root `tui.js` re-export
-**Version / channel**: V2-only **2.0.0**, moving to `latest` (promotion pending registry verification); the V1 release stays frozen and available at **1.0.1**
+**Version / channel**: V2-only **2.0.0** on `latest`; the V1 release stays frozen and available at **1.0.1**
 **Registration**: TUI `cli.json` profile under the plural `plugins` key; never the V2 server `opencode.json`
 **Parent Context**: This extends [../../AGENTS.md](../../AGENTS.md)
 

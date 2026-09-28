@@ -1,6 +1,6 @@
 # Documentation
 
-The root [README](../README.md) and package READMEs describe current installation and usage. The [V1 guide](./v1-plugins.md) retains instructions for V1 hosts, including the frozen releases whose package READMEs now describe V2. Contributor checks and release procedures live in [CONTRIBUTING.md](../CONTRIBUTING.md).
+The root [README](../README.md) and package READMEs describe current installation and usage. The [V1 guide](./v1-plugins.md) retains instructions for OpenCode V1, including the frozen releases whose package READMEs now describe V2. Contributor checks and release procedures live in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Map
 

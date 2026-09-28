@@ -8,7 +8,7 @@
   <a href="https://opensource.org/licenses/MPL-2.0"><img alt="license" src="https://img.shields.io/badge/License-MPL--2.0-blue.svg?style=flat-square&color=60dfe6" /></a>
 </p>
 
-[![OpenCode Ram Monitor sidebar](../../.github/assets/ram-monitor-sidebar.webp)]([../../.github/assets/ram-monitor-sidebar.webp](https://github.com/capyBearista/opencode-plugins/tree/main/packages/opencode-ram-monitor))
+[![OpenCode Ram Monitor sidebar](../../.github/assets/ram-monitor-sidebar.webp)](https://github.com/capyBearista/opencode-plugins/tree/main/packages/opencode-ram-monitor)
 
 ---
 
@@ -36,38 +36,57 @@ Compact sidebar summary on the left. Full process tree in a modal on `/ram` or w
 
 ## Features
 
-- **Real-time Sidebar Widget**: View direct and with-tools RAM for the current session and all sessions in a compact OpenCode sidebar card.
-- **Active Session Tracking**: Automatically discovers logical OpenCode sessions and aggregates their RAM.
-- **Cross-Platform**: Uses native commands (`ps` on Unix, `wmic` on Windows) for lightweight zero-dependency metrics.
-- **`/ram` Command**: Opens a detailed, heavy process-tree breakdown across all active OpenCode sessions in a pop-up (also opened by clicking the sidebar widget). In sessions without a TUI, the server entry injects the tree into the chat instead.
-- **Configurable**: Polling interval via plugin `options`, with `experimental.ramMonitor.refreshIntervalMs` config-file keys as fallback.
+- **Real-time sidebar widget**: shows direct and with-tools RAM for the current session and all sessions in a compact OpenCode sidebar card.
+- **Active session tracking**: automatically discovers logical OpenCode sessions and aggregates their RAM.
+- **Cross-platform**: uses native commands (`ps` on Unix, `wmic` on Windows) for lightweight zero-dependency metrics.
+- **`/ram` command**: opens a detailed, heavy process-tree breakdown across all active OpenCode sessions in a pop-up (also opened by clicking the sidebar widget). In sessions without a TUI, the server entry injects the tree into the chat instead.
+- **Configurable**: polling interval via plugin `options`.
 
 ## Install
 
-The TUI entry is the primary path. Add the plugin to `cli.json` (global config):
+### OpenCode V2
+
+Add it under the `"plugins"` key in `cli.json`:
 
 ```json
 {
-  "plugins": ["@capybearista/opencode-ram-monitor"]
+  "plugins": ["@capybearista/opencode-ram-monitor@latest"]
 }
 ```
 
-For sessions without a TUI, also add the server entry to `opencode.json` or `opencode.jsonc`:
+For sessions without a TUI, also add it under the `"plugins"` key in `opencode.json(c)`:
 
 ```json
 {
-  "plugins": ["@capybearista/opencode-ram-monitor"]
+  "plugins": ["@capybearista/opencode-ram-monitor@latest"]
 }
 ```
 
-Both files use the plural `"plugins"` key. For a local directory install, point at the package directory (which resolves `tui.js`/`server.js`), not `dist/`.
+### OpenCode V1
 
-## Updating
+Add it under the `"plugin"` key in `opencode.json(c)`:
 
-Run `opencode plugin check` to see whether a newer package is available, then
-`opencode plugin update` (with the configured target, or omit it to update all configured
-mutable targets) to install it. A restart or configuration reload alone does not upgrade a
-cached package. Do not delete the npm cache directory.
+```json
+{
+  "plugin": ["@capybearista/opencode-ram-monitor@1.1.0"]
+}
+```
+
+**AND**
+
+Add it under the `"plugin"` key in `tui.json(c)`:
+
+```json
+{
+  "plugin": ["@capybearista/opencode-ram-monitor@1.1.0"]
+}
+```
+
+See the [V1 plugin guide](../../docs/v1-plugins.md) for details.
+
+### Uninstall
+
+Remove the plugin from `"plugin(s)"` from the respective config files they were added to. 
 
 ## Usage
 
@@ -77,7 +96,7 @@ To get a detailed heavy process tree of memory usage across all currently active
 
 ## Configuration
 
-Preferred: pass the interval as plugin `options` alongside the plugin entry (server `opencode.json` object form, TUI `cli.json` tuple form):
+Preferred: pass the interval as plugin `options` alongside the plugin entry (server `opencode.json(c)` object form, TUI `cli.json` tuple form):
 
 ```json
 {
@@ -89,10 +108,9 @@ Preferred: pass the interval as plugin `options` alongside the plugin entry (ser
 
 Fallback: add `experimental.ramMonitor.refreshIntervalMs` to any supported config file. Supported files, in load order:
 
-1. `opencode.json` / `opencode.jsonc` - global and worktree configs
-2. `.opencode/opencode.json` / `.opencode/opencode.jsonc` - project-local configs
-3. `tui.json` / `tui.jsonc` and `.opencode/` variants - legacy TUI configs
-4. `cli.json` / `cli.jsonc` and `.opencode/` variants
+1. `opencode.json(c)`
+2. `tui.json(c)` - legacy TUI configs
+3. `cli.json`
 
 Plugin `options` win over config files when the value is a valid number; invalid values fall back to files, then the default. Files load the global config dir first (`$OPENCODE_CONFIG_DIR` or `~/.config/opencode/`), then project files — later files override earlier ones.
 
@@ -113,18 +131,20 @@ File-key example:
 }
 ```
 
-Note: the host only delivers `options` for entries declared in the global `cli.json` (TUI) / `opencode.json` (server) plugin lists. The TUI re-reads the global `cli.json` when the file changes; the server profile applies changes on a configuration reload (`/reload` or `opencode reload`) or a restart.
+Note if you want to modify this setting on the fly: OpenCode only delivers `options` for entries declared in the global `cli.json` (TUI) / `opencode.json` (server) plugin lists. The TUI re-reads the global `cli.json` when the file changes; the server profile applies changes on a configuration reload (`/reload` or `opencode reload`) or a restart.
 
 ## Troubleshooting
 
-- **Widget missing from sidebar**: Ensure the TUI plugin is registered in your `cli.json` `plugins` list (project `cli.json` files are not read by the host — use the global one).
+- **Widget missing from sidebar**: Ensure the TUI plugin is registered in your `cli.json` `plugins` list (project `cli.json` files are not read by OpenCode — use the global one).
 - **Refresh interval did not change**: Prefer plugin `options` (tuple/object entry form) — options only apply to declared entries and are read when the plugin is set up. The TUI re-reads `cli.json` on save; the server profile needs a configuration reload or restart. File keys remain as fallback.
 - **Config warning shown in the sidebar**: A supported config file could not be parsed, so the widget is using the last valid value it found or the default `5000ms` interval.
 - **Active count seems off**: The plugin tokenizes command lines and parent links to find logical sessions. Deeply nested wrappers or unusual invocation aliases might still be missed.
 - **Sidebar numbers look higher than expected**: The sidebar shows both direct RSS and with-tools RSS. The with-tools column includes child processes spawned by the session.
 - **Total RAM shows `0`**: If sampling fails completely (e.g. `ps` is missing), the plugin falls back to using `process.memoryUsage().rss` of the current process. Ensure standard process utilities are available.
 
-## Debug Logging
+## Development Notes
+
+### Debug logging
 
 Debug logging is disabled by default. To enable diagnostic logs during development:
 
@@ -138,8 +158,11 @@ When enabled, the plugin appends structured JSON log lines to `.opencode-ram-mon
 
 This package lives in the `opencode-plugins` monorepo.
 
-- Run `bun run build`, `bun run typecheck`, `bun run lint`, and `bun test` before opening a PR.
-- Keep the plugin focused on RAM monitoring logic.
+See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
+
+- From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`,`bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test` as the workspace check.
+- For a focused run, `bun test` is supported from this package directory; its tests include the real local-directory resolver regression.
+- `bun run check` writes Biome changes; use it only when formatting changes are intended.
 - Prefer small, direct changes.
 
 Please open an issue or check for existing ones before creating a pull request.

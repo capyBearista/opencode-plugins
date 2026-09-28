@@ -10,8 +10,8 @@
 
 ---
 
-> **Status:** V1-only. Deprecated for OpenCode V2 — no V2 maintenance is planned.
-> Existing V1 users can keep using it; see the [V1 compatibility guide](../../docs/v1-plugins.md).
+> [!IMPORTANT] V2
+> A V2 port is not planned at this time. The V1 output-style capability remains enabled.
 
 ## Why?
 
@@ -25,7 +25,7 @@ OpenCode is designed to be extensible through plugins. This plugin takes the nar
 
 ```text
 src/
-├── index.ts           # Plugin hooks (thin barrel)
+├── index.ts           # Plugin entry point
 ├── styles.ts          # Style parsing, discovery, built-in loading
 └── built-in-styles/   # Shipped output styles
     ├── explanatory.md
@@ -34,35 +34,34 @@ src/
 
 ## Features
 
-- Ships built-in styles *inspired* by Claude Code (`explanatory`, `learning`) out of the box
-- Discovers global styles from `~/.config/opencode/output-styles/`
-- Discovers project-local styles from `.opencode/output-styles/`
-- Activates styles with `/output-style <id>`
-- Persists the active style in `.opencode/active-style.json`
-- Injects the selected style wrapped in `<output-style>` tags into the system prompt
-- Marks built-in styles with `[Built-in]` in the style listing
-- Supports overriding: user styles take precedence over built-in styles with the same id
+- **Built-in styles**: ships `explanatory` and `learning`, *inspired* by Claude Code.
+- **Global discovery**: reads styles from `~/.config/opencode/output-styles/`.
+- **Project-local discovery**: reads styles from `.opencode/output-styles/`.
+- **Activation**: switches the active style with `/output-style <id>`.
+- **Persistence**: keeps the active style in `.opencode/active-style.json`.
+- **Prompt injection**: injects the selected style, wrapped in `<output-style>` tags, into the system prompt.
+- **Built-in labeling**: marks built-in styles with `[Built-in]` in the style listing.
+- **Overriding**: user styles take precedence over built-in styles with the same id.
 
 ## Install
 
-Add the plugin to `opencode.json` or `opencode.jsonc`:
+### OpenCode V1
+
+Add it under the `"plugin"` key in `opencode.json(c)`:
 
 ```json
 {
-  "plugin": ["@capybearista/opencode-output-styles@latest"]
+  "plugin": ["@capybearista/opencode-output-styles@1.0.1"]
 }
 ```
 
-You can also install it through the CLI:
+Server entry only, so `tui.json(c)` needs no entry.
 
-```bash
-opencode plugin -g @capybearista/opencode-output-styles@latest    # global install
-opencode plugin @capybearista/opencode-output-styles@latest       # project-local install
-```
+See the [V1 plugin guide](../../docs/v1-plugins.md) for details.
 
-## Updating
+### Uninstall
 
-Follow the [V1 plugin guide](../../docs/v1-plugins.md#pinning-and-updates) to update: an already configured target keeps its cached installation, and moving to another release means reinstalling with a different exact version. Do not delete cache directories as routine update maintenance.
+Remove the plugin from `"plugin(s)"` from the respective config files they were added to.
 
 ## Usage
 
@@ -140,14 +139,17 @@ This plugin requires no manual configuration.
 
 - If `/output-style` shows no results, confirm your style files end in `.md` and include YAML frontmatter.
 - If two styles share the same filename, the project-local version takes precedence over the global one, which takes precedence over the built-in.
-- The `/output-style` command currently uses a plugin API workaround that throws a handled error to short-circuit the command pipeline.
+- The `/output-style` command is handled by the plugin directly; there is no command file to edit.
 
 ## Contributing
 
 This package lives in the `opencode-plugins` monorepo.
 
-- Run `bun run build`, `bun run typecheck`, `bun run lint`, and `bun test` before opening a PR.
-- Keep the plugin focused on style discovery, persistence, and prompt appending.
+See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
+
+- From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`,`bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test` as the workspace check.
+- For a focused run, `bun test` is supported from this package directory; its tests include the real local-directory resolver regression.
+- `bun run check` writes Biome changes; use it only when formatting changes are intended.
 - Prefer small, direct changes.
 
 Please open an issue or check for existing ones before creating a pull request.

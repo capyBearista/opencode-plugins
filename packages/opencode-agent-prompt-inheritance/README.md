@@ -10,8 +10,8 @@
 
 ---
 
-> **Status:** Currently V1-only. A V2 port is TBD — no V2 release is available
-> or promised. The V1 prompt-sync workflow remains enabled.
+> [!IMPORTANT] V2
+> A V2 port is TBD. The V1 prompt-sync workflow remains enabled.
 
 ## Why?
 
@@ -19,13 +19,13 @@
 
 ## Philosophy: Extending OpenCode
 
-This plugin stays narrow: it only touches `experimental.chat.system.transform`, resolves the active agent from the current session, and stitches the active provider prompt back in when inheritance is enabled. It does not change OpenCode core or add new commands.
+This plugin stays narrow: it resolves the active agent from the current session and stitches the active provider prompt back in when inheritance is enabled. It does not change OpenCode core or add new commands.
 
 ### Architecture
 
 ```text
 src/
-├── index.ts            # Hook entry point
+├── index.ts            # Plugin entry point
 ├── inheritance.ts      # Inheritance flag parsing + prompt stitching
 ├── provider-prompt.ts  # Model-family prompt selection
 └── prompt/             # Vendored upstream prompt assets (.txt)
@@ -33,50 +33,34 @@ src/
 
 ## Features
 
-- Reads custom agent frontmatter from the active session
-- Supports `inherit-base-prompt` and `inheritBasePrompt`
-- Accepts `false`, `true`, `prepend`, and `append`
-- Treats `true` as `prepend`
-- Keeps other system prompt parts intact
-- Uses vendored upstream prompt files to mirror OpenCode provider behavior
-- Supports optional env-gated JSONL prompt capture for debugging
+- **Agent frontmatter**: reads the inheritance setting from the active session's custom agent.
+- **Key aliases**: supports `inherit-base-prompt` and `inheritBasePrompt`.
+- **Value modes**: accepts `false`, `true`, `prepend`, and `append`.
+- **Prepend default**: treats `true` as `prepend`.
+- **Non-destructive**: keeps other system prompt parts intact.
+- **Vendored prompts**: uses vendored upstream prompt files to mirror OpenCode provider behavior.
+- **Debug capture**: supports optional env-gated JSONL prompt capture for debugging.
 
-## Supported Model Families
-
-The plugin selects the appropriate base prompt based on the model ID. All checks are case-insensitive.
-
-| Model ID pattern | Prompt used |
-| --- | --- |
-| `gpt-4*`, `o1*`, `o3*` | Beast prompt |
-| `*codex*` | Codex prompt |
-| `*copilot*` | Copilot GPT-5 prompt |
-| `*gpt*` | GPT prompt |
-| `*gemini-*` | Gemini prompt |
-| `*claude*` | Anthropic prompt |
-| `*trinity*` | Trinity prompt |
-| `*kimi*` | Kimi prompt |
-| (anything else) | Default prompt |
 
 ## Install
 
-Add the plugin to `opencode.json` or `opencode.jsonc`:
+### OpenCode V1
+
+Add it under the `"plugin"` key in `opencode.json(c)`:
 
 ```json
 {
-  "plugin": ["@capybearista/opencode-agent-prompt-inheritance"]
+  "plugin": ["@capybearista/opencode-agent-prompt-inheritance@1.0.0"]
 }
 ```
 
-You can also install it through the CLI:
+Server entry only, so `tui.json(c)` needs no entry.
 
-```bash
-opencode plugin -g @capybearista/opencode-agent-prompt-inheritance
-opencode plugin @capybearista/opencode-agent-prompt-inheritance
-```
+See the [V1 plugin guide](../../docs/v1-plugins.md) for details.
 
-## Updating
+### Uninstall
 
-Follow the [V1 plugin guide](../../docs/v1-plugins.md#pinning-and-updates) to update: an already configured target keeps its cached installation, and moving to another release means reinstalling with a different exact version. Do not delete cache directories as routine update maintenance.
+Remove the plugin from `"plugin(s)"` from the respective config files they were added to.
 
 ## Usage
 
@@ -101,6 +85,22 @@ Review code for correctness, risk, and missing tests.
 | `inherit-base-prompt` | `false \| true \| prepend \| append` | Controls provider prompt inheritance |
 | `inheritBasePrompt` | `false \| true \| prepend \| append` | CamelCase alias for the same setting |
 
+## Supported Model Families
+
+The plugin selects the appropriate base prompt based on the model ID. All checks are case-insensitive.
+
+| Model ID pattern | Prompt used |
+| --- | --- |
+| `gpt-4*`, `o1*`, `o3*` | Beast prompt |
+| `*codex*` | Codex prompt |
+| `*copilot*` | Copilot GPT-5 prompt |
+| `*gpt*` | GPT prompt |
+| `*gemini-*` | Gemini prompt |
+| `*claude*` | Anthropic prompt |
+| `*trinity*` | Trinity prompt |
+| `*kimi*` | Kimi prompt |
+| (anything else) | Default prompt |
+
 ## Debug Capture
 
 If you want to inspect the transformed `system` prompt after this plugin runs, set:
@@ -124,9 +124,22 @@ If the variable is unset, no capture file is written.
 ## Troubleshooting
 
 - If nothing changes, confirm the active agent has one of the inheritance keys and the value is valid.
-- If the active agent cannot be resolved, the hook leaves the system prompt untouched.
+- If the active agent cannot be resolved, the plugin leaves the system prompt untouched.
 - Prompt updates are synced from upstream OpenCode (`anomalyco/opencode`) via the `Sync OpenCode Prompts` workflow and opened as PRs.
 - If you are using debug capture, remember that `.jsonl` files are local artifacts and are ignored by git.
+
+## Contributing
+
+This package lives in the `opencode-plugins` monorepo.
+
+See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
+
+- From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`,`bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test` as the workspace check.
+- For a focused run, `bun test` is supported from this package directory; its tests include the real local-directory resolver regression.
+- `bun run check` writes Biome changes; use it only when formatting changes are intended.
+- Prefer small, direct changes.
+
+Please open an issue or check for existing ones before creating a pull request.
 
 ## License
 

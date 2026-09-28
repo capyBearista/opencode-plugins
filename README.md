@@ -25,69 +25,90 @@ A collection of plugins for the OpenCode AI harness. These extensions add qualit
 
 ### 🤺 [opencode-adversarial-review](./packages/opencode-adversarial-review/)
 
-Adversarial code review that challenges your implementation approach and design choices, not just finding bugs. Uses a clean-context subagent so the review stays unbiased by conversation history, prioritizing auth gaps, data loss, etc. Returns structured JSON findings with severity, confidence scores, and recommendations.
-
-*Inspired by Codex*
-
-### 💬 [opencode-agent-prompt-inheritance](./packages/opencode-agent-prompt-inheritance/)
-
-Preserves OpenCode provider system prompts when custom agents add their own instructions. Uses the `experimental.chat.system.transform` hook to stitch the base provider prompt and custom agent prompt together, preventing custom agents from discarding base model behaviors.
+Two clean-context code reviewers that stay unbiased by conversation history: an adversarial reviewer that challenges your implementation approach and design choices, prioritizing auth gaps, data loss, and similar risks (structured JSON findings with severity, confidence, and recommendations), plus a constructive reviewer that checks correctness first and suggests improvements. *Inspired by Codex*
 
 ### 🛠️ [opencode-agents-loader](./packages/opencode-agents-loader/)
 
-Extends command and agent discovery to the `.agents/` directory standard. This enables interoperability with other AI tools and keeps project configuration organized.
+Extends **command** and **agent** discovery to the `.agents/` directory standard. This enables interoperability with other AI tools and keeps project configuration organized.
 
 ### ⏱️ [opencode-double-tap-timeline](./packages/opencode-double-tap-timeline/)
 
-A keyboard-driven UI extension. Double-tap the Escape key to instantly open the session timeline modal without typing commands or using a mouse.
-
-*Inspired by Claude Code*
-
-### 🗣️ [opencode-output-styles](./packages/opencode-output-styles/)
-
-Persistent response styles for OpenCode sessions. This plugin injects selected guidelines (like "explanatory" or "learning" modes) into the system prompt so they stay active across your session.
-
-*Inspired by Claude Code*
+A keyboard-driven UI extension. Double-tap the Escape key to instantly open the session timeline modal without typing commands or using a mouse. *Inspired by Claude Code*
 
 ### 🐏 [opencode-ram-monitor](./packages/opencode-ram-monitor/)
 
 Zero-dependency RAM monitoring for OpenCode sessions. Shows live session memory usage in the sidebar and adds a `/ram` command for a detailed process tree and aggregate OpenCode RAM totals.
 
+### 💬 [opencode-agent-prompt-inheritance](./packages/opencode-agent-prompt-inheritance/)
+
+Preserves provider system prompts when custom agents add their own instructions, stitching the base provider prompt and the custom agent prompt together instead of discarding base model behaviors.
+
+### 🗣️ [opencode-output-styles](./packages/opencode-output-styles/)
+
+Persistent response styles for OpenCode sessions. This plugin injects selected guidelines (like "explanatory" or "learning" modes) into the system prompt so they stay active across your session. *Inspired by Claude Code*
+
 ## Compatibility and release status
 
-The four OpenCode V2 ports target **2.0.0** on **`latest`**. `opencode-adversarial-review` and
-`opencode-ram-monitor` are already published there (V1 hosts must pin ram-monitor `1.1.0`);
-the loader and timeline registry promotion is pending verification. Do not use `@v2`: npm
-parses that literal as a semver range, not as the intended channel.
-
-The V1 releases remain separate and available. The loader is frozen at `1.0.0` and the
-timeline at `1.0.1`; pin those exact versions on a V1 host.
-`opencode-agent-prompt-inheritance` stays V1-only with a V2 port TBD, and
-`opencode-output-styles` stays V1-only, deprecated for V2 with no V2 maintenance planned.
-
-| Plugin | V1 host and release | V2 line in this release |
+| Plugin | Pin Version for V2; Where | Pin Version for V1; Where |
 | --- | --- | --- |
-| `opencode-adversarial-review` | V1 `1.0.0`; server `opencode.json`, singular `plugin` | `2.0.0`; server `opencode.json`, plural `plugins`, channel `latest` |
-| `opencode-agent-prompt-inheritance` | V1 `1.0.0`; server `opencode.json`, singular `plugin` | V1 only; V2 port TBD |
-| `opencode-agents-loader` | V1 `1.0.0`, frozen; server `opencode.json`, singular `plugin` | `2.0.0`; server `opencode.json`, plural `plugins`, channel `latest` (promotion pending verification) |
-| `opencode-double-tap-timeline` | V1 `1.0.1`, frozen; TUI `tui.json`, singular `plugin` | `2.0.0`; TUI `cli.json`, plural `plugins`, channel `latest` (promotion pending verification) |
-| `opencode-output-styles` | V1 `1.0.1`; server `opencode.json`, singular `plugin` | V1 only; deprecated for V2 |
-| `opencode-ram-monitor` | V1 `1.1.0`; server and TUI (`opencode.json` and `tui.json`), singular `plugin` | `2.0.0`; server `opencode.json` + TUI `cli.json`, plural `plugins`, channel `latest` |
+| `opencode-adversarial-review` | `@latest` in `opencode.json(c)` | `@1.0.0` in `opencode.json(c)` |
+| `opencode-agents-loader` | `@latest` in `opencode.json(c)` | `@1.0.0` in `opencode.json(c)` |
+| `opencode-double-tap-timeline` | `@latest` in `cli.json(c)` | `@1.0.1` in `tui.json(c)` |
+| `opencode-ram-monitor` | `@latest` in `opencode.json(c)` and/or `cli.json(c)` | `@1.1.0` in `opencode.json(c)` and `tui.json(c)` |
+| `opencode-agent-prompt-inheritance` | V1 only; V2 port TBD | `@1.0.0` in `opencode.json(c)` |
+| `opencode-output-styles` | V1 only; V2 unplanned |  `@1.0.1` in `opencode.json(c)` |
 
 ## Installation
 
-### Existing V1 releases
+### OpenCode V2
 
-Use these instructions with an OpenCode V1 host. V1 uses the singular `"plugin"` key and the
-V1 CLI command is `plugin <module>`, not `plugin add`. Exact pins are supported; the examples
-below use the current V1 package versions.
+V2 uses a plural `"plugins"` key.
 
-```bash
-opencode plugin --global @capybearista/opencode-adversarial-review@1.0.0
-opencode plugin @capybearista/opencode-adversarial-review@1.0.0
+Server profile. Add to `opencode.json(c)`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    "@capybearista/opencode-adversarial-review@latest",
+    "@capybearista/opencode-agents-loader@latest",
+    "@capybearista/opencode-ram-monitor@latest"
+  ]
+}
 ```
 
-For V1 server plugins, add pinned entries to `opencode.json` or `opencode.jsonc`:
+TUI profile. Add to `cli.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "plugins": [
+    "@capybearista/opencode-double-tap-timeline@latest",
+    "@capybearista/opencode-ram-monitor@latest"
+  ]
+}
+```
+
+### Updating
+
+There are two ways to update configured plugins. Either way, only mutable targets
+(such as `@latest`) are updated: exact pins stay fixed.
+
+1. **TUI plugin manager.** Open the plugins dialog from the TUI (the "Open plugins" action, or click the plugin status in the footer). It lists every configured plugin with its status and offers check (`ctrl+r`), update (`ctrl+u`), and install actions.
+
+[![Plugin Management TUI](.github/assets/plugin-management-TUI.png)](https://opencode.ai/v2/docs/plugins/)
+
+2. **CLI.** `opencode plugin check` reports available updates without installing them. `opencode plugin update` with the configured target as its argument updates that plugin; omitting the target updates all configured mutable targets:
+```bash
+opencode plugin check
+opencode plugin update @capybearista/opencode-ram-monitor
+```
+
+### OpenCode V1
+
+Use these instructions for OpenCode V1. V1 uses the singular `"plugin"` key. The examples below use the current V1 package versions.
+
+Server profile. Add to `opencode.json(c)`:
 
 ```json
 {
@@ -101,7 +122,7 @@ For V1 server plugins, add pinned entries to `opencode.json` or `opencode.jsonc`
 }
 ```
 
-For V1 TUI plugins, use `tui.json` or `tui.jsonc` and the same singular key:
+TUI profile. Add to `tui.json(c)`:
 
 ```json
 {
@@ -112,65 +133,24 @@ For V1 TUI plugins, use `tui.json` or `tui.jsonc` and the same singular key:
 }
 ```
 
-### V2 releases
-
-V2 uses plural `"plugins"` and separates server and TUI configuration. Pin loader and
-timeline to `2.0.0` explicitly until their promotion to `latest` is verified; adversarial-review
-and ram-monitor `2.0.0` are already on `latest`.
-
-V2 server profile, `~/.config/opencode/opencode.json`, contains the loader and ram-monitor:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": [
-    "@capybearista/opencode-agents-loader@2.0.0",
-    "@capybearista/opencode-ram-monitor@latest"
-  ]
-}
-```
-
-V2 TUI profile, `~/.config/opencode/cli.json`, contains the timeline and ram-monitor:
-
-```json
-{
-  "$schema": "https://opencode.ai/v2/cli.json",
-  "plugins": [
-    "@capybearista/opencode-double-tap-timeline@2.0.0",
-    "@capybearista/opencode-ram-monitor@latest"
-  ]
-}
-```
-
-On an OpenCode V2 host, the `plugin add` command routes the server-only loader to server
-configuration and the TUI-only timeline to `cli.json`:
-
-```bash
-opencode plugin add @capybearista/opencode-agents-loader@2.0.0
-opencode plugin add @capybearista/opencode-double-tap-timeline@2.0.0
-# Check all configured plugins without updating them
-opencode plugin check
-```
-
-To install an update, run `opencode plugin update` with the configured target as its argument.
-Omitting the target updates all configured mutable plugin targets. `check` only reports available
-updates. Restarting OpenCode or reloading configuration is not an upgrade; exact pins remain fixed.
-The loader and timeline `latest` tags move to `2.0.0` once the pending registry promotion is
-verified.
-
-Do not overwrite a shared V1 configuration with these V2 examples or add a V2-only entry to a
-V1 singular `plugin` list. V1 and V2 may share the default `~/.config/opencode/` directory, so
-choose a separate configuration root for a side-by-side trial. `OPENCODE_CONFIG_DIR` selects that
-root; a fully isolated trial also needs separate home, data, state, and cache locations. These
-examples do not migrate existing configuration or session data.
-
-### Updating V1 installations
+#### Updating V1 installations
 
 V1 reuses the cached installation for an already configured target; a restart alone does not fetch
 a newer package. To move an actively maintained V1 plugin to another release, choose a different
 exact version and use `opencode plugin --force <package>@<version>` to replace the configured
 entry. `--force` changes configuration; it does **not** refresh the cache for the same `@latest`
-specifier. The loader and timeline V1 lines are frozen and need no further V1 upgrade.
+specifier.
+
+If that does not work, check and delete the respective plugin's directory within OpenCode's cache:
+
+```sh
+ls ~/.cache/opencode/packages/@capybearista/
+```
+Then
+```sh
+rm -rf ~/.cache/opencode/packages/@capybearista/<plugin directory>
+```
+This will force OpenCode to download the pinned version of the plugin on its next restart.
 
 ## What Should I Build Next?
 
@@ -190,12 +170,9 @@ Plugins I've personally used and highly recommend! Some of these are genuinely u
 | -------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [opencode-quota](https://github.com/slkiser/opencode-quota)                      | Keep track of your provider subscriptions _in_ OpenCode          | Token usage and quota tracking for Anthropic, OpenAI, Copilot, and more—reports in terminal with zero context pollution.                                                           |
 | [opencode-snippets](https://github.com/JosXa/opencode-snippets)                  | Expand `#tags` into text anywhere, instantly                     | Hashtag-based snippet expansion. Just type `#name` to inject pre-defined code blocks, configs, or prompts inline. You can even put them in commands.                               |
-| [opencode-dcp](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) | Caps token waste from stale context                              | Context-aware compression intelligently prunes old tool outputs to keep context lean and reduce token burn.                                                                        |
+| [opencode-dynamic-context-pruning](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning) | Caps token waste from stale context                              | Context-aware compression intelligently prunes old tool outputs to keep context lean and reduce token burn.                                                                        |
 | [cc-safety-net](https://github.com/kenryu42/claude-code-safety-net)              | Prevents dangerous commands like `rm -rf` and `git reset --hard` | Intercepts destructive git and filesystem commands before they execute, giving you a chance to abort before your agent deletes your entire project.                                |
-| [opencode-command-hooks](https://github.com/shanebishop1/opencode-command-hooks) | Run scripts on session events without writing a plugin           | Declarative event hooks for shell commands via YAML/JSON. You can even attach scripts to lifecycle events like `tool.execute.after`.                                               |
 | [opencode-agent-identity](https://github.com/gotgenes/opencode-agent-identity)   | Distinguish which sub-agent said what in multi-agent sessions    | Per-message attribution so each agent knows its role and which message came from which source.                                                                                     |
-| [opencode-mem](https://github.com/tickernelz/opencode-mem)                       | Retain long-term context across sessions                         | Persistent memory for AI coding agents with SQLite + USearch indexing, automatic user profile learning, and a visual web UI. It's even got a nice web UI to check stored memories! |
-| [opencode-notifier](https://github.com/mohak34/opencode-notifier)                | Know when sessions finish without watching the terminal          | Highly customizable desktop notifications and sounds for permission prompts, completion, and errors so you never miss a beat.                                                      |
 
 ## Development
 
@@ -222,7 +199,7 @@ the Turbo pipeline and includes the root release guard. A package-scoped `bun te
 run from that package directory. `bun run check` runs Biome with `--write`, so it mutates files and
 should only be used when formatting changes are intended.
 
-Read the [documentation index](./docs/README.md), [V1 plugin guide](./docs/v1-plugins.md), and
+Read the [documentation index](./docs/README.md), [V1 plugin guide](./docs/v1-plugins.md) (if developing for OpenCode V1), and
 [contribution guidelines](./CONTRIBUTING.md) before contributing.
 
 ## Disclaimer
