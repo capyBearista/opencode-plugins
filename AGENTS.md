@@ -69,18 +69,20 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 
 ### Development
 - `bun run build` — Build all packages
-- `bun run test` — Run all tests
-- `bun run typecheck` — Type validation
-- `bun run lint` — Lint all code
+- `bun run test` — Run all tests (runs the release-channel guard first)
+- `bun run typecheck` — Type validation (runs the release-channel guard first)
+- `bun run lint` — Lint all code (runs the release-channel guard first)
 - `bun run check` — Format and lint all packages
 - `bun changeset` — Manage versioning and publishing
 - `bun run changeset:publish` — Build and publish releasable packages
+- `bun run release:check` — Inspect unpublished set and channel (no publish)
 
 ### Package-Specific
 - `bun --filter [name] [command]` — Run in specific package
 
 ### Quality Gates (run before PR)
 `bun run typecheck && bun run lint && bun run test && bun run build`
+CI runs typecheck, lint, and test only — `bun run build` is a local-only gate; always run it before opening a PR.
 <!-- bootstrap:managed:end core-commands -->
 
 <!-- bootstrap:managed:start project-structure -->
