@@ -134,7 +134,8 @@ rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
 - Start commit subjects lowercase (`feat(x): …`) — the commitlint hook rejects capitalized subjects
 - After publishing, verify via direct registry curl — `npm view` can lag the CDN by ~60s
 - PRs require: typecheck, lint, test, build
-- Squash commits on merge
+- Merge PRs with a merge commit, not squash or rebase: preserve the feature branch's commits in `main` so the local branch can be removed with `git branch -d`.
+- Keep the remote feature branch after merging (disable automatic branch deletion on GitHub); delete only the local branch unless the user explicitly asks to remove the remote one.
 - Safety-net-blocked git forms have recoverable equivalents: `git stash -u` before `worktree remove` (never `--force`), `git update-ref` for pointer-only moves on verified-identical trees, `git merge --ff-only` where ancestry allows, `git branch -d` (never `-D` in chained commands)
 - Merge commits also need conventional messages — the commitlint hook rejects empty subject/type on merges too
 - `git log --all -- <path>` also lists merges that deleted the path; prove artifact absence with `git rev-list --objects --all --reflog` plus `git cat-file -e <blob>`, not log output
