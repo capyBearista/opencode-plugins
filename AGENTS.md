@@ -19,7 +19,7 @@ Subdirectories contain specialized files that extend these rules.
 
 ### Plugin Development (MUST)
 
-Scope: V1 packages. The four V2 ports use the Promise API instead; see the V2 boundary below.
+Scope: V1 packages. The five V2 plugins use the Promise API instead; see the V2 boundary below.
 
 - **MUST** keep server and TUI entrypoints split. If a plugin exposes both, publish separate `./server` and `./tui` exports instead of exporting both from one module.
 - **MUST** verify the real runtime path when testing local plugins. Check both the package build output and the harness config that OpenCode actually loads.
@@ -30,7 +30,7 @@ Scope: V1 packages. The four V2 ports use the Promise API instead; see the V2 bo
 
 ### V2 Boundary (MUST)
 
-Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
+Five packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
 
 | Package | V2 status |
 | --- | --- |
@@ -40,6 +40,7 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port TBD |
 | `opencode-output-styles` | V1 only; deprecated for V2 |
 | `opencode-ram-monitor` | Ported: dual server+TUI plugin, plural `plugins` (`opencode.json` + `cli.json`); `2.0.0` on `latest` |
+| `opencode-auto-advisor` | New: server plugin, plural `plugins` in `opencode.json`; `2.0.0` on `latest` |
 
 - **MUST** use the V2 Promise API in ports: `Plugin.define({ id, setup })` from `@opencode/plugin` 2.x. Do not carry V1 `server`/`config` hook signatures into a port.
 - **MUST** keep V2 entrypoints at the package root: `server.js` for the loader, `tui.js` for the timeline. Filesystem-local config points at the package directory, not the entry file.
@@ -98,6 +99,7 @@ CI runs typecheck, lint, and test only — `bun run build` is a local-only gate;
 - **`packages/opencode-double-tap-timeline/`** → OpenCode plugin (see packages/opencode-double-tap-timeline/AGENTS.md)
 - **`packages/opencode-output-styles/`** → OpenCode plugin (see packages/opencode-output-styles/AGENTS.md)
 - **`packages/opencode-ram-monitor/`** → Dual server/TUI plugin for live RAM telemetry and the `/ram` command (see `packages/opencode-ram-monitor/AGENTS.md`)
+- **`packages/opencode-auto-advisor/`** → OpenCode V2 server plugin for independent Advisor consultation and experimental automatic routing (see `packages/opencode-auto-advisor/AGENTS.md`)
 
 ### Supporting Directories
 - **`.agents/`** → Shared commands and skills used by local harness workflows
@@ -109,17 +111,17 @@ CI runs typecheck, lint, and test only — `bun run build` is a local-only gate;
 ## Quick Find Commands
 
 ### Code Navigation
-`# Find plugin hooks or commands
-rg -n "export (default )?class .*Plugin" packages/
+`# Find V2 plugin entrypoints
+rg -n "Plugin\.define" packages/*/src
 
-# Find server/TUI plugin entrypoints
+# Find V1 server/TUI plugin entrypoints
 rg -n "export default \{|const (server|tui):" packages/*/src
 
 # Find prompt-transform plugins
 rg -n "experimental\.chat\.system\.transform" packages/
 
 # Find TUI slot registrations
-rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
+rg -n "ui\.slot|keymap" packages/*/src
 `
 <!-- bootstrap:managed:end jit-index -->
 
@@ -179,6 +181,7 @@ When working in specific directories, refer to their AGENTS.md:
 - opencode-double-tap-timeline: packages/opencode-double-tap-timeline/AGENTS.md
 - opencode-output-styles: packages/opencode-output-styles/AGENTS.md
 - opencode-ram-monitor: packages/opencode-ram-monitor/AGENTS.md
+- opencode-auto-advisor: packages/opencode-auto-advisor/AGENTS.md
 
 ## Project Keywords & Context
 
