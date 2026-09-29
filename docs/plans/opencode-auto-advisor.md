@@ -1,6 +1,6 @@
 # OpenCode Auto Advisor
 
-**Status:** Planning / implementation not yet approved  
+**Status:** Implementation approved — implementation may proceed  
 **Package:** `@capybearista/opencode-auto-advisor`  
 **Host baseline:** OpenCode V2, initially `@opencode/plugin@2.0.18` and `@opencode/ai@2.0.18`  
 **Distribution:** npm `latest`
@@ -385,19 +385,20 @@ Execution contracts:
 
 Release/docs/final-readiness work is tracked by the epic acceptance checklist rather than a separate release issue.
 
-## Implementation approval gate
+## Implementation authorization
 
-Before modifying implementation code, the coding orchestrator must:
+Implementation is **approved as of 2026-09-28**. The coding orchestrator may proceed with implementation against this governing plan and the active issue contracts.
 
-1. inspect current repository instructions and current OpenCode V2 source/docs;
+During implementation, the coding orchestrator must:
+
+1. inspect current repository instructions and current OpenCode V2 source/docs before relying on runtime/API assumptions;
 2. inspect this plan and the active issue contracts;
-3. inspect the agents/tools available in its execution environment;
-4. refine the durable implementation plan, including exact tests and validation graph;
+3. use the agents/tools available in its execution environment appropriately;
+4. refine implementation details and the validation graph as concrete code/runtime evidence requires;
 5. select and document conservative initial threshold defaults and the 0-4 consequence anchors;
 6. resolve implementation details such as exact state fingerprint construction and deterministic budget accounting on failures;
-7. set the implementation plan to **Awaiting implementation approval**;
-8. present that plan to the user and stop.
+7. keep this plan and the active issue contracts synchronized with material findings.
 
-Implementation begins only after explicit user approval.
+No additional approval pause is required for implementation that stays within this approved scope.
 
-Material changes to requirements, architecture, public interfaces, privacy/security behavior, configuration semantics, release strategy, or acceptance criteria require the durable plan to be updated and re-approved.
+Material changes to requirements, architecture, public interfaces, privacy/security behavior, configuration semantics, release strategy, or acceptance criteria require the durable plan to be updated and explicitly re-approved before those changes are implemented.
