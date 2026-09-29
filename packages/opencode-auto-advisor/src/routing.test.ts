@@ -104,15 +104,19 @@ function domain(options: {
   readonly config?: AdvisorConfig | Error;
   readonly router: AdvisorRouter;
   readonly service?: AdvisorService;
+  readonly maxSessions?: number;
 }) {
-  return createRoutingDomain({
-    loadConfig: async () => {
-      if (options.config instanceof Error) throw options.config;
-      return options.config ?? configWith();
+  return createRoutingDomain(
+    {
+      loadConfig: async () => {
+        if (options.config instanceof Error) throw options.config;
+        return options.config ?? configWith();
+      },
+      router: options.router,
+      service: options.service ?? { consult: async () => ({ advice: "advice" }) },
     },
-    router: options.router,
-    service: options.service ?? { consult: async () => ({ advice: "advice" }) },
-  });
+    options.maxSessions === undefined ? {} : { maxSessions: options.maxSessions },
+  );
 }
 
 describe("routing modes", () => {
@@ -494,6 +498,34 @@ describe("turn identity", () => {
     expect(continuation.action).toBe("deny");
     expect(newTurn.action).toBe("accept");
     expect(advisor.calls).toHaveLength(2);
+  });
+});
+
+describe("turn state bounds", () => {
+  test("evicts the oldest session without disturbing suppression for live sessions", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
+    const routing = domain({
+      config: configWith({ mode: "observe" }),
+      router: router.router,
+      maxSessions: 2,
+    });
+    const opportunities = (sessionID: SessionID) =>
+      opportunity(stateWith([USER("hi")]), { sessionID });
+
+    const first = await routing.observe(opportunities("ses_1" as SessionID).value);
+    const repeated = await routing.observe(opportunities("ses_1" as SessionID).value);
+    const second = await routing.observe(opportunities("ses_2" as SessionID).value);
+    const third = await routing.observe(opportunities("ses_3" as SessionID).value);
+    const revived = await routing.observe(opportunities("ses_1" as SessionID).value);
+    const live = await routing.observe(opportunities("ses_3" as SessionID).value);
+
+    expect(first.action).toBe("accept");
+    expect(repeated.action).toBe("suppress");
+    expect(second.action).toBe("accept");
+    expect(third.action).toBe("accept");
+    expect(revived.action).toBe("accept");
+    expect(live.action).toBe("suppress");
+    expect(router.calls).toHaveLength(4);
   });
 });
 

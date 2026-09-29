@@ -1,6 +1,12 @@
 import { describeMedia, type MediaPlaceholder } from "./media.js";
 import type { ContextMessage } from "./messages.js";
-import { refKey, type SerializedAssistant, serializeAssistant } from "./serialize-assistant.js";
+import {
+  type AssistantBlock,
+  refKey,
+  type SerializedAssistant,
+  serializeAssistant,
+} from "./serialize-assistant.js";
+import { stableStringify } from "./stable.js";
 
 export interface CompactionCheckpoint {
   readonly providerID: string;
@@ -32,6 +38,7 @@ type SerializedEntryBody =
       readonly checkpoint?: CompactionCheckpoint;
       readonly error?: { readonly type: string; readonly message: string };
     }
+  | { readonly role: "tool"; readonly blocks: readonly AssistantBlock[] }
   | { readonly role: "marker"; readonly type: string; readonly detail?: string };
 
 export type SerializedEntry = SerializedEntryBody & { readonly origin?: AdvisorOrigin };
@@ -44,9 +51,7 @@ export function serializeAdvisorContext(entries: readonly SerializedEntry[]): st
   return stableStringify(entries);
 }
 
-export function stableStringify(value: unknown): string {
-  return JSON.stringify(sortKeys(value));
-}
+export { stableStringify };
 
 export function serializeMessage(
   message: ContextMessage & { readonly origin?: AdvisorOrigin },
@@ -139,15 +144,4 @@ function shellDetail(message: ShellMessage): string {
 
 function transition(previous: string | undefined, current: string): string {
   return previous ? `${previous} -> ${current}` : current;
-}
-
-function sortKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortKeys);
-  if (typeof value !== "object" || value === null) return value;
-  const record = value as Record<string, unknown>;
-  return Object.fromEntries(
-    Object.keys(record)
-      .sort()
-      .map((key) => [key, sortKeys(record[key])]),
-  );
 }

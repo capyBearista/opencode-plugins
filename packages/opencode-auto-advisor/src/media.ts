@@ -1,4 +1,4 @@
-export type MediaKind = "image" | "audio" | "video" | "document";
+export type MediaKind = "image" | "audio" | "video" | "document" | "unknown";
 
 export interface MediaDimensions {
   readonly width: number;
@@ -32,11 +32,49 @@ export function mediaKind(mime: string): MediaKind {
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("audio/")) return "audio";
   if (mime.startsWith("video/")) return "video";
-  return "document";
+  if (mime === "application/pdf" || mime.startsWith("text/")) return "document";
+  return "unknown";
+}
+
+export function sanitizeUri(uri: string): string {
+  const cleaned = uri.replace(/[?#][\s\S]*$/, "").trim();
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(cleaned);
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed) return leafName(cleaned) || "opaque";
+  if (parsed.protocol === "file:") return leafName(decode(parsed.pathname)) || "file:";
+  if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+    return `${parsed.origin}${parsed.pathname}`;
+  }
+  return parsed.protocol;
+}
+
+function decode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function leafName(value: string): string {
+  const parts = value.split(/[\\/]/);
+  return parts[parts.length - 1] ?? "";
+}
+
+function sanitizeMediaName(name: string | null | undefined): string | undefined {
+  if (!name) return undefined;
+  const cleaned = name.replace(/[?#][\s\S]*$/, "").trim();
+  const leaf = leafName(cleaned).trim();
+  return leaf || undefined;
 }
 
 export function describeMedia(descriptor: MediaDescriptor): MediaPlaceholder {
   const kind = mediaKind(descriptor.mime);
+  const name = sanitizeMediaName(descriptor.name);
   const dimensions =
     kind === "image" && descriptor.data
       ? imageDimensions(descriptor.data, descriptor.mime)
@@ -50,10 +88,10 @@ export function describeMedia(descriptor: MediaDescriptor): MediaPlaceholder {
   return {
     kind,
     mime: descriptor.mime,
-    ...(descriptor.name ? { name: descriptor.name } : {}),
+    ...(name ? { name } : {}),
     ...(dimensions ? { dimensions } : {}),
     ...(durationMs === undefined ? {} : { durationMs }),
-    source: descriptor.uri ? { type: "uri", uri: descriptor.uri } : { type: "inline" },
+    source: descriptor.uri ? { type: "uri", uri: sanitizeUri(descriptor.uri) } : { type: "inline" },
     inspected: false,
   };
 }

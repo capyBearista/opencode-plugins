@@ -1,3 +1,4 @@
+import { sha256Hex } from "./digest.js";
 import { type AdvisorOrigin, type SerializedEntry, stableStringify } from "./serialize.js";
 import type { AssistantBlock } from "./serialize-assistant.js";
 
@@ -5,7 +6,7 @@ const ADVISOR_TOOL_NAME = "advisor";
 const ADVISOR_ORIGIN: AdvisorOrigin = "advisor";
 
 export function routingFingerprint(entries: readonly SerializedEntry[]): string {
-  return stableStringify(fingerprintPreimage(entries));
+  return sha256Hex(stableStringify(fingerprintPreimage(entries)));
 }
 
 export function fingerprintPreimage(entries: readonly SerializedEntry[]): SerializedEntry[] {
@@ -27,5 +28,8 @@ export function fingerprintPreimage(entries: readonly SerializedEntry[]): Serial
 }
 
 function isMaterialBlock(block: AssistantBlock): boolean {
-  return !(block.type !== "text" && block.type !== "reasoning" && block.name === ADVISOR_TOOL_NAME);
+  if (block.type === "tool-call" || block.type === "tool-result" || block.type === "tool-error") {
+    return block.name !== ADVISOR_TOOL_NAME;
+  }
+  return true;
 }

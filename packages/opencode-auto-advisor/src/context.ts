@@ -6,34 +6,36 @@ import {
   stableStringify,
 } from "./serialize.js";
 
-export interface AdvisorContextSession {
+export interface AdvisorHistorySession {
   readonly context: (input: {
     readonly sessionID: SessionID;
   }) => Promise<readonly ContextMessage[]>;
 }
 
-export interface AdvisorContextInput {
+export interface AdvisorHistoryInput {
   readonly sessionID: SessionID;
   readonly messageID: string;
 }
 
-export interface CapturedAdvisorContext {
+export interface CapturedHistory {
   readonly entries: readonly SerializedEntry[];
+  readonly messageIDs: readonly string[];
   readonly transcript: string;
   readonly executorModel?: ModelReference;
   readonly lastUserMessageID?: string;
 }
 
-export async function captureAdvisorContext(
-  session: AdvisorContextSession,
-  input: AdvisorContextInput,
-): Promise<CapturedAdvisorContext> {
+export async function captureSessionHistory(
+  session: AdvisorHistorySession,
+  input: AdvisorHistoryInput,
+): Promise<CapturedHistory> {
   const messages = await session.context({ sessionID: input.sessionID });
   const entries = messages.map((message) => serializeMessage(message, input.messageID));
   const executorModel = resolveExecutorModel(messages, input.messageID);
   const lastUserMessageID = resolveLastUserMessageID(messages);
   return {
     entries,
+    messageIDs: messages.map((message) => message.id),
     transcript: serializeAdvisorContext(entries),
     ...(executorModel ? { executorModel } : {}),
     ...(lastUserMessageID ? { lastUserMessageID } : {}),

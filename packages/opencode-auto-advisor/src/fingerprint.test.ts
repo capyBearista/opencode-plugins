@@ -39,6 +39,16 @@ const readResult = (value: string): AssistantBlock => ({
 });
 
 describe("routingFingerprint", () => {
+  test("is a deterministic sha256 digest of the canonical preimage", () => {
+    expect(routingFingerprint([])).toBe(
+      "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    );
+    expect(routingFingerprint([user("Fix the bug")])).toMatch(/^[0-9a-f]{64}$/);
+    expect(routingFingerprint([user("Fix the bug")])).toBe(
+      routingFingerprint([user("Fix the bug")]),
+    );
+  });
+
   test("excludes entries flagged origin advisor", () => {
     const material = [user("Fix the bug"), assistant(false, [readResult("body")])];
     const injected = [

@@ -16,17 +16,20 @@
 
 ## Status
 
-Phase 1C implemented: the routing domain and observer sit alongside the Phase 1B
-explicit path. Explicit `advisor()` works end to end — strict global
-configuration, Executor context capture/serialization with media placeholders,
-Executor-model inheritance, and a stateless `AdvisorService` over
-`ctx.generate.text`. `ctx.session.hook("context")` now observes primary
-dispatches to fingerprint routing state, apply the deterministic policy, and
-account the per-turn consultation budget: `off` short-circuits, `observe`
+Phase 1D implemented: routing consumes the live assembled request and explicit
+consultations merge it with the current delta. `ctx.session.hook("context")`
+canonicalizes the request the host is about to dispatch (`event.system`,
+`event.messages`, `event.model`) into a bounded per-session snapshot, fingerprints
+that request with a SHA-256 digest, applies the deterministic policy, and
+accounts the per-turn consultation budget: `off` short-circuits, `observe`
 evaluates hypothetically without invoking the Advisor, and `active` performs the
-automatic consultation without delivering advice yet. The Zen/System One
-`AdvisorRouter` adapter, telemetry, RPC, TUI, storage, and advice delivery are
-intentionally absent and tracked by the execution contracts in
+automatic consultation without delivering advice yet. Explicit zero-argument
+`advisor()` works end to end — strict global configuration, Executor-model
+inheritance, and a stateless `AdvisorService` over `ctx.generate.text`; its
+context is the hook snapshot plus only the current assistant delta read from
+persisted history. The Zen/System One `AdvisorRouter` adapter, telemetry, RPC,
+TUI, storage, and advice delivery are intentionally absent and tracked by the
+execution contracts in
 [../../docs/plans/opencode-auto-advisor.md](../../docs/plans/opencode-auto-advisor.md).
 Add a Changeset only when the package becomes releasable.
 
@@ -65,16 +68,22 @@ src/
 ├── config-types.ts     # Knob types, defaults, ConfigError
 ├── config-parse.ts     # Strict sparse-config validation
 ├── config.ts           # Config-directory resolution + file loading
-├── context.ts          # Session read → captured, serialized context
+├── context.ts          # Durable session history → captured, serialized context
+├── request.ts          # Assembled model request → captured routing state
+├── request-serialize.ts  # Assembled-request serializer; unknown part types become type-name-only markers (no payload) so future host types alter the fingerprint instead of colliding
+├── consult.ts          # Explicit merge: captured request + current-turn delta
+├── snapshot-store.ts   # Bounded, turn-keyed per-session request snapshots
 ├── messages.ts         # Host message/tool shapes derived from @opencode/plugin types
-├── serialize.ts        # Canonical deterministic transcript serializer
+├── serialize.ts        # Canonical deterministic transcript serializer (durable form)
 ├── serialize-assistant.ts
+├── stable.ts           # Key-sorted stringify
+├── digest.ts           # SHA-256 helper
 ├── media.ts            # Media placeholders; raw bytes never leave this module
 ├── advisor-service.ts  # Fresh/stateless consultation service
 ├── routing-types.ts    # AdvisorRouter seam, decisions, 0-4 consequence anchors
 ├── router.ts           # Router result normalization (clamp/reject)
-├── fingerprint.ts      # Routing fingerprint + preimage composition
-├── routing.ts          # Modes, opportunity gating, policy, per-turn budget
+├── fingerprint.ts      # Routing fingerprint digest + preimage composition
+├── routing.ts          # Modes, opportunity gating, policy, bounded per-turn budget
 ├── routing-observer.ts # ctx.session.hook("context") wiring
 └── *.test.ts           # Colocated bun tests
 ```
@@ -86,40 +95,71 @@ src/
   idempotent dispose function that disposes the hook before the tool. The plugin
   creates one shared `AdvisorService` per setup; the tool and the automatic path
   both resolve through it, and `buildAdvisorService` is the shared seam.
-- Advisor context is the actual Executor history returned by
-  `ctx.session.context`, serialized chronologically. The assistant message that
-  carries the `advisor()` call is marked `inFlight: true`, so same-turn
-  assistant text before the call survives capture. Compaction entries include
-  checkpoint provenance; the provider-native checkpoint blob is omitted.
+- Three distinct context domains, each with its own explicit types:
+  `captureSessionHistory` serializes durable `ctx.session.context` messages;
+  `captureAssembledRequest` serializes the live hook request; `mergeExplicitConsult`
+  combines a turn-matched request snapshot with the persisted delta of the
+  in-flight assistant message. Only the merged context feeds explicit `advisor()`;
+  routing consumes only the assembled request. The assistant message that
+  carries the `advisor()` call is marked `inFlight: true`, so same-turn assistant
+  text before the call survives capture. Compaction entries include checkpoint
+  provenance; the provider-native checkpoint blob is omitted.
+- `mergeExplicitConsult` relies on the invariant that a turn-matched snapshot
+  already spans the durable prefix through the current user turn — the assembled
+  request carries the durable messages, so only the durable delta from the
+  in-flight message onward is appended and no earlier turn is duplicated. The
+  invariant is documented rather than re-verified because hook-time mutations
+  can legitimately differ from the durable text; the turn-key equality check is
+  the guard that keeps a stale snapshot out of the merge.
+- Turn-key logic is shared: capture and explicit lookup both go through the single `contentTurnKey` helper (`turnKeyFor` / `turnKeyForHistory` in `request.ts`) — a key-format change must land in both paths together or snapshots become write-only.
 - `serializeAdvisorContext` and `stableStringify` are pure, deterministic
-  (sorted keys) exports so routing fingerprints build on the same canonical
-  form. `SerializedEntry` carries an optional `origin: "advisor"` tag that the
-  serializer passes through and the fingerprint excludes; automatic delivery
-  (Phase 2) uses it.
-- Media (images, audio, video, documents) becomes metadata placeholders with
-  `inspected: false`; base64 payloads and provider-native blobs never reach the
-  prompt.
+  (sorted keys) exports, so all three serializers share one canonical entry form
+  that fingerprints build on. `SerializedEntry` carries an optional
+  `origin: "advisor"` tag that the serializers pass through and the fingerprint
+  excludes; automatic delivery (Phase 2) uses it.
+- Media (images, audio, video, documents, unknown) becomes metadata placeholders
+  with `inspected: false`; base64 payloads and provider-native blobs never reach
+  the prompt. URI sources drop query strings and fragments, local paths reduce
+  to a basename, and unrecognized MIME types stay `unknown` instead of being
+  mislabeled as documents. `describeMedia` sanitizes `name`/`filename` the same
+  way (query/fragment stripped, path reduced to a leaf) before every serializer
+  sees it, so a filename can never smuggle directory paths or URL secrets into
+  the transcript.
 - Explicit-consultation failures — session read, configuration, or generation —
   are returned as a visible `Auto Advisor consultation failed: …` tool result
   with `metadata.error`; they are never thrown past the tool boundary.
 
-## Routing (Phase 1C)
+## Routing
 
 - Boundary: exactly one `ctx.session.hook("context", …)` observer. On
   `@opencode/plugin` 2.0.18 the host only fires this hook for primary agent-loop
   dispatches (compaction, title, and generate dispatches have their own hook
   names), so a payload without `kind` is treated as primary; a payload that
   carries any other `kind` is skipped defensively.
-- Modes: `off` short-circuits before any session read; `observe` captures,
-  fingerprints, evaluates, and applies policy hypothetically with zero Advisor
-  invocations and zero context mutations; `active` additionally performs the
-  automatic consultation. No mode delivers advice yet.
-- Fingerprint: `routingFingerprint(entries)` canonicalizes the fingerprint
-  preimage. The preimage preserves transcript order and drops the in-flight
-  advisor tool-call block, `inFlight` flags (normalized to `false`), entries
-  flagged `origin: "advisor"`, and `idle` markers; `model-switched` and other
-  markers stay. Identical fingerprints are suppressed, so a failed or completed
-  opportunity is never retried against unchanged state.
+- Routing input is the assembled request the host is about to dispatch, read
+  from the hook event (`system`, `messages`, `model`), never a second
+  `session.context()` read of persisted history. Hook-time mutations therefore
+  affect routing state. The same request is captured into a bounded store
+  (LRU across sessions, one snapshot per session) keyed by
+  `(sessionID, last-user-message-id)`; a snapshot is only reused while its turn
+  key still matches the durable history, so stale snapshots never attach to a
+  later consultation. Unreadable dispatches fail open without throwing.
+- Modes: `off` short-circuits before evaluating; `observe` captures, fingerprints,
+  evaluates, and applies policy hypothetically with zero Advisor invocations and
+  zero context mutations; `active` additionally performs the automatic
+  consultation. No mode delivers advice yet. No mode reads the session context.
+  Every primary dispatch writes the request snapshot before the mode branches,
+  so `off` still snapshots for explicit `advisor()` consults — the snapshot is
+  the only source of hook-time system and user content.
+- Fingerprint: `routingFingerprint(entries)` is a SHA-256 digest over the
+  canonical fingerprint preimage emitted by `fingerprintPreimage`, which is on
+  the live routing path (the router evaluates the same material entries that the
+  digest covers). The preimage preserves transcript
+  order and drops the in-flight advisor tool-call block, `inFlight` flags
+  (normalized to `false`), entries flagged `origin: "advisor"`, and `idle`
+  markers; state markers such as model or agent switches stay. Identical
+  fingerprints are suppressed, so a failed or completed opportunity is never
+  retried against unchanged state.
 - Consequence anchors (the `consequence` router answer is an integer 0-4 on this five-level rubric; the Eval client enforces `0..n−1` dynamically, so any future rubric change must keep exactly five levels to preserve the 0-4 contract):
 
   | Level | Summary | Guidance |
@@ -135,14 +175,21 @@ src/
   every opportunity. `advisorWouldHelp` is clamped to `[0, 1]` for finite values;
   NaN and ±Infinity are rejected as router errors; a non-integer or
   out-of-range consequence is a router error.
-- Budget: keyed by `(sessionID, last-user-message-id)`. A new user message
-  resets the turn. The budget is checked after policy: rejected opportunities
+- Budget: keyed by `(sessionID, turn key)` where the turn key is the last user
+  message id; an id-less last user message falls back to
+  `content:<message-index>:<content-hash>` so identical id-less turns in
+  different positions stay distinct, and a dispatch with no user message falls
+  back to `content:no-user:<entries-hash>` instead of sharing the empty key.
+  A new user message resets the turn. The budget is checked after policy: rejected opportunities
   never consume it, and budget-exhausted opportunities are still evaluated so
   `observe` can record what `active` would have done. An accepted opportunity
   consumes one attempt whether the automatic consultation succeeds or fails;
   explicit `advisor()` never consumes. Router errors, capture failures, and
   configuration errors fail open without consuming an attempt, and the
-  fingerprint is still recorded so the same state is not retried.
+  fingerprint is still recorded so the same state is not retried. Turn and
+  budget state is an LRU keyed by session with the same cap as the snapshot
+  store (64, refreshed on access, oldest session evicted), so a long-lived
+  process cannot accumulate routing state across closed sessions.
 - Router seam: stable code depends on
   `AdvisorRouter.evaluate(state) → { advisorWouldHelp, consequence, metadata? }`.
   The OpenCode `@opencode/ai` Evaluation/System One adapter lands in Phase 2 and
@@ -151,7 +198,7 @@ src/
 - Phase 1 performs no provider calls beyond `ctx.generate.text` on the
   configured-or-inherited Advisor model; no Zen/paid-only routing calls exist.
   `routing.models` is validated but unconsumed until the #50 adapter.
-- Known limits carried to Phase 2 (#50): per-session turn state is an unbounded in-memory map (needs eviction or session-close cleanup); advisor prompts embed the full transcript with no size bound (needs a truncation policy before `active` is recommended); fingerprints are stored as inspectable strings (hash on persist to telemetry).
+- Known limits carried to Phase 2 (#50): advisor prompts embed the full transcript with no size bound (needs a truncation policy before `active` is recommended); the digest fingerprint is computed per opportunity, and any telemetry persistence must store only the digest; `sanitizeUri` preserves http(s) path segments, so a secret embedded in a URL path can still reach the prompt (query strings and fragments are stripped, but paths are not); no-user turns fall back to durable history in real flows (the in-flight flag asymmetry keeps hook and durable no-user keys from coinciding) — changing that needs an explicit design decision, not a key-format tweak.
 
 ## V2 Install and Compatibility
 
@@ -188,11 +235,18 @@ src/
 - Runtime smoke: `bun run smoke` loads the **built** package-root `server.js`
   (never `dist/*` directly) with a temporary `OPENCODE_CONFIG_DIR`, asserts the
   plugin id, the zero-argument tool contract, and exactly one `context` hook,
-  executes a consultation through `session.context` + `generate.text` with
-  executor-model inheritance, fires frozen primary/auxiliary dispatches in all
-  three modes (off performs zero session reads and zero generation; no mode
-  mutates the dispatch), and verifies cleanup disposes the hook and tool
-  registrations.
+  fires frozen primary/auxiliary dispatches in all three modes (routing never
+  reads persisted history and never mutates the dispatch), then executes a
+  consultation through the hook snapshot + `session.context` + `generate.text`
+  and asserts the hook-time system, the captured user message, and the current
+  assistant delta each appear exactly once with executor-model inheritance.
+  Cleanup must dispose the hook and tool registrations.
+- Live verification (2.0.18): a real `opencode run --standalone` loads the built
+  package, uses a local OpenAI-compatible provider stand-in, and checks that the
+  context hook sees the assembled request, the merged advisor prompt contains the
+  hook-only system prompt exactly once plus the current assistant delta exactly
+  once, and the hook turn key matches the durable user message id. Keep probe
+  fixtures in tmpdirs with private `OPENCODE_CONFIG_DIR`/`XDG_*` roots.
 
 ## License
 

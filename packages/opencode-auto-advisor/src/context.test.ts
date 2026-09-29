@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ContextMessage, SessionID } from "./context.js";
-import { captureAdvisorContext, serializeAdvisorContext, stableStringify } from "./context.js";
+import { captureSessionHistory, serializeAdvisorContext, stableStringify } from "./context.js";
 import { serializeMessage } from "./serialize.js";
 
 const PNG_1X1 =
@@ -26,7 +26,7 @@ const user = (text: string, files?: unknown[], id = "msg-user"): ContextMessage 
   ...(files ? { files: files as never } : {}),
 });
 
-describe("captureAdvisorContext", () => {
+describe("captureSessionHistory", () => {
   test("preserves chronological roles, assistant text before the call, reasoning, tool calls and results", async () => {
     const messages: ContextMessage[] = [
       system("System rules"),
@@ -95,10 +95,17 @@ describe("captureAdvisorContext", () => {
       },
     ];
 
-    const captured = await captureAdvisorContext(session(messages), input);
+    const captured = await captureSessionHistory(session(messages), input);
 
     expect(captured.executorModel).toEqual({ providerID: "opencode", id: "jev-1.14" });
     expect(captured.lastUserMessageID).toBe("msg-user");
+    expect(captured.messageIDs).toEqual([
+      "msg-system",
+      "msg-user",
+      "msg-assistant-1",
+      "msg-compaction",
+      "msg-current",
+    ]);
     expect(captured.entries).toEqual([
       { role: "system", text: "System rules", description: "base" },
       {
@@ -202,7 +209,7 @@ describe("captureAdvisorContext", () => {
       },
     ];
 
-    const captured = await captureAdvisorContext(session(messages), input);
+    const captured = await captureSessionHistory(session(messages), input);
 
     expect(captured.entries[0]).toEqual({
       role: "assistant",
@@ -220,7 +227,7 @@ describe("captureAdvisorContext", () => {
               kind: "image",
               mime: "image/png",
               name: "shot.png",
-              source: { type: "uri", uri: "file:///tmp/shot.png" },
+              source: { type: "uri", uri: "shot.png" },
               inspected: false,
             },
           ],
@@ -286,7 +293,7 @@ describe("captureAdvisorContext", () => {
       },
     ];
 
-    const captured = await captureAdvisorContext(session(messages), input);
+    const captured = await captureSessionHistory(session(messages), input);
 
     expect(captured.entries.map((entry) => ({ ...entry }))).toEqual([
       { role: "marker", type: "synthetic", detail: "continue after incomplete stream" },
@@ -321,7 +328,7 @@ describe("captureAdvisorContext", () => {
       },
     ];
 
-    const captured = await captureAdvisorContext(session(messages), input);
+    const captured = await captureSessionHistory(session(messages), input);
 
     expect(captured.entries).toEqual([
       { role: "compaction", status: "running", reason: "auto", summary: "s", recent: "r" },
@@ -348,13 +355,13 @@ describe("captureAdvisorContext", () => {
       user("second", undefined, "msg-user-b"),
     ];
 
-    const captured = await captureAdvisorContext(session(messages), input);
+    const captured = await captureSessionHistory(session(messages), input);
 
     expect(captured.lastUserMessageID).toBe("msg-user-b");
   });
 
   test("omits the last user message identity when no user message exists", async () => {
-    const captured = await captureAdvisorContext(session([system("rules")]), input);
+    const captured = await captureSessionHistory(session([system("rules")]), input);
 
     expect(captured.lastUserMessageID).toBeUndefined();
   });
@@ -365,7 +372,7 @@ describe("captureAdvisorContext", () => {
         throw new Error("session read failed");
       },
     };
-    await expect(captureAdvisorContext(failing, input)).rejects.toThrow("session read failed");
+    await expect(captureSessionHistory(failing, input)).rejects.toThrow("session read failed");
   });
 });
 

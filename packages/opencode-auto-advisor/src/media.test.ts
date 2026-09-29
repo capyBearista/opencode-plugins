@@ -26,13 +26,15 @@ function jpeg(width: number, height: number): string {
 }
 
 describe("mediaKind", () => {
-  test("classifies mime families and defaults to document", () => {
+  test("classifies known mime families and reports unknown types truthfully", () => {
     expect(mediaKind("image/png")).toBe("image");
     expect(mediaKind("audio/mpeg")).toBe("audio");
     expect(mediaKind("video/mp4")).toBe("video");
     expect(mediaKind("application/pdf")).toBe("document");
     expect(mediaKind("text/plain")).toBe("document");
-    expect(mediaKind("")).toBe("document");
+    expect(mediaKind("application/octet-stream")).toBe("unknown");
+    expect(mediaKind("application/x-custom")).toBe("unknown");
+    expect(mediaKind("")).toBe("unknown");
   });
 });
 
@@ -76,10 +78,73 @@ describe("describeMedia", () => {
       kind: "document",
       mime: "application/pdf",
       name: "report.pdf",
-      source: { type: "uri", uri: "file:///tmp/report.pdf" },
+      source: { type: "uri", uri: "report.pdf" },
       inspected: false,
     });
     expect(describeMedia({ mime: "video/mp4", durationMs: 4200 }).durationMs).toBe(4200);
+  });
+
+  test("drops query strings and fragments from https sources but keeps host and path", () => {
+    const placeholder = describeMedia({
+      mime: "image/png",
+      name: "signed.png",
+      uri: "https://cdn.example.com/assets/a/signed.png?X-Amz-Signature=SECRET#fragment",
+    });
+
+    expect(placeholder).toEqual({
+      kind: "image",
+      mime: "image/png",
+      name: "signed.png",
+      source: { type: "uri", uri: "https://cdn.example.com/assets/a/signed.png" },
+      inspected: false,
+    });
+    const serialized = JSON.stringify(placeholder);
+    expect(serialized).not.toContain("?");
+    expect(serialized).not.toContain("#");
+    expect(serialized).not.toContain("SECRET");
+  });
+
+  test("reduces local file paths to a basename and never keeps directory paths", () => {
+    for (const uri of [
+      "file:///home/user/secret-project/report.pdf",
+      "/home/user/secret-project/report.pdf",
+      "relative/dir/report.pdf?token=SECRET#frag",
+      "\\\\server\\share\\secret-project\\report.pdf",
+    ]) {
+      const placeholder = describeMedia({ mime: "application/pdf", uri, name: "report.pdf" });
+      expect(placeholder.source).toEqual({ type: "uri", uri: "report.pdf" });
+      const serialized = JSON.stringify(placeholder);
+      expect(serialized).not.toContain("secret-project");
+      expect(serialized).not.toContain("token");
+    }
+  });
+
+  test("reduces media names to a sanitized leaf and drops query and fragment", () => {
+    const cases: ReadonlyArray<{ readonly name: string; readonly expected: string }> = [
+      { name: "/home/user/secret-project/report.pdf", expected: "report.pdf" },
+      { name: "C:\\Users\\me\\secret-project\\report.pdf", expected: "report.pdf" },
+      { name: "https://cdn.example.com/a/signed.png?token=SECRET#frag", expected: "signed.png" },
+      { name: "report.pdf?X-Amz-Signature=SECRET#fragment", expected: "report.pdf" },
+    ];
+    for (const { name, expected } of cases) {
+      const placeholder = describeMedia({ mime: "application/pdf", name });
+      expect(placeholder.name).toBe(expected);
+      const serialized = JSON.stringify(placeholder);
+      expect(serialized).not.toContain("secret-project");
+      expect(serialized).not.toContain("SECRET");
+    }
+    expect(describeMedia({ mime: "application/pdf", name: "secret-project/" })).not.toHaveProperty(
+      "name",
+    );
+  });
+
+  test("represents unrepresentable uri schemes structurally without leaking payloads", () => {
+    const placeholder = describeMedia({
+      mime: "image/png",
+      uri: "data:image/png;base64,SECRETPAYLOAD",
+    });
+    expect(placeholder.source).toEqual({ type: "uri", uri: "data:" });
+    expect(JSON.stringify(placeholder)).not.toContain("SECRETPAYLOAD");
   });
 
   test("omits optional metadata that is missing or unusable", () => {

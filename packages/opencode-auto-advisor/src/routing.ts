@@ -11,6 +11,7 @@ import type {
   RoutingOpportunity,
 } from "./routing-types.js";
 import { serializeAdvisorContext } from "./serialize.js";
+import { DEFAULT_MAX_SESSIONS } from "./snapshot-store.js";
 
 export interface RoutingDomainDeps {
   readonly loadConfig: () => Promise<AdvisorConfig>;
@@ -28,7 +29,11 @@ interface TurnState {
   consumed: number;
 }
 
-export function createRoutingDomain(deps: RoutingDomainDeps): RoutingDomain {
+export function createRoutingDomain(
+  deps: RoutingDomainDeps,
+  options: { readonly maxSessions?: number } = {},
+): RoutingDomain {
+  const maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
   const turns = new Map<SessionID, TurnState>();
 
   return {
@@ -51,7 +56,7 @@ export function createRoutingDomain(deps: RoutingDomainDeps): RoutingDomain {
       }
 
       const fingerprint = routingFingerprint(captured.entries);
-      const turn = turnFor(turns, opportunity.sessionID, captured.lastUserMessageID);
+      const turn = turnFor(turns, opportunity.sessionID, captured.lastUserMessageID, maxSessions);
       if (turn.fingerprint === fingerprint) return { action: "suppress", mode, fingerprint };
       turn.fingerprint = fingerprint;
 
@@ -107,11 +112,22 @@ function turnFor(
   turns: Map<SessionID, TurnState>,
   sessionID: SessionID,
   userMessageID: string,
+  maxSessions: number,
 ): TurnState {
   const existing = turns.get(sessionID);
-  if (existing && existing.userMessageID === userMessageID) return existing;
+  if (existing && existing.userMessageID === userMessageID) {
+    turns.delete(sessionID);
+    turns.set(sessionID, existing);
+    return existing;
+  }
   const next: TurnState = { userMessageID, consumed: 0 };
+  turns.delete(sessionID);
   turns.set(sessionID, next);
+  while (turns.size > maxSessions) {
+    const oldest = turns.keys().next().value;
+    if (oldest === undefined) break;
+    turns.delete(oldest);
+  }
   return next;
 }
 

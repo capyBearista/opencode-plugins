@@ -32,7 +32,9 @@ export type AssistantBlock =
       readonly id: string;
       readonly name: string;
       readonly error: SerializedError;
-    };
+    }
+  | { readonly type: "media"; readonly media: MediaPlaceholder }
+  | { readonly type: "marker"; readonly marker: string; readonly detail?: string };
 
 export interface SerializedAssistant {
   readonly role: "assistant";

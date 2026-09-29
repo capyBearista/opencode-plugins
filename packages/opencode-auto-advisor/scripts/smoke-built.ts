@@ -31,8 +31,14 @@ function dispatch(extra: Record<string, unknown> = {}) {
     sessionID: "ses_smoke",
     agent: "build",
     model: { providerID: "opencode", id: "jev-1.13" },
-    system: [],
-    messages: [],
+    system: [{ type: "text", text: "smoke hook system" }],
+    messages: [
+      {
+        id: "msg-user",
+        role: "user",
+        content: [{ type: "text", text: "smoke prompt" }],
+      },
+    ],
     options: {},
     tools: {},
     ...extra,
@@ -135,14 +141,13 @@ assert(prompts.length === 0, "off mode generated text");
 
 await writeFile(configPath, JSON.stringify({ routing: { mode: "observe" } }));
 await fire(dispatch({ kind: "primary" }));
-assert(contextReads === 1, "observe mode did not evaluate exactly one primary dispatch");
+assert(contextReads === 0, "observe mode read persisted history instead of the hook request");
 assert(prompts.length === 0, "observe mode invoked the advisor");
 await fire(dispatch({ kind: "compaction" }));
-assert(contextReads === 1, "observe mode evaluated an auxiliary dispatch");
+assert(contextReads === 0, "observe mode evaluated an auxiliary dispatch");
 
 await writeFile(configPath, JSON.stringify({ routing: { mode: "active" } }));
 await fire(dispatch({ kind: "primary" }));
-assert(contextReads === 2, "active mode did not evaluate the primary dispatch");
 assert(prompts.length === 0, "active mode generated without a configured router");
 
 assert(added.length === 1, "setup did not register exactly one tool");
@@ -171,9 +176,19 @@ assert(
   prompts[0]?.model?.providerID === "opencode" && prompts[0]?.model?.id === "jev-1.13",
   "the advisor did not inherit the executor model",
 );
+const advisorPrompt = prompts[0]?.prompt ?? "";
+const occurrences = (value: string, needle: string) => value.split(needle).length - 1;
 assert(
-  prompts[0]?.prompt.includes("smoke context"),
-  "the advisor prompt did not include the session context",
+  occurrences(advisorPrompt, "smoke hook system") === 1,
+  "the advisor prompt did not include the hook-time system mutation exactly once",
+);
+assert(
+  occurrences(advisorPrompt, "smoke prompt") === 1,
+  "the advisor prompt did not include the captured request user message exactly once",
+);
+assert(
+  occurrences(advisorPrompt, "smoke context") === 1,
+  "the advisor prompt did not include the current assistant delta exactly once",
 );
 
 assert(typeof cleanup === "function", "setup did not return a cleanup function");
@@ -188,5 +203,5 @@ else process.env.OPENCODE_CONFIG_DIR = previousConfigDirectory;
 await rm(configDirectory, { recursive: true, force: true });
 
 process.stdout.write(
-  "smoke: built server.js registered the advisor tool and one context hook; off/observe/active dispatch handling never mutated the dispatch and never generated without a router; cleanup disposed both registrations\n",
+  "smoke: built server.js registered the advisor tool and one context hook; routing read the assembled hook request without touching persisted history; the explicit consultation merged the hook snapshot with the current assistant delta exactly once in every mode; cleanup disposed both registrations\n",
 );
