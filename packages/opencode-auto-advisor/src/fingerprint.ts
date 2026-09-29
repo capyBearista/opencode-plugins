@@ -1,0 +1,31 @@
+import { type AdvisorOrigin, type SerializedEntry, stableStringify } from "./serialize.js";
+import type { AssistantBlock } from "./serialize-assistant.js";
+
+const ADVISOR_TOOL_NAME = "advisor";
+const ADVISOR_ORIGIN: AdvisorOrigin = "advisor";
+
+export function routingFingerprint(entries: readonly SerializedEntry[]): string {
+  return stableStringify(fingerprintPreimage(entries));
+}
+
+export function fingerprintPreimage(entries: readonly SerializedEntry[]): SerializedEntry[] {
+  const preimage: SerializedEntry[] = [];
+  for (const entry of entries) {
+    if (entry.origin === ADVISOR_ORIGIN) continue;
+    if (entry.role === "marker" && entry.type === "idle") continue;
+    if (entry.role !== "assistant") {
+      preimage.push(entry);
+      continue;
+    }
+    preimage.push({
+      ...entry,
+      inFlight: false,
+      blocks: entry.inFlight ? entry.blocks.filter(isMaterialBlock) : entry.blocks,
+    });
+  }
+  return preimage;
+}
+
+function isMaterialBlock(block: AssistantBlock): boolean {
+  return !(block.type !== "text" && block.type !== "reasoning" && block.name === ADVISOR_TOOL_NAME);
+}

@@ -1,0 +1,40 @@
+{
+  "name": "@capybearista/opencode-auto-advisor",
+  "version": "2.0.0",
+  "description": "OpenCode V2 plugin that provides an independent Advisor: explicit consultation and the routing domain ship in Phase 1; advice delivery, telemetry, and the Zen AdvisorRouter adapter are pending",
+  "author": "capyBearista <capybearista@github.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/capyBearista/opencode-plugins.git",
+    "directory": "packages/opencode-auto-advisor"
+  },
+  "type": "module",
+  "license": "MPL-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "server.js"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "bunx @biomejs/biome check .",
+    "check": "bunx @biomejs/biome check --write .",
+    "ci": "bunx @biomejs/biome ci .",
+    "test": "bun test",
+    "smoke": "bun run build && bun scripts/smoke-built.ts"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "2.0.18"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.0.18"
+  }
+}
