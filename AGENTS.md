@@ -48,6 +48,9 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 - **MUST** keep V1 and V2 lines apart. The loader and timeline V1 releases are frozen but available by exact pin. Both lines may share the default config directory, so use separate profiles (`OPENCODE_CONFIG_DIR`) for side-by-side testing.
 - **SHOULD** manage V2 targets with `opencode plugin check` / `opencode plugin update`; a restart or reload alone does not upgrade a cached target, and exact pins stay fixed.
 - Channel source of truth: [`tools/release-channels.json`](tools/release-channels.json), enforced by [`tools/release-channel-guard.ts`](tools/release-channel-guard.ts).
+- Registering a new package touches four files together: `tools/release-channels.json`, the `APPROVED_POLICY` map plus the exact-count checks in `tools/release-channel-guard.ts`, the package fixtures in `tools/release-channel-guard.test.ts`, and the new `package.json` itself (v2 class requires a stable version ≥2.0.0).
+- `bun run release:check` fails closed with HTTP 404 for never-published packages while typecheck/lint/test stay green; plan a first-publish bootstrap instead of treating it as a regression.
+- When adding a package, update the V2 status table, the packages list, and the specialized-context list together — all three enumerate packages by hand.
 
 ### Bug Fix Workflow (MUST)
 - **MUST** identify and record the root cause before broad fixes; for bugs/regressions, use the `systematic-debugging` skill first and escalate to `five-whys` if the cause remains unclear or review findings keep shifting.
@@ -137,6 +140,7 @@ rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
 - Merge PRs with a merge commit, not squash or rebase: preserve the feature branch's commits in `main` so the local branch can be removed with `git branch -d`.
 - Keep the remote feature branch after merging (disable automatic branch deletion on GitHub); delete only the local branch unless the user explicitly asks to remove the remote one.
 - Safety-net-blocked git forms have recoverable equivalents: `git stash -u` before `worktree remove` (never `--force`), `git update-ref` for pointer-only moves on verified-identical trees, `git merge --ff-only` where ancestry allows, `git branch -d` (never `-D` in chained commands)
+- Blocked `git restore <path>` (unstaged) has two recoverable forms: `git restore --staged <path>` to unstage only, or `git show HEAD:<path>` plus recreating the file to revert a worktree deletion without touching other changes.
 - Merge commits also need conventional messages — the commitlint hook rejects empty subject/type on merges too
 - `git log --all -- <path>` also lists merges that deleted the path; prove artifact absence with `git rev-list --objects --all --reflog` plus `git cat-file -e <blob>`, not log output
 - Release-channel policy edits never move npm dist-tags (guard returns `noop` for published versions); promotion is an authenticated `npm dist-tag` op — E401 in unattended sessions means handing exact commands to an operator
@@ -145,6 +149,7 @@ rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
 - **Unit tests**: colocated (bun test)
 - Run tests before committing (enforced by CI)
 - Add runtime smoke coverage or an explicit built-artifact verification step for plugin entrypoints, TUI render paths, or config-driven loading changes.
+- Turbo replays cached task logs, so after a fix re-run with `--force` and cite only the fresh run as completion evidence.
 
 ## Reference Docs
 
@@ -194,3 +199,4 @@ This repository uses **Bun Workspaces** for dependency management and **Turborep
    - Root: `bun run build`, `bun run test`, `bun run lint`
 4. **Releasing:** Use the `release-plugin` skill.
    - Run `bun changeset` at the root to record change intents.
+- Review routing: send diff-level gate reviews to `code-reviewer`; `oracle` excludes final diff auditing and declines such requests.

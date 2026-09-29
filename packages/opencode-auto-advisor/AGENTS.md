@@ -120,7 +120,7 @@ src/
   flagged `origin: "advisor"`, and `idle` markers; `model-switched` and other
   markers stay. Identical fingerprints are suppressed, so a failed or completed
   opportunity is never retried against unchanged state.
-- Consequence anchors (the `consequence` router answer is an integer 0-4):
+- Consequence anchors (the `consequence` router answer is an integer 0-4 on this five-level rubric; the Eval client enforces `0..n−1` dynamically, so any future rubric change must keep exactly five levels to preserve the 0-4 contract):
 
   | Level | Summary | Guidance |
   | --- | --- | --- |
@@ -132,7 +132,8 @@ src/
 
 - Policy: `consult = advisorWouldHelp >= routing.advisorWouldHelpThreshold AND
   consequence >= routing.consequenceThreshold`, read from live configuration for
-  every opportunity. `advisorWouldHelp` is clamped to `[0, 1]`; a non-integer or
+  every opportunity. `advisorWouldHelp` is clamped to `[0, 1]` for finite values;
+  NaN and ±Infinity are rejected as router errors; a non-integer or
   out-of-range consequence is a router error.
 - Budget: keyed by `(sessionID, last-user-message-id)`. A new user message
   resets the turn. The budget is checked after policy: rejected opportunities
@@ -150,6 +151,7 @@ src/
 - Phase 1 performs no provider calls beyond `ctx.generate.text` on the
   configured-or-inherited Advisor model; no Zen/paid-only routing calls exist.
   `routing.models` is validated but unconsumed until the #50 adapter.
+- Known limits carried to Phase 2 (#50): per-session turn state is an unbounded in-memory map (needs eviction or session-close cleanup); advisor prompts embed the full transcript with no size bound (needs a truncation policy before `active` is recommended); fingerprints are stored as inspectable strings (hash on persist to telemetry).
 
 ## V2 Install and Compatibility
 
