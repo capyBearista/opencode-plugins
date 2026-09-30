@@ -55,4 +55,14 @@ describe("createSnapshotStore", () => {
     }
     expect(store.sessions()).toBe(1);
   });
+
+  test("forget drops a closed session snapshot", () => {
+    const store = createSnapshotStore();
+    store.capture(snapshot("ses_1", "turn-1", "one"));
+
+    store.forget("ses_1" as SessionID);
+
+    expect(store.sessions()).toBe(0);
+    expect(store.read("ses_1" as SessionID, "turn-1")).toBeUndefined();
+  });
 });

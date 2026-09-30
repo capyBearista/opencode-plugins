@@ -11,6 +11,7 @@ export interface RequestSnapshot {
 export interface SnapshotStore {
   readonly capture: (snapshot: RequestSnapshot) => void;
   readonly read: (sessionID: SessionID, turnKey: string) => RequestSnapshot | undefined;
+  readonly forget: (sessionID: SessionID) => void;
   readonly sessions: () => number;
 }
 
@@ -40,6 +41,9 @@ export function createSnapshotStore(
       snapshots.delete(sessionID);
       snapshots.set(sessionID, snapshot);
       return snapshot;
+    },
+    forget: (sessionID) => {
+      snapshots.delete(sessionID);
     },
     sessions: () => snapshots.size,
   };

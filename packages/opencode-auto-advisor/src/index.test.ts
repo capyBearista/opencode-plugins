@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import plugin, { ADVISOR_TOOL_DESCRIPTION, ADVISOR_TOOL_NAME } from "./index.js";
+import { defaultConfig } from "./config.js";
+import plugin, { ADVISOR_TOOL_DESCRIPTION, ADVISOR_TOOL_NAME, registerPlugin } from "./index.js";
 
 type AddedTool = {
   name: string;
@@ -85,6 +86,84 @@ describe("@capybearista/opencode-auto-advisor", () => {
     expect(manifest.exports["."].default).toBe("./dist/index.js");
     expect(manifest.files).toEqual(["dist", "server.js"]);
     expect(manifest.peerDependencies["@opencode/plugin"]).toBeString();
+  });
+
+  test("full host context wires telemetry storage, rpc, delivery, and event cleanup", async () => {
+    const base = createTestContext();
+    const values = new Map<string, unknown>();
+    const rpcIDs: string[] = [];
+    const signals: AbortSignal[] = [];
+    const ctx = {
+      ...base.ctx,
+      generate: { text: async () => ({ text: "advice" }) },
+      storage: {
+        get: async (key: string) => values.get(key),
+        set: async (key: string, value: unknown) => {
+          values.set(key, value);
+        },
+        remove: async (key: string) => {
+          values.delete(key);
+        },
+        scan: async () => ({ entries: [] }),
+      },
+      rpc: {
+        register: async (definition: { id: string }) => {
+          rpcIDs.push(definition.id);
+          return {
+            dispose: async () => {
+              base.disposers.push(`rpc:${definition.id}`);
+            },
+            events: { emit: async () => undefined },
+          };
+        },
+      },
+      event: {
+        subscribe: (options: { signal?: AbortSignal }) => {
+          if (options.signal) signals.push(options.signal);
+          return (async function* () {
+            await new Promise<void>((resolve) => {
+              options.signal?.addEventListener("abort", () => resolve(), { once: true });
+            });
+          })();
+        },
+      },
+    };
+    const cleanup = await registerPlugin(ctx as never, {
+      loadConfig: async () => ({
+        ...defaultConfig(),
+        routing: { ...defaultConfig().routing, mode: "active" },
+      }),
+      router: { evaluate: async () => ({ advisorWouldHelp: 0.9, consequence: 4 }) },
+    });
+
+    const dispatch = {
+      sessionID: "ses_1",
+      agent: "build",
+      model: { providerID: "opencode", id: "jev-1.13" },
+      system: [],
+      messages: [{ id: "msg-user-1", role: "user", content: [{ type: "text", text: "hi" }] }],
+      options: {},
+      tools: {},
+    };
+    await base.hookCallbacks.get("context")?.(dispatch);
+
+    expect(dispatch.messages).toHaveLength(2);
+    expect(dispatch.messages[1]?.role).toBe("system");
+    expect(rpcIDs).toEqual(["experimental.auto-advisor"]);
+    expect(values.has("head")).toBe(true);
+    const stored = [...values.values()].find(
+      (value) => (value as { decision?: string }).decision === "accept",
+    );
+    expect(stored).toMatchObject({ mode: "active", delivered: true });
+    expect(signals).toHaveLength(1);
+
+    await cleanup?.();
+    expect(signals[0]?.aborted).toBe(true);
+    expect(base.disposers).toEqual([
+      "hook:context",
+      "rpc:experimental.auto-advisor",
+      `tool:${ADVISOR_TOOL_NAME}`,
+    ]);
   });
 
   test("real V2 host resolves the package root server wrapper to the built entry", () => {

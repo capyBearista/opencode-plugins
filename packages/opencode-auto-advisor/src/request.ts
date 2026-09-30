@@ -40,8 +40,8 @@ function turnKeyFor(
   for (let index = request.messages.length - 1; index >= 0; index -= 1) {
     const message = request.messages[index];
     if (!message || message.role !== "user") continue;
-    if (message.id) return message.id;
     const body = serializeRequestMessage(message, agent, model);
+    if (message.id) return message.id;
     return contentTurnKey(index, body);
   }
   return `content:no-user:${sha256Hex(stableStringify(entries))}`;

@@ -1,1 +1,1 @@
-export { default } from "./dist/index.js";
+export { default, registerPlugin } from "./dist/index.js";

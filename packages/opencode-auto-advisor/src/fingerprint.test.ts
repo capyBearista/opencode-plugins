@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fingerprintPreimage, routingFingerprint } from "./fingerprint.js";
+import { routingFingerprint } from "./fingerprint.js";
 import type { SerializedEntry } from "./serialize.js";
 import type { AssistantBlock } from "./serialize-assistant.js";
 
@@ -47,17 +47,6 @@ describe("routingFingerprint", () => {
     expect(routingFingerprint([user("Fix the bug")])).toBe(
       routingFingerprint([user("Fix the bug")]),
     );
-  });
-
-  test("excludes entries flagged origin advisor", () => {
-    const material = [user("Fix the bug"), assistant(false, [readResult("body")])];
-    const injected = [
-      ...material,
-      { role: "system", text: "advisor advice", origin: "advisor" } satisfies SerializedEntry,
-    ];
-
-    expect(routingFingerprint(injected)).toBe(routingFingerprint(material));
-    expect(JSON.stringify(fingerprintPreimage(injected))).not.toContain("advisor advice");
   });
 
   test("excludes inFlight flags and the in-flight advisor tool-call block", () => {

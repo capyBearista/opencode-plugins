@@ -3,10 +3,14 @@ import {
   CONSEQUENCE_MIN,
   type NormalizedAssessment,
   type RouterAssessment,
+  type RoutingFailure,
 } from "./routing-types.js";
 
 export class RouterError extends Error {
-  constructor(detail: string) {
+  constructor(
+    detail: string,
+    readonly failure?: RoutingFailure,
+  ) {
     super(detail);
     this.name = "RouterError";
   }

@@ -39,12 +39,26 @@ export interface RoutingOpportunity {
 
 export type RoutingAction = "skip" | "suppress" | "deny" | "reject" | "accept" | "fail";
 
+export interface RoutingFailure {
+  readonly errorClass: string;
+  readonly model?: string;
+  readonly attempts?: number;
+}
+
+export interface RoutingPolicySnapshot {
+  readonly advisorWouldHelpThreshold: number;
+  readonly consequenceThreshold: number;
+}
+
 export interface RoutingDecision {
   readonly action: RoutingAction;
   readonly mode?: RoutingMode;
   readonly fingerprint?: string;
   readonly assessment?: NormalizedAssessment;
   readonly advice?: string;
+  readonly advisorModel?: string;
+  readonly failure?: RoutingFailure;
+  readonly policy?: RoutingPolicySnapshot;
   readonly error?: string;
 }
 

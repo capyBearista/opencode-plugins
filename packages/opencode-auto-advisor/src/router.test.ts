@@ -65,22 +65,72 @@ describe("normalizeAssessment", () => {
   });
 });
 
+const ADAPTER_FILES = [
+  "zen-auth.ts",
+  "zen-errors.ts",
+  "zen-evaluation.ts",
+  "zen-questions.ts",
+  "zen-router.ts",
+];
+
+const AI_MESSAGE_FILES = ["advice-delivery.ts"];
+
 describe("router boundary", () => {
-  test("routing sources never import @opencode/ai or System One evaluation types", async () => {
+  test("only the zen adapter imports evaluation types and only named files import @opencode/ai", async () => {
     const directory = import.meta.dir;
     const files = [...new Bun.Glob("*.ts").scanSync({ cwd: directory })];
     expect(files.length).toBeGreaterThan(0);
+    for (const file of ADAPTER_FILES) {
+      expect(files).toContain(file);
+    }
+    for (const file of AI_MESSAGE_FILES) {
+      expect(files).toContain(file);
+    }
 
-    for (const file of files.filter((name) => !name.includes(".test."))) {
+    for (const file of files.filter(
+      (name) =>
+        !name.includes(".test.") &&
+        !ADAPTER_FILES.includes(name) &&
+        !AI_MESSAGE_FILES.includes(name),
+    )) {
       const source = await Bun.file(join(directory, file)).text();
       expect(source).not.toContain("@opencode/ai");
-      expect(source).not.toContain("Evaluation");
       expect(source).not.toContain("System One");
+      if (file !== "index.ts") expect(source).not.toContain("Evaluation");
     }
+
+    for (const file of AI_MESSAGE_FILES) {
+      const source = await Bun.file(join(directory, file)).text();
+      expect(source).toContain("@opencode/ai");
+      expect(source).not.toContain("System One");
+      expect(source).not.toContain("Evaluation");
+    }
+
+    const evaluation = await Bun.file(join(directory, "zen-evaluation.ts")).text();
+    expect(evaluation).toContain("@opencode/ai");
+    expect(evaluation).toContain("SystemOne");
   });
 
-  test("the package manifest does not depend on @opencode/ai", async () => {
+  test("the package manifest declares @opencode/ai for the Phase 2 adapter", async () => {
     const manifest = await Bun.file(join(import.meta.dir, "..", "package.json")).text();
-    expect(manifest).not.toContain("@opencode/ai");
+    expect(manifest).toContain("@opencode/ai");
+  });
+
+  test("the package manifest does not pin the host's effect runtime", async () => {
+    const manifest = await Bun.file(join(import.meta.dir, "..", "package.json")).json();
+    expect(manifest.peerDependencies.effect).toBeUndefined();
+    expect(manifest.devDependencies.effect).toBeUndefined();
+  });
+
+  test("no source imports the effect runtime directly", async () => {
+    const directory = import.meta.dir;
+    const files = [...new Bun.Glob("*.ts").scanSync({ cwd: directory })].filter(
+      (name) => !name.includes(".test."),
+    );
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const source = await Bun.file(join(directory, file)).text();
+      expect(source).not.toContain('from "effect"');
+    }
   });
 });

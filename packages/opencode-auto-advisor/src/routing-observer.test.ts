@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test";
+import {
+  ADVISOR_DELIVERY_PREFIX,
+  type AdviceDeliveryInput,
+  createAdviceLifetime,
+  deliverAdvice,
+} from "./advice-delivery.js";
+import type { AdvisorService } from "./advisor-service.js";
 import { defaultConfig, type RoutingMode } from "./config.js";
 import type { ContextMessage } from "./context.js";
 import { ADVISOR_TOOL_NAME, registerPlugin } from "./index.js";
 import { createTestContext } from "./index.test.js";
+import { RouterError } from "./router.js";
 import { registerRoutingObserver } from "./routing-observer.js";
 import type { AdvisorRouter, RouterAssessment, RoutingState } from "./routing-types.js";
-import type { RequestSnapshot } from "./snapshot-store.js";
+import { createSnapshotStore, type RequestSnapshot } from "./snapshot-store.js";
+import type { TelemetryEventInput } from "./telemetry-types.js";
 
 const PERSISTED_MESSAGES: readonly ContextMessage[] = [
   { id: "msg-user-1", time: { created: 1 }, type: "user", text: "persisted-only user message" },
@@ -259,20 +268,22 @@ describe("routing observer wiring", () => {
     });
   }
 
-  test("active mode consults the advisor without mutating the dispatch", async () => {
+  test("active mode injects accepted advice into the dispatch as a system message", async () => {
     const context = wiring({ mode: "active" });
     await registerPlugin(context.ctx as never, {
       loadConfig: context.loadConfig,
       router: context.router,
     });
     const value = dispatch({ kind: "primary" });
-    const before = JSON.stringify(value);
 
     await fireHook(context, value);
 
     expect(context.evaluated).toHaveLength(1);
     expect(context.prompts).toHaveLength(1);
-    expect(JSON.stringify(value)).toBe(before);
+    const messages = (value as { messages: Array<{ role: string; content: unknown }> }).messages;
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.role).toBe("system");
+    expect(JSON.stringify(messages[1]?.content)).toContain(ADVISOR_DELIVERY_PREFIX);
   });
 
   test("suppresses a repeat dispatch with unchanged state", async () => {
@@ -394,5 +405,203 @@ describe("routing observer wiring", () => {
 
     expect(context.evaluated).toHaveLength(1);
     expect(context.prompts).toHaveLength(3);
+  });
+});
+
+const ADVICE = "check the rollback path";
+
+async function observerHarness(options: {
+  readonly answers: readonly (RouterAssessment | Error)[];
+  readonly mode?: RoutingMode;
+  readonly deliver?: (input: AdviceDeliveryInput) => void;
+  readonly service?: AdvisorService;
+}) {
+  const context = createTestContext();
+  const evaluated: RoutingState[] = [];
+  const deliveries: AdviceDeliveryInput[] = [];
+  const events: TelemetryEventInput[] = [];
+  const lifetime = createAdviceLifetime();
+  const router: AdvisorRouter = {
+    evaluate: async (state) => {
+      evaluated.push(state);
+      const answer = options.answers[Math.min(evaluated.length - 1, options.answers.length - 1)];
+      if (answer instanceof Error) throw answer;
+      if (!answer) throw new Error("scripted router has no answers");
+      return answer;
+    },
+  };
+  const baseConfig = defaultConfig();
+  await registerRoutingObserver(context.ctx as never, {
+    loadConfig: async () => ({
+      ...baseConfig,
+      routing: { ...baseConfig.routing, mode: options.mode ?? "active" },
+    }),
+    router,
+    service: options.service ?? {
+      consult: async () => ({
+        advice: ADVICE,
+        model: { providerID: "opencode", id: "jev-1.13" },
+      }),
+    },
+    snapshots: createSnapshotStore(),
+    telemetry: {
+      record: async (event) => {
+        events.push(event);
+      },
+    },
+    lifetime,
+    deliver: (input) => {
+      deliveries.push(input);
+      if (options.deliver) options.deliver(input);
+      else deliverAdvice(input);
+    },
+  });
+  return { context, evaluated, deliveries, events, lifetime };
+}
+
+describe("active delivery, telemetry, and lifetime", () => {
+  test("injects accepted advice into the dispatch with telemetry", async () => {
+    const harness = await observerHarness({
+      answers: [
+        {
+          advisorWouldHelp: 0.9,
+          consequence: 4,
+          metadata: { model: "jev-1.13-free", attempts: 1 },
+        },
+      ],
+    });
+    const value = dispatch();
+
+    await fireHook(harness.context, value);
+
+    expect(harness.deliveries).toHaveLength(1);
+    expect(harness.deliveries[0]?.advice).toBe(ADVICE);
+    expect(harness.deliveries[0]?.messages).toBe((value as { messages: unknown }).messages);
+    const messages = (value as { messages: Array<{ role: string; content: unknown }> }).messages;
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.role).toBe("system");
+    expect(JSON.stringify(messages[1]?.content)).toContain(ADVISOR_DELIVERY_PREFIX);
+    expect(harness.lifetime.current("ses_1" as never)).toEqual({
+      turnKey: "msg-user-1",
+      text: ADVICE,
+    });
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]).toMatchObject({
+      sessionID: "ses_1",
+      turnKey: "msg-user-1",
+      mode: "active",
+      decision: "accept",
+      delivered: true,
+      model: "jev-1.13-free",
+      attempts: 1,
+      advisorModel: "opencode/jev-1.13",
+      advisorWouldHelp: 0.9,
+      consequence: 4,
+      policy: { advisorWouldHelpThreshold: 0.7, consequenceThreshold: 3 },
+    });
+    expect(harness.events[0]?.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(typeof harness.events[0]?.latencyMs).toBe("number");
+  });
+
+  test("delivery failures fail open and are recorded", async () => {
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      deliver: () => {
+        throw new Error("injection rejected");
+      },
+    });
+
+    await fireHook(harness.context, dispatch());
+
+    expect(harness.deliveries).toHaveLength(1);
+    expect(harness.events[0]?.delivered).toBe(false);
+    expect(harness.lifetime.current("ses_1" as never)).toBeUndefined();
+  });
+
+  test("reinjects live advice on continuations within the same turn", async () => {
+    const harness = await observerHarness({
+      answers: [
+        { advisorWouldHelp: 0.9, consequence: 4 },
+        { advisorWouldHelp: 0.9, consequence: 4 },
+      ],
+    });
+
+    await fireHook(harness.context, dispatch());
+    const continuation = dispatch({
+      messages: [
+        {
+          id: "msg-user-1",
+          role: "user",
+          content: [{ type: "text", text: "hook-only user message" }],
+        },
+        { id: "msg-tool", role: "tool", content: [{ type: "text", text: "tool output" }] },
+      ],
+    });
+    await fireHook(harness.context, continuation);
+
+    expect(harness.evaluated).toHaveLength(2);
+    expect(harness.deliveries).toHaveLength(2);
+    expect(harness.deliveries[1]?.advice).toBe(ADVICE);
+    const messages = (continuation as { messages: Array<{ role: string }> }).messages;
+    expect(messages.at(-1)?.role).toBe("system");
+    expect(harness.lifetime.current("ses_1" as never)?.text).toBe(ADVICE);
+  });
+
+  test("a new user turn expires the previous live advice", async () => {
+    const harness = await observerHarness({
+      answers: [
+        { advisorWouldHelp: 0.9, consequence: 4 },
+        { advisorWouldHelp: 0.1, consequence: 0 },
+      ],
+    });
+
+    await fireHook(harness.context, dispatch());
+    expect(harness.lifetime.current("ses_1" as never)?.turnKey).toBe("msg-user-1");
+
+    await fireHook(
+      harness.context,
+      dispatch({
+        messages: [
+          { id: "msg-user-2", role: "user", content: [{ type: "text", text: "next turn" }] },
+        ],
+      }),
+    );
+
+    expect(harness.deliveries).toHaveLength(1);
+    expect(harness.lifetime.current("ses_1" as never)).toBeUndefined();
+    expect(harness.events.at(-1)?.decision).toBe("reject");
+  });
+
+  test("observe mode never delivers or records live advice", async () => {
+    const harness = await observerHarness({
+      mode: "observe",
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+    });
+
+    await fireHook(harness.context, dispatch());
+
+    expect(harness.deliveries).toHaveLength(0);
+    expect(harness.lifetime.current("ses_1" as never)).toBeUndefined();
+    expect(harness.events[0]).toMatchObject({ mode: "observe", decision: "accept" });
+    expect(harness.events[0]?.delivered).toBeUndefined();
+  });
+
+  test("router failures record the classified failure and never deliver", async () => {
+    const failure = new RouterError("zen routing failed on jev-1.13-free (Authentication)", {
+      errorClass: "Authentication",
+      model: "jev-1.13-free",
+      attempts: 1,
+    });
+    const harness = await observerHarness({ answers: [failure] });
+
+    await fireHook(harness.context, dispatch());
+
+    expect(harness.deliveries).toHaveLength(0);
+    expect(harness.events[0]).toMatchObject({
+      decision: "fail",
+      errorClass: "Authentication",
+      model: "jev-1.13-free",
+      attempts: 1,
+    });
   });
 });

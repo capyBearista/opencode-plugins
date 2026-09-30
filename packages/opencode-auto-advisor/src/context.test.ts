@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ContextMessage, SessionID } from "./context.js";
 import { captureSessionHistory, serializeAdvisorContext, stableStringify } from "./context.js";
-import { serializeMessage } from "./serialize.js";
 
 const PNG_1X1 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
@@ -373,19 +372,6 @@ describe("captureSessionHistory", () => {
       },
     };
     await expect(captureSessionHistory(failing, input)).rejects.toThrow("session read failed");
-  });
-});
-
-describe("serializeMessage", () => {
-  test("passes a plugin origin tag through to the serialized entry", () => {
-    const message = { ...system("rules"), origin: "advisor" } as ContextMessage;
-
-    expect(serializeMessage(message, "msg-current")).toEqual({
-      role: "system",
-      text: "rules",
-      description: "base",
-      origin: "advisor",
-    });
   });
 });
 

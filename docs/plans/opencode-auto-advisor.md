@@ -2,7 +2,7 @@
 
 **Status:** Implementation approved — implementation may proceed  
 **Package:** `@capybearista/opencode-auto-advisor`  
-**Host baseline:** OpenCode V2, initially `@opencode/plugin@2.0.18` and `@opencode/ai@2.0.18`  
+**Host baseline:** OpenCode V2, initially `@opencode/plugin@2.0.19` and `@opencode/ai@2.0.19`  
 **Distribution:** npm `latest`
 
 ## Goal
@@ -333,7 +333,7 @@ Expose read-only plugin RPC(s) for telemetry scan/export so evaluation tooling c
 ## Package/release expectations
 
 - Package is V2-only.
-- Initial dependency compatibility is deliberately based on OpenCode 2.0.18.
+- Initial dependency compatibility is deliberately based on OpenCode 2.0.19.
 - Publish on npm `latest`.
 - Current repository release tooling already supports V2 packages on `latest`; no redesign based on the obsolete `opencode2` assumption is required.
 - Register the new package in existing release policy/guard data and tests as needed.

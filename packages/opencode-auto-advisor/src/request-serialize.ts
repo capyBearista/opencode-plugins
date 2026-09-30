@@ -29,10 +29,11 @@ function userEntry(message: AssembledMessage): readonly SerializedEntry[] {
   const media = message.content.flatMap((part) =>
     part.type === "media" ? [mediaPlaceholder(part)] : [],
   );
+  const text = textOf(message.content);
   return [
     {
       role: "user",
-      text: textOf(message.content),
+      text,
       ...(media.length > 0 ? { media } : {}),
     },
     ...unknownMarkers(message.content),

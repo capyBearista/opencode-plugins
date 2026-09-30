@@ -1,7 +1,7 @@
 {
   "name": "@capybearista/opencode-auto-advisor",
   "version": "2.0.0",
-  "description": "OpenCode V2 plugin that provides an independent Advisor: explicit consultation and the routing domain ship in Phase 1; advice delivery, telemetry, and the Zen AdvisorRouter adapter are pending",
+  "description": "OpenCode V2 plugin that provides an independent Advisor: explicit zero-argument consultation, experimental Zen automatic routing with observe and active modes, digest-only telemetry, and same-turn system-context advice delivery",
   "author": "capyBearista <capybearista@github.com>",
   "repository": {
     "type": "git",
@@ -32,9 +32,11 @@
     "smoke": "bun run build && bun scripts/smoke-built.ts"
   },
   "peerDependencies": {
-    "@opencode/plugin": "2.0.18"
+    "@opencode/ai": "2.0.19",
+    "@opencode/plugin": "2.0.19"
   },
   "devDependencies": {
-    "@opencode/plugin": "2.0.18"
+    "@opencode/ai": "2.0.19",
+    "@opencode/plugin": "2.0.19"
   }
 }

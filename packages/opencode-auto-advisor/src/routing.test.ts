@@ -6,6 +6,7 @@ import type {
 } from "./advisor-service.js";
 import type { AdvisorConfig, RoutingConfig } from "./config.js";
 import type { ModelReference, SessionID } from "./messages.js";
+import { RouterError } from "./router.js";
 import { acceptsConsultation, createRoutingDomain, isPrimaryDispatch } from "./routing.js";
 import type {
   AdvisorRouter,
@@ -253,23 +254,6 @@ describe("fingerprint suppression", () => {
     expect(after.fingerprint).not.toBe(before.fingerprint);
     expect(router.calls).toHaveLength(2);
   });
-
-  test("origin advisor entries do not create a new opportunity", async () => {
-    const material = [USER("hi"), ASSISTANT(false, [RESULT("old")])];
-    const injected: SerializedEntry[] = [
-      ...material,
-      { role: "system", text: "automatic advice", origin: "advisor" },
-    ];
-    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 3 }]);
-    const routing = domain({ config: configWith(), router: router.router });
-
-    const before = await routing.observe(opportunity(stateWith(material)).value);
-    const after = await routing.observe(opportunity(stateWith(injected)).value);
-
-    expect(before.action).toBe("accept");
-    expect(after.action).toBe("suppress");
-    expect(router.calls).toHaveLength(1);
-  });
 });
 
 describe("policy", () => {
@@ -374,6 +358,25 @@ describe("router result normalization", () => {
     expect(failed.error).toContain("router unavailable");
     expect(again.action).toBe("suppress");
     expect(router.calls).toHaveLength(1);
+  });
+
+  test("carries the router failure classification and policy snapshot into the decision", async () => {
+    const failure = {
+      errorClass: "Authentication",
+      model: "jev-1.13-free",
+      attempts: 1,
+    };
+    const router = scripted([new RouterError("zen routing failed", failure)]);
+    const routing = domain({ config: configWith(), router: router.router });
+
+    const decision = await routing.observe(opportunity(stateWith([USER("hi")])).value);
+
+    expect(decision.action).toBe("fail");
+    expect(decision.failure).toEqual(failure);
+    expect(decision.policy).toEqual({
+      advisorWouldHelpThreshold: 0.7,
+      consequenceThreshold: 3,
+    });
   });
 });
 
@@ -526,6 +529,23 @@ describe("turn state bounds", () => {
     expect(revived.action).toBe("accept");
     expect(live.action).toBe("suppress");
     expect(router.calls).toHaveLength(4);
+  });
+});
+
+describe("session cleanup", () => {
+  test("forget clears fingerprint suppression and budget state for a session", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
+    const routing = domain({ config: configWith(), router: router.router });
+
+    const first = await routing.observe(opportunity(stateWith([USER("hi")])).value);
+    const suppressed = await routing.observe(opportunity(stateWith([USER("hi")])).value);
+    routing.forget("ses_1" as SessionID);
+    const afterForget = await routing.observe(opportunity(stateWith([USER("hi")])).value);
+
+    expect(first.action).toBe("accept");
+    expect(suppressed.action).toBe("suppress");
+    expect(afterForget.action).toBe("accept");
+    expect(router.calls).toHaveLength(2);
   });
 });
 

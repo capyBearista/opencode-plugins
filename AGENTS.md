@@ -146,6 +146,7 @@ rg -n "ui\.slot|keymap" packages/*/src
 - Merge commits also need conventional messages — the commitlint hook rejects empty subject/type on merges too
 - `git log --all -- <path>` also lists merges that deleted the path; prove artifact absence with `git rev-list --objects --all --reflog` plus `git cat-file -e <blob>`, not log output
 - Release-channel policy edits never move npm dist-tags (guard returns `noop` for published versions); promotion is an authenticated `npm dist-tag` op — E401 in unattended sessions means handing exact commands to an operator
+- `gh pr edit --body-file` fails on this repo (classic-projects GraphQL deprecation); patch PR bodies via `gh api repos/capyBearista/opencode-plugins/pulls/<n> -X PATCH -F 'body=@file'` instead
 
 ## Testing Requirements
 - **Unit tests**: colocated (bun test)
@@ -203,3 +204,4 @@ This repository uses **Bun Workspaces** for dependency management and **Turborep
 4. **Releasing:** Use the `release-plugin` skill.
    - Run `bun changeset` at the root to record change intents.
 - Review routing: send diff-level gate reviews to `code-reviewer`; `oracle` excludes final diff auditing and declines such requests.
+- Delegation briefs must be self-contained: a lane given findings "below" with nothing pasted reconstructs them from local state and may take unsupervised architectural judgment calls — always paste the full review text, API map, or acceptance criteria into the dispatch prompt.

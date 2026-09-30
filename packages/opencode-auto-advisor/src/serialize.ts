@@ -17,8 +17,6 @@ export interface CompactionCheckpoint {
   readonly endpoint: string;
 }
 
-export type AdvisorOrigin = "advisor";
-
 type SerializedEntryBody =
   | { readonly role: "system"; readonly text: string; readonly description?: string }
   | {
@@ -41,7 +39,7 @@ type SerializedEntryBody =
   | { readonly role: "tool"; readonly blocks: readonly AssistantBlock[] }
   | { readonly role: "marker"; readonly type: string; readonly detail?: string };
 
-export type SerializedEntry = SerializedEntryBody & { readonly origin?: AdvisorOrigin };
+export type SerializedEntry = SerializedEntryBody;
 
 type UserMessage = Extract<ContextMessage, { type: "user" }>;
 type ShellMessage = Extract<ContextMessage, { type: "shell" }>;
@@ -53,12 +51,8 @@ export function serializeAdvisorContext(entries: readonly SerializedEntry[]): st
 
 export { stableStringify };
 
-export function serializeMessage(
-  message: ContextMessage & { readonly origin?: AdvisorOrigin },
-  messageID: string,
-): SerializedEntry {
-  const entry = serializeEntryBody(message, messageID);
-  return message.origin ? { ...entry, origin: message.origin } : entry;
+export function serializeMessage(message: ContextMessage, messageID: string): SerializedEntry {
+  return serializeEntryBody(message, messageID);
 }
 
 function serializeEntryBody(message: ContextMessage, messageID: string): SerializedEntry {
