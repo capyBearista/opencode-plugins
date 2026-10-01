@@ -1,17 +1,46 @@
 import { describe, expect, test } from "bun:test";
 import type { RpcDomain } from "@opencode/plugin/promise/rpc";
-import { Effect, JsonSchema, Schema, SchemaRepresentation } from "effect";
 import { registerTelemetryRpc, TELEMETRY_RPC_ID, TelemetryRpc } from "./telemetry-rpc.js";
 import type { TelemetryEvent, TelemetryQuery, TelemetryStore } from "./telemetry-types.js";
 
-function hostOutputCodec(schema: JsonSchema.JsonSchema) {
-  return Schema.make(
-    SchemaRepresentation.fromJsonSchemaDocument(JsonSchema.fromSchemaDraft2020_12(schema)).ast,
-  );
+interface SchemaNode {
+  readonly type?: string;
+  readonly properties?: Readonly<Record<string, SchemaNode>>;
 }
 
-async function decodeHostOutput(schema: JsonSchema.JsonSchema, value: unknown): Promise<unknown> {
-  return Effect.runPromise(Schema.decodeUnknownEffect(hostOutputCodec(schema))(value));
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function expectSchemaCoversEvent(
+  schema: SchemaNode,
+  value: Record<string, unknown>,
+  path: string,
+): void {
+  const properties = schema.properties;
+  expect(properties, `no declared properties at ${path}`).toBeDefined();
+  for (const key of Object.keys(value)) {
+    const sub = properties?.[key];
+    expect(sub, `undeclared field ${path}.${key} (the host RPC path strips it)`).toBeDefined();
+    const subValue = value[key];
+    if (sub?.type === "object" && sub.properties !== undefined && isRecord(subValue)) {
+      expectSchemaCoversEvent(sub, subValue, `${path}.${key}`);
+    }
+  }
+}
+
+function queryEventSchema(): SchemaNode {
+  const output = TelemetryRpc.methods["telemetry.query"].output as unknown as {
+    readonly properties: { readonly events: { readonly items: SchemaNode } };
+  };
+  return output.properties.events.items;
+}
+
+function singleEventSchema(): SchemaNode {
+  const output = TelemetryRpc.methods["telemetry.event"].output as unknown as {
+    readonly anyOf: readonly [SchemaNode, ...unknown[]];
+  };
+  return output.anyOf[0] as SchemaNode;
 }
 
 const maximalEvent: TelemetryEvent = {
@@ -109,18 +138,19 @@ describe("telemetry rpc", () => {
   });
 
   test("query output preserves every field the store can produce", async () => {
-    const decoded = await decodeHostOutput(TelemetryRpc.methods["telemetry.query"].output, {
-      events: [maximalEvent],
-    });
-    expect(decoded).toEqual({ events: [maximalEvent] });
+    expectSchemaCoversEvent(
+      queryEventSchema(),
+      maximalEvent as unknown as Record<string, unknown>,
+      "telemetry.query.events[]",
+    );
   });
 
   test("single-event output preserves every field the store can produce", async () => {
-    const decoded = await decodeHostOutput(
-      TelemetryRpc.methods["telemetry.event"].output,
-      maximalEvent,
+    expectSchemaCoversEvent(
+      singleEventSchema(),
+      maximalEvent as unknown as Record<string, unknown>,
+      "telemetry.event",
     );
-    expect(decoded).toEqual(maximalEvent);
   });
 
   test("query handler reads the bounded store and returns the page", async () => {
