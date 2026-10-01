@@ -6,6 +6,7 @@ import { type AdvisorConfig, loadConfig } from "./config.js";
 import { mergeExplicitConsult } from "./consult.js";
 import { captureSessionHistory } from "./context.js";
 import type { SessionID } from "./messages.js";
+import { createModelLimitResolver, type ModelCatalog } from "./model-limits.js";
 import { turnKeyForHistory } from "./request.js";
 import { registerRoutingObserver } from "./routing-observer.js";
 import type { AdvisorRouter } from "./routing-types.js";
@@ -23,7 +24,9 @@ export const ADVISOR_TOOL_DESCRIPTION =
   "Call with no arguments; the Advisor reads this session's context itself and returns actionable advice.";
 
 type AdvisorContext = Pick<PluginContext, "tool" | "session" | "generate"> &
-  Partial<Pick<PluginContext, "storage" | "integration" | "event" | "rpc">>;
+  Partial<Pick<PluginContext, "storage" | "integration" | "event" | "rpc">> & {
+    readonly model?: { readonly list?: ModelCatalog["list"] };
+  };
 
 export interface AdvisorPluginOptions {
   readonly loadConfig?: () => Promise<AdvisorConfig>;
@@ -51,6 +54,7 @@ export async function registerPlugin(
   const lifetime = createAdviceLifetime();
   const zen = createZenEvaluation({ connection: context.integration?.connection });
   const router = options.router ?? createZenRouter({ loadConfig: load, evaluation: zen });
+  const resolveLimits = createModelLimitResolver(hostModelCatalog(context));
 
   const registration = await context.tool.transform((editor) => {
     editor.add({
@@ -96,6 +100,7 @@ export async function registerPlugin(
     router,
     service,
     snapshots,
+    resolveLimits,
     ...(telemetry ? { telemetry } : {}),
     lifetime,
   });
@@ -122,6 +127,13 @@ export async function registerPlugin(
     await zen.dispose();
     await registration.dispose();
   };
+}
+
+function hostModelCatalog(context: AdvisorContext): ModelCatalog | undefined {
+  const model = context.model;
+  if (model === undefined || typeof model.list !== "function") return undefined;
+  const list = model.list;
+  return { list: () => list.call(model) };
 }
 
 function watchSessionDeletes(

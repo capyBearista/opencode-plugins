@@ -28,26 +28,30 @@ function headers(value: string, name = "x-should-retry"): HttpContext {
 }
 
 describe("classifyZenFailure", () => {
-  test("retries rate limits, provider internals, and transport failures", () => {
-    expect(classifyZenFailure(plain(new RateLimitError({ message: "slow down" })))).toEqual({
-      disposition: "retry",
-      errorClass: "RateLimit",
-    });
-    expect(classifyZenFailure(plain(new ProviderInternalError({ message: "5xx" })))).toEqual({
-      disposition: "retry",
-      errorClass: "ProviderInternal",
-    });
+  test("retries transient transport and generic infrastructure failures on the same model", () => {
     expect(
       classifyZenFailure(
         plain(new TransportError({ message: "socket", transport: "http", operation: "request" })),
       ),
     ).toEqual({ disposition: "retry", errorClass: "Transport" });
+    expect(classifyZenFailure(plain(new ProviderInternalError({ message: "5xx" })))).toEqual({
+      disposition: "retry",
+      errorClass: "ProviderInternal",
+    });
+    expect(classifyZenFailure(plain(new UnknownProviderError({ message: "?" })))).toEqual({
+      disposition: "retry",
+      errorClass: "UnknownProvider",
+    });
   });
 
-  test("falls back to the next model on quota exhaustion", () => {
+  test("falls back to the next model on quota exhaustion and model-specific rate limiting", () => {
     expect(classifyZenFailure(plain(new QuotaExceededError({ message: "402" })))).toEqual({
       disposition: "fallback",
       errorClass: "QuotaExceeded",
+    });
+    expect(classifyZenFailure(plain(new RateLimitError({ message: "429" })))).toEqual({
+      disposition: "fallback",
+      errorClass: "RateLimit",
     });
   });
 
@@ -59,7 +63,6 @@ describe("classifyZenFailure", () => {
       plain(new TimeoutError({ message: "deadline" })),
       plain(new UnsupportedOperationError({ message: "nope", operation: "evaluate" })),
       plain(new InvalidProviderOutputError({ message: "bad shape" })),
-      plain(new UnknownProviderError({ message: "?" })),
       new Error("not an AIError"),
     ];
     for (const cause of cases) {
@@ -67,16 +70,39 @@ describe("classifyZenFailure", () => {
     }
   });
 
-  test("honors the x-should-retry override in both directions", () => {
+  test("honors x-should-retry true as a same-model retry on any class", () => {
     expect(
       classifyZenFailure(plain(new InvalidRequestError({ message: "400", http: headers("true") }))),
     ).toEqual({ disposition: "retry", errorClass: "InvalidRequest" });
     expect(
+      classifyZenFailure(plain(new RateLimitError({ message: "429", http: headers("true") }))),
+    ).toEqual({ disposition: "retry", errorClass: "RateLimit" });
+  });
+
+  test("x-should-retry false forbids retrying the same model without forbidding a fallback model", () => {
+    expect(
       classifyZenFailure(plain(new RateLimitError({ message: "429", http: headers("false") }))),
-    ).toEqual({ disposition: "terminal", errorClass: "RateLimit" });
+    ).toEqual({ disposition: "fallback", errorClass: "RateLimit" });
     expect(
       classifyZenFailure(plain(new QuotaExceededError({ message: "402", http: headers("false") }))),
-    ).toEqual({ disposition: "terminal", errorClass: "QuotaExceeded" });
+    ).toEqual({ disposition: "fallback", errorClass: "QuotaExceeded" });
+    expect(
+      classifyZenFailure(
+        plain(
+          new TransportError({
+            message: "socket",
+            transport: "http",
+            operation: "request",
+            http: headers("false"),
+          }),
+        ),
+      ),
+    ).toEqual({ disposition: "terminal", errorClass: "Transport" });
+    expect(
+      classifyZenFailure(
+        plain(new ProviderInternalError({ message: "5xx", http: headers("false") })),
+      ),
+    ).toEqual({ disposition: "terminal", errorClass: "ProviderInternal" });
   });
 
   test("reads the x-should-retry override case-insensitively", () => {
@@ -89,7 +115,7 @@ describe("classifyZenFailure", () => {
       classifyZenFailure(
         plain(new RateLimitError({ message: "429", http: headers("false", "X-SHOULD-RETRY") })),
       ),
-    ).toEqual({ disposition: "terminal", errorClass: "RateLimit" });
+    ).toEqual({ disposition: "fallback", errorClass: "RateLimit" });
   });
 
   test("reports the AIError class tag for every classified class", () => {

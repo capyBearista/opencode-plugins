@@ -5,12 +5,19 @@ import {
   createAdviceLifetime,
   deliverAdvice,
 } from "./advice-delivery.js";
-import type { AdvisorService } from "./advisor-service.js";
-import { defaultConfig, type RoutingMode } from "./config.js";
+import {
+  ADVISOR_OMISSION_MARKER,
+  type AdvisorProjectionBuilder,
+  buildAdvisorProjection,
+} from "./advisor-projection.js";
+import type { AdvisorConsultationInput, AdvisorService } from "./advisor-service.js";
+import { type AdvisorConfig, defaultConfig, type RoutingMode } from "./config.js";
 import type { ContextMessage } from "./context.js";
 import { ADVISOR_TOOL_NAME, registerPlugin } from "./index.js";
 import { createTestContext } from "./index.test.js";
+import type { ModelLimitResolver } from "./model-limits.js";
 import { RouterError } from "./router.js";
+import { ADVISOR_LIMITS_SKIP_REASON } from "./routing.js";
 import { registerRoutingObserver } from "./routing-observer.js";
 import type { AdvisorRouter, RouterAssessment, RoutingState } from "./routing-types.js";
 import { createSnapshotStore, type RequestSnapshot } from "./snapshot-store.js";
@@ -161,6 +168,7 @@ describe("routing observer wiring", () => {
         read: () => undefined,
         sessions: () => captured.length,
       },
+      resolveLimits: async () => ({ context: 200_000, output: 32_000 }),
     });
 
     await fireHook(context, dispatch({ kind: "primary" }));
@@ -406,6 +414,38 @@ describe("routing observer wiring", () => {
     expect(context.evaluated).toHaveLength(1);
     expect(context.prompts).toHaveLength(3);
   });
+
+  test("explicit advisor consultations still run after the automatic budget is exhausted", async () => {
+    const context = wiring({ mode: "active" });
+    await registerPlugin(context.ctx as never, {
+      loadConfig: context.loadConfig,
+      router: context.router,
+    });
+    const tool = context.added[0];
+    const toolContext = { sessionID: "ses_1", messageID: "msg-assistant-1" };
+
+    await fireHook(context, dispatch({ kind: "primary" }));
+    await fireHook(
+      context,
+      dispatch({
+        kind: "primary",
+        messages: [
+          {
+            id: "msg-user-1",
+            role: "user",
+            content: [{ type: "text", text: "hook-only user message" }],
+          },
+          { id: "msg-tool", role: "tool", content: [{ type: "text", text: "tool output" }] },
+        ],
+      }),
+    );
+    expect(context.evaluated).toHaveLength(1);
+
+    await tool?.execute({}, toolContext);
+    await tool?.execute({}, toolContext);
+
+    expect(context.prompts).toHaveLength(3);
+  });
 });
 
 const ADVICE = "check the rollback path";
@@ -415,6 +455,10 @@ async function observerHarness(options: {
   readonly mode?: RoutingMode;
   readonly deliver?: (input: AdviceDeliveryInput) => void;
   readonly service?: AdvisorService;
+  readonly resolveLimits?: ModelLimitResolver;
+  readonly project?: AdvisorProjectionBuilder;
+  readonly loadConfig?: () => Promise<AdvisorConfig>;
+  readonly telemetry?: { readonly record: (event: TelemetryEventInput) => Promise<void> };
 }) {
   const context = createTestContext();
   const evaluated: RoutingState[] = [];
@@ -432,10 +476,12 @@ async function observerHarness(options: {
   };
   const baseConfig = defaultConfig();
   await registerRoutingObserver(context.ctx as never, {
-    loadConfig: async () => ({
-      ...baseConfig,
-      routing: { ...baseConfig.routing, mode: options.mode ?? "active" },
-    }),
+    loadConfig:
+      options.loadConfig ??
+      (async () => ({
+        ...baseConfig,
+        routing: { ...baseConfig.routing, mode: options.mode ?? "active" },
+      })),
     router,
     service: options.service ?? {
       consult: async () => ({
@@ -444,7 +490,9 @@ async function observerHarness(options: {
       }),
     },
     snapshots: createSnapshotStore(),
-    telemetry: {
+    resolveLimits: options.resolveLimits ?? (async () => ({ context: 200_000, output: 32_000 })),
+    ...(options.project ? { project: options.project } : {}),
+    telemetry: options.telemetry ?? {
       record: async (event) => {
         events.push(event);
       },
@@ -518,7 +566,7 @@ describe("active delivery, telemetry, and lifetime", () => {
     expect(harness.lifetime.current("ses_1" as never)).toBeUndefined();
   });
 
-  test("reinjects live advice on continuations within the same turn", async () => {
+  test("reinjects live advice on continuations without re-evaluating an exhausted turn", async () => {
     const harness = await observerHarness({
       answers: [
         { advisorWouldHelp: 0.9, consequence: 4 },
@@ -539,9 +587,10 @@ describe("active delivery, telemetry, and lifetime", () => {
     });
     await fireHook(harness.context, continuation);
 
-    expect(harness.evaluated).toHaveLength(2);
+    expect(harness.evaluated).toHaveLength(1);
     expect(harness.deliveries).toHaveLength(2);
     expect(harness.deliveries[1]?.advice).toBe(ADVICE);
+    expect(harness.events.at(-1)).toMatchObject({ decision: "deny", mode: "active" });
     const messages = (continuation as { messages: Array<{ role: string }> }).messages;
     expect(messages.at(-1)?.role).toBe("system");
     expect(harness.lifetime.current("ses_1" as never)?.text).toBe(ADVICE);
@@ -603,5 +652,232 @@ describe("active delivery, telemetry, and lifetime", () => {
       model: "jev-1.13-free",
       attempts: 1,
     });
+  });
+
+  test("records the failure disposition for a fail-open", async () => {
+    const failure = new RouterError("zen routing failed on jev-1.13-free (Transport)", {
+      errorClass: "Transport",
+      model: "jev-1.13-free",
+      attempts: 2,
+      disposition: "retry",
+    });
+    const harness = await observerHarness({ answers: [failure] });
+
+    await fireHook(harness.context, dispatch());
+
+    expect(harness.events[0]).toMatchObject({
+      decision: "fail",
+      errorClass: "Transport",
+      failureDisposition: "retry",
+    });
+  });
+
+  test("records the raw and normalized consequence with probability metadata", async () => {
+    const harness = await observerHarness({
+      answers: [
+        {
+          advisorWouldHelp: 0.9,
+          consequence: 3,
+          metadata: {
+            model: "jev-1.13-free",
+            attempts: 1,
+            rawConsequence: 2.6,
+            consequenceProbabilities: { "0": 0.05, "1": 0.1, "2": 0.6, "3": 0.2, "4": 0.05 },
+            consequenceConfidence: 0.9,
+          },
+        },
+      ],
+    });
+
+    await fireHook(harness.context, dispatch());
+
+    expect(harness.events[0]).toMatchObject({
+      decision: "accept",
+      consequence: 3,
+      rawConsequence: 2.6,
+      consequenceProbabilities: { "0": 0.05, "1": 0.1, "2": 0.6, "3": 0.2, "4": 0.05 },
+      consequenceConfidence: 0.9,
+    });
+  });
+
+  test("records the advisor context diagnostics on accept", async () => {
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+    });
+
+    await fireHook(harness.context, dispatch());
+
+    expect(harness.events[0]).toMatchObject({
+      decision: "accept",
+      advisorContext: {
+        complete: true,
+        omittedEntries: 0,
+        inputBudget: 150_000,
+      },
+    });
+    expect(harness.events[0]?.advisorContext?.estimatedTokens).toBeLessThanOrEqual(150_000);
+  });
+
+  test("records incompleteness when a small-context advisor drops history", async () => {
+    const transcripts: string[] = [];
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      resolveLimits: async () => ({ context: 2000, output: 1500 }),
+      service: {
+        consult: async (input) => {
+          transcripts.push(input.transcript);
+          return { advice: ADVICE };
+        },
+      },
+    });
+    const value = dispatch({
+      messages: [
+        {
+          id: "msg-old",
+          role: "user",
+          content: [{ type: "text", text: `OLD-${"x".repeat(8000)}` }],
+        },
+        { id: "msg-user-1", role: "user", content: [{ type: "text", text: "CURRENT-TASK" }] },
+      ],
+    });
+
+    await fireHook(harness.context, value);
+
+    expect(transcripts).toHaveLength(1);
+    expect(transcripts[0]).toContain("CURRENT-TASK");
+    expect(transcripts[0]).not.toContain("OLD-");
+    expect(transcripts[0]).toContain(ADVISOR_OMISSION_MARKER);
+    expect(harness.deliveries).toHaveLength(1);
+    expect(harness.events[0]).toMatchObject({
+      decision: "accept",
+      delivered: true,
+      advisorContext: { complete: false, omittedEntries: 1, inputBudget: 500 },
+    });
+  });
+
+  test("records an advisor-limits skip without consulting or delivering", async () => {
+    const calls: AdvisorConsultationInput[] = [];
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      resolveLimits: async () => undefined,
+      service: {
+        consult: async (input) => {
+          calls.push(input);
+          return { advice: ADVICE };
+        },
+      },
+    });
+    const value = dispatch();
+
+    await fireHook(harness.context, value);
+
+    expect(calls).toHaveLength(0);
+    expect(harness.deliveries).toHaveLength(0);
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]).toMatchObject({
+      mode: "active",
+      decision: "skip",
+      skipReason: ADVISOR_LIMITS_SKIP_REASON,
+      advisorWouldHelp: 0.9,
+      consequence: 4,
+    });
+    expect(harness.events[0]?.errorClass).toBeUndefined();
+    expect(harness.lifetime.current("ses_1" as never)).toBeUndefined();
+    const messages = (value as { messages: Array<{ role: string }> }).messages;
+    expect(messages).toHaveLength(1);
+  });
+
+  test("a provider length rejection fails open and the executor continues", async () => {
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      service: {
+        consult: async () => {
+          throw new Error("prompt is too long: context length exceeded");
+        },
+      },
+    });
+    const value = dispatch();
+
+    await fireHook(harness.context, value);
+
+    expect(harness.deliveries).toHaveLength(0);
+    expect(harness.events[0]).toMatchObject({ decision: "fail" });
+    expect(harness.events[0]?.advisorContext?.complete).toBe(true);
+    const messages = (value as { messages: Array<{ role: string }> }).messages;
+    expect(messages).toHaveLength(1);
+  });
+
+  test("records consultation failures with a distinct class and terminal disposition", async () => {
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      service: {
+        consult: async () => {
+          throw new Error("advisor generation failed");
+        },
+      },
+    });
+
+    await fireHook(harness.context, dispatch());
+
+    expect(harness.deliveries).toHaveLength(0);
+    expect(harness.events[0]).toMatchObject({
+      decision: "fail",
+      errorClass: "ConsultationError",
+      failureDisposition: "terminal",
+    });
+    expect(harness.events[0]?.errorClass).not.toBe("RouterError");
+  });
+
+  test("never builds the advisor projection in observe mode", async () => {
+    let projected = 0;
+    const harness = await observerHarness({
+      mode: "observe",
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      project: (state, options) => {
+        projected += 1;
+        return buildAdvisorProjection(state, options);
+      },
+    });
+
+    await fireHook(harness.context, dispatch());
+
+    expect(harness.events[0]?.decision).toBe("accept");
+    expect(projected).toBe(0);
+  });
+
+  test("an unexpected domain throw fails open and leaves the dispatch untouched", async () => {
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      loadConfig: async () => ({ routing: null }) as never,
+    });
+    const value = dispatch();
+    const before = JSON.stringify(value);
+
+    await fireHook(harness.context, value);
+
+    expect(JSON.stringify(value)).toBe(before);
+    expect(harness.evaluated).toHaveLength(0);
+    expect(harness.deliveries).toHaveLength(0);
+    expect(harness.events).toHaveLength(0);
+  });
+
+  test("a telemetry sink throw fails open after delivery", async () => {
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      telemetry: {
+        record: async () => {
+          throw new Error("telemetry storage down");
+        },
+      },
+    });
+    const value = dispatch();
+
+    await fireHook(harness.context, value);
+
+    expect(harness.deliveries).toHaveLength(1);
+    expect(harness.lifetime.current("ses_1" as never)?.text).toBe(ADVICE);
+    const messages = (value as { messages: Array<{ role: string }> }).messages;
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.role).toBe("system");
   });
 });

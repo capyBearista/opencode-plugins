@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { routingFingerprint } from "./fingerprint.js";
+import { fingerprintPreimage, routingFingerprint } from "./fingerprint.js";
 import type { SerializedEntry } from "./serialize.js";
 import type { AssistantBlock } from "./serialize-assistant.js";
 
@@ -36,6 +36,78 @@ const readResult = (value: string): AssistantBlock => ({
   id: "call_read",
   name: "read",
   text: value,
+});
+
+const advisorResult: AssistantBlock = {
+  type: "tool-result",
+  id: "call_advisor",
+  name: "advisor",
+  text: "old advice",
+};
+
+const toolEntry = (blocks: readonly AssistantBlock[]): SerializedEntry => ({
+  role: "tool",
+  blocks,
+});
+
+describe("advisor-origin exclusion", () => {
+  test("excludes settled advisor tool blocks from an assistant message", () => {
+    const withAdvisor = [
+      user("Fix the bug"),
+      assistant(false, [text("planning"), advisorCall, advisorResult]),
+    ];
+    const withoutAdvisor = [user("Fix the bug"), assistant(false, [text("planning")])];
+
+    expect(routingFingerprint(withAdvisor)).toBe(routingFingerprint(withoutAdvisor));
+  });
+
+  test("collapses an assistant message that carried only advisor blocks", () => {
+    const withAdvisor = [user("Fix the bug"), assistant(false, [advisorCall, advisorResult])];
+    const withoutAdvisor = [user("Fix the bug")];
+
+    expect(routingFingerprint(withAdvisor)).toBe(routingFingerprint(withoutAdvisor));
+  });
+
+  test("excludes advisor blocks from separate tool messages", () => {
+    const withAdvisor = [user("Fix the bug"), toolEntry([advisorResult])];
+    const withoutAdvisor = [user("Fix the bug")];
+
+    expect(routingFingerprint(withAdvisor)).toBe(routingFingerprint(withoutAdvisor));
+  });
+
+  test("keeps unrelated blocks that share a message with advisor blocks", () => {
+    const mixed = [user("Fix the bug"), toolEntry([advisorResult, readResult("body")])];
+    const readOnly = [user("Fix the bug"), toolEntry([readResult("body")])];
+    const none = [user("Fix the bug")];
+
+    expect(routingFingerprint(mixed)).toBe(routingFingerprint(readOnly));
+    expect(routingFingerprint(mixed)).not.toBe(routingFingerprint(none));
+  });
+
+  test("still fingerprints material activity that follows a completed advisor interaction", () => {
+    const advisorDone = [user("Fix the bug"), assistant(false, [advisorCall, advisorResult])];
+    const withRead = [...advisorDone, assistant(false, [readCall, readResult("body")])];
+
+    expect(routingFingerprint(withRead)).not.toBe(routingFingerprint(advisorDone));
+  });
+
+  test("keeps an advisor-only assistant entry that carries an error", () => {
+    const errored: SerializedEntry = {
+      role: "assistant",
+      agent: "build",
+      model: "opencode/jev-1.13",
+      inFlight: false,
+      error: { type: "provider-error", message: "stream interrupted" },
+      blocks: [advisorCall, advisorResult],
+    };
+    const withError = [user("Fix the bug"), errored];
+    const withoutError = [user("Fix the bug"), assistant(false, [advisorCall, advisorResult])];
+    const withoutEntry = [user("Fix the bug")];
+
+    expect(fingerprintPreimage(withError)).toHaveLength(2);
+    expect(routingFingerprint(withError)).not.toBe(routingFingerprint(withoutError));
+    expect(routingFingerprint(withError)).not.toBe(routingFingerprint(withoutEntry));
+  });
 });
 
 describe("routingFingerprint", () => {

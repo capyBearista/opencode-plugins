@@ -39,11 +39,18 @@ export function buildAdvisorPrompt(transcript: string): string {
   return `${ADVISOR_INSTRUCTIONS}\n\n${ADVISOR_CONTEXT_MARKER}\n${transcript}`;
 }
 
+export function resolveAdvisorModel(
+  config: AdvisorConfig,
+  executorModel?: ModelReference,
+): ModelReference | undefined {
+  return config.advisor.model ?? executorModel;
+}
+
 export function createAdvisorService(deps: AdvisorServiceDeps): AdvisorService {
   return {
     consult: async (input) => {
       const config = await deps.loadConfig();
-      const model = config.advisor.model ?? input.executorModel;
+      const model = resolveAdvisorModel(config, input.executorModel);
       const response = await deps.generateText({
         prompt: buildAdvisorPrompt(input.transcript),
         ...(model ? { model } : {}),

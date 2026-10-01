@@ -1,7 +1,8 @@
+import { buildAdvisorProjection } from "./advisor-projection.js";
 import type { CapturedHistory } from "./context.js";
 import type { ModelReference } from "./messages.js";
 import { turnKeyForHistory } from "./request.js";
-import { type SerializedEntry, serializeAdvisorContext } from "./serialize.js";
+import type { SerializedEntry } from "./serialize.js";
 import type { RequestSnapshot } from "./snapshot-store.js";
 
 export interface MergedConsultContext {
@@ -28,7 +29,7 @@ export function mergeExplicitConsult(input: ConsultMergeInput): MergedConsultCon
   const executorModel = history.executorModel ?? current?.executorModel;
   return {
     entries,
-    transcript: serializeAdvisorContext(entries),
+    transcript: buildAdvisorProjection(entries).transcript,
     ...(executorModel ? { executorModel } : {}),
   };
 }

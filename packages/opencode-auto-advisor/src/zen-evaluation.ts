@@ -1,18 +1,27 @@
 import { AIError, TimeoutError } from "@opencode/ai";
-import type { EvaluationQuestions, EvaluationResponseFor } from "@opencode/ai/experimental";
+import type {
+  EvaluationInput,
+  EvaluationQuestions,
+  EvaluationResponseFor,
+} from "@opencode/ai/experimental";
 import { Evaluation, EvaluationClient } from "@opencode/ai/experimental";
 import { SystemOne } from "@opencode/ai/experimental/system-one";
 import { make } from "@opencode/ai/promise";
-import { resolveZenAuth, type ZenConnectionDomain } from "./zen-auth.js";
+import {
+  resolveZenAuth,
+  resolveZenToken,
+  ZEN_PUBLIC_TOKEN,
+  type ZenConnectionDomain,
+} from "./zen-auth.js";
 
 export const ZEN_PROVIDER_ID = "opencode";
 export const ZEN_PROVIDER_METADATA_KEY = "opencode";
 export const ZEN_BASE_URL = "https://opencode.ai/zen/v1";
-export const ZEN_CALL_TIMEOUT_MS = 30_000;
+export const ZEN_CALL_TIMEOUT_MS = 5_000;
 
 export interface ZenEvaluationInput {
   readonly modelID: string;
-  readonly state: string;
+  readonly state: EvaluationInput;
   readonly questions: EvaluationQuestions;
 }
 
@@ -26,6 +35,7 @@ export interface ZenEvaluation {
   readonly evaluate: (
     input: ZenEvaluationInput,
   ) => Promise<EvaluationResponseFor<EvaluationQuestions>>;
+  readonly isPublicAuth: () => Promise<boolean>;
   readonly dispose: () => Promise<void>;
 }
 
@@ -74,6 +84,7 @@ export function createZenEvaluation(options: ZenEvaluationOptions = {}): ZenEval
         clearTimeout(timer);
       }
     },
+    isPublicAuth: async () => (await resolveZenToken(options.connection)) === ZEN_PUBLIC_TOKEN,
     dispose: async () => {
       if (disposed) return;
       disposed = true;

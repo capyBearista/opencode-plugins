@@ -30,7 +30,9 @@ Both paths converge on one fresh, stateless Advisor service. The Executor must n
 
 ## Advisor context
 
-The Advisor context is derived from the actual Executor working context, preserving role and chronological order.
+The Advisor context is the **Advisor consultation projection** derived from the
+canonical captured state (see [State representations](#state-representations)),
+preserving role and chronological order.
 
 The canonical serializer must represent, as applicable:
 
@@ -58,6 +60,32 @@ Unsupported media must be represented explicitly rather than silently omitted or
 - an explicit marker that the Advisor did not directly inspect the media contents.
 
 Text elsewhere in the conversation that describes the media remains normal context.
+
+## State representations
+
+The implementation derives one canonical captured state from the assembled hook
+request and gives routing and the Advisor separate projections of it. No single
+shared serialized transcript is passed to both; the fingerprint, the Jev routing
+state, and the Advisor transcript are independent derivations.
+
+- **Canonical captured state** — the rich, capture-normalized Executor request:
+  system instructions, user/assistant text, tool calls/results/errors,
+  compaction markers, state markers, and sanitized media placeholders.
+  Consumers: every derivation below. Bounds: normalized and sanitized once at
+  capture; bounded by the assembled request.
+- **Fingerprint projection** — a SHA-256 digest over the full canonical material
+  state with advisor-origin blocks excluded, used only to decide whether a
+  routing opportunity is materially new. Bounds: fixed-size digest; the
+  preimage is never persisted.
+- **Jev routing projection** — the bounded structured state sent to the
+  Zen/System One classifier (`{objective, currentTurn, recentHistory,
+  omittedHistoryTurns, executor}`). Bounds: internal caps; omitted history is
+  reported, never silently dropped.
+- **Advisor consultation projection** — the rich canonical transcript fitted to
+  the selected Advisor model's advertised input budget by whole-entry priority
+  retention, with an omission marker and compact diagnostics when anything is
+  dropped. The explicit `advisor()` path uses the same projection without a
+  budget and stays unbounded by design.
 
 ## Advisor model
 
@@ -135,7 +163,8 @@ Default mode.
 
 ### `observe`
 
-- evaluate routing opportunities;
+- evaluate routing opportunities by sending the bounded Jev routing projection
+  to the configured Zen/System One provider — `observe` is not local-only;
 - apply deterministic routing policy hypothetically;
 - persist compact telemetry;
 - do not invoke the Advisor automatically;
@@ -199,7 +228,8 @@ Direct TypeSafe support is deferred. If added later, prefer supported OpenCode i
 
 ### Routing questions
 
-Use two independent atomic Evaluation questions over the same routing state:
+Use two independent atomic Evaluation questions over the same Jev routing
+projection (never the Advisor consultation transcript):
 
 1. **advisor_would_help** — normalized boolean probability: would independent expert review at this point materially improve correctness or catch an important issue in the primary agent's next action?
 2. **consequence** — score on a fixed **0-4** rubric: how consequential would an incorrect next action be if the Executor proceeds without independent review?
@@ -297,7 +327,9 @@ The implementation must prove this with focused tests/runtime validation.
 
 Fail open. Routing, provider, Advisor, advice-delivery, and telemetry failures must not unnecessarily block normal Executor continuation.
 
-Failures remain observable through diagnostics/telemetry where possible.
+Failures remain observable through diagnostics/telemetry where possible, with
+the failing stage (routing vs Advisor consultation) identifiable from the
+recorded error class and disposition.
 
 ### Explicit path
 

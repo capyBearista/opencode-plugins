@@ -1,8 +1,10 @@
 import type { Context as PluginContext } from "@opencode/plugin/promise/plugin";
 import { type AdviceDeliveryInput, type AdviceLifetime, deliverAdvice } from "./advice-delivery.js";
+import type { AdvisorProjectionBuilder } from "./advisor-projection.js";
 import type { AdvisorService } from "./advisor-service.js";
 import type { AdvisorConfig } from "./config.js";
 import type { AssembledMessage } from "./messages.js";
+import type { ModelLimitResolver } from "./model-limits.js";
 import { type CapturedRequest, captureAssembledRequest } from "./request.js";
 import { createRoutingDomain } from "./routing.js";
 import type { AdvisorRouter, RoutingDecision } from "./routing-types.js";
@@ -16,6 +18,8 @@ export interface RoutingObserverDeps {
   readonly router: AdvisorRouter;
   readonly service: AdvisorService;
   readonly snapshots: SnapshotStore;
+  readonly resolveLimits?: ModelLimitResolver;
+  readonly project?: AdvisorProjectionBuilder;
   readonly telemetry?: TelemetrySink;
   readonly lifetime?: AdviceLifetime;
   readonly deliver?: (input: AdviceDeliveryInput) => void;
@@ -40,28 +44,32 @@ export async function registerRoutingObserver(
     } catch {
       return;
     }
-    deps.snapshots.capture({
-      sessionID: captured.sessionID,
-      turnKey: captured.turnKey,
-      entries: captured.entries,
-      executorModel: captured.executorModel,
-    });
-    deps.lifetime?.expire(captured.sessionID, captured.turnKey);
-    const started = Date.now();
-    const decision = await domain.observe({
-      sessionID: captured.sessionID,
-      ...(kind === "primary" ? { kind } : {}),
-      capture: async () => ({
+    try {
+      deps.snapshots.capture({
+        sessionID: captured.sessionID,
+        turnKey: captured.turnKey,
         entries: captured.entries,
-        lastUserMessageID: captured.turnKey,
         executorModel: captured.executorModel,
-      }),
-    });
-    const delivered = deliverAccepted(deps, dispatch.messages, captured, decision);
-    if (decision.mode === "active") {
-      injectLiveAdvice(deps, dispatch.messages, captured, delivered);
+      });
+      deps.lifetime?.expire(captured.sessionID, captured.turnKey);
+      const started = Date.now();
+      const decision = await domain.observe({
+        sessionID: captured.sessionID,
+        ...(kind === "primary" ? { kind } : {}),
+        capture: async () => ({
+          entries: captured.entries,
+          lastUserMessageID: captured.turnKey,
+          executorModel: captured.executorModel,
+        }),
+      });
+      const delivered = deliverAccepted(deps, dispatch.messages, captured, decision);
+      if (decision.mode === "active") {
+        injectLiveAdvice(deps, dispatch.messages, captured, delivered);
+      }
+      await recordTelemetry(deps, captured, decision, delivered, Date.now() - started);
+    } catch {
+      return;
     }
-    await recordTelemetry(deps, captured, decision, delivered, Date.now() - started);
   });
   return { dispose: () => registration.dispose(), forget: (sessionID) => domain.forget(sessionID) };
 }
@@ -110,6 +118,9 @@ async function recordTelemetry(
   if (decision.mode === "off") return;
   const model = decision.failure?.model ?? metadataString(decision, "model");
   const attempts = decision.failure?.attempts ?? metadataNumber(decision, "attempts");
+  const rawConsequence = metadataNumber(decision, "rawConsequence");
+  const consequenceProbabilities = metadataNumberRecord(decision, "consequenceProbabilities");
+  const consequenceConfidence = metadataNumber(decision, "consequenceConfidence");
   const event: TelemetryEventInput = {
     sessionID: captured.sessionID,
     turnKey: captured.turnKey,
@@ -123,11 +134,19 @@ async function recordTelemetry(
           consequence: decision.assessment.consequence,
         }
       : {}),
+    ...(rawConsequence !== undefined ? { rawConsequence } : {}),
+    ...(consequenceProbabilities ? { consequenceProbabilities } : {}),
+    ...(consequenceConfidence !== undefined ? { consequenceConfidence } : {}),
     ...(decision.policy ? { policy: decision.policy } : {}),
     ...(model ? { model } : {}),
     ...(attempts !== undefined ? { attempts } : {}),
-    ...(decision.error ? { errorClass: decision.failure?.errorClass ?? "RouterError" } : {}),
+    ...(decision.error && decision.action !== "skip"
+      ? { errorClass: decision.failure?.errorClass ?? "RouterError" }
+      : {}),
+    ...(decision.failure?.disposition ? { failureDisposition: decision.failure.disposition } : {}),
     ...(decision.advisorModel ? { advisorModel: decision.advisorModel } : {}),
+    ...(decision.skipReason ? { skipReason: decision.skipReason } : {}),
+    ...(decision.advisorContext ? { advisorContext: decision.advisorContext } : {}),
     ...(delivered !== undefined ? { delivered } : {}),
   };
   await deps.telemetry.record(event);
@@ -136,6 +155,18 @@ async function recordTelemetry(
 function metadataNumber(decision: RoutingDecision, key: string): number | undefined {
   const value = decision.assessment?.metadata?.[key];
   return typeof value === "number" ? value : undefined;
+}
+
+function metadataNumberRecord(
+  decision: RoutingDecision,
+  key: string,
+): Readonly<Record<string, number>> | undefined {
+  const value = decision.assessment?.metadata?.[key];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).filter(
+    (entry): entry is [string, number] => typeof entry[1] === "number",
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 function metadataString(decision: RoutingDecision, key: string): string | undefined {

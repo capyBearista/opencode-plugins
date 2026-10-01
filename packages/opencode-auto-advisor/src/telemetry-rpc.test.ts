@@ -1,7 +1,49 @@
 import { describe, expect, test } from "bun:test";
 import type { RpcDomain } from "@opencode/plugin/promise/rpc";
+import { Effect, JsonSchema, Schema, SchemaRepresentation } from "effect";
 import { registerTelemetryRpc, TELEMETRY_RPC_ID, TelemetryRpc } from "./telemetry-rpc.js";
 import type { TelemetryEvent, TelemetryQuery, TelemetryStore } from "./telemetry-types.js";
+
+function hostOutputCodec(schema: JsonSchema.JsonSchema) {
+  return Schema.make(
+    SchemaRepresentation.fromJsonSchemaDocument(JsonSchema.fromSchemaDraft2020_12(schema)).ast,
+  );
+}
+
+async function decodeHostOutput(schema: JsonSchema.JsonSchema, value: unknown): Promise<unknown> {
+  return Effect.runPromise(Schema.decodeUnknownEffect(hostOutputCodec(schema))(value));
+}
+
+const maximalEvent: TelemetryEvent = {
+  seq: 42,
+  time: 1_700_000_000_000,
+  sessionID: "ses_max",
+  turnKey: "msg-max",
+  mode: "active",
+  decision: "fail",
+  fingerprint: "f".repeat(64),
+  advisorWouldHelp: 0.91,
+  consequence: 3,
+  rawConsequence: 3.42,
+  consequenceProbabilities: { "0": 0.01, "1": 0.05, "2": 0.19, "3": 0.55, "4": 0.2 },
+  consequenceConfidence: 0.83,
+  policy: { advisorWouldHelpThreshold: 0.7, consequenceThreshold: 3 },
+  model: "jev-1.13",
+  attempts: 2,
+  latencyMs: 512,
+  errorClass: "Timeout",
+  failureDisposition: "terminal",
+  advisorModel: "opencode/gpt-5",
+  skipReason: "advisor-model-limits-unavailable",
+  advisorContext: {
+    complete: false,
+    omittedEntries: 4,
+    includedEntries: 11,
+    estimatedTokens: 8192,
+    inputBudget: 150_000,
+  },
+  delivered: false,
+};
 
 const stored: TelemetryEvent = {
   seq: 7,
@@ -64,6 +106,21 @@ describe("telemetry rpc", () => {
     for (const name of Object.keys(TelemetryRpc.methods)) {
       expect(name).not.toMatch(/record|set|remove|clear|write|delete/i);
     }
+  });
+
+  test("query output preserves every field the store can produce", async () => {
+    const decoded = await decodeHostOutput(TelemetryRpc.methods["telemetry.query"].output, {
+      events: [maximalEvent],
+    });
+    expect(decoded).toEqual({ events: [maximalEvent] });
+  });
+
+  test("single-event output preserves every field the store can produce", async () => {
+    const decoded = await decodeHostOutput(
+      TelemetryRpc.methods["telemetry.event"].output,
+      maximalEvent,
+    );
+    expect(decoded).toEqual(maximalEvent);
   });
 
   test("query handler reads the bounded store and returns the page", async () => {

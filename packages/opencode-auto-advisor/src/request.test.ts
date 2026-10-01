@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionContext } from "@opencode/plugin/promise/session";
-import { routingFingerprint } from "./fingerprint.js";
+import { fingerprintPreimage, routingFingerprint } from "./fingerprint.js";
 import { captureAssembledRequest, turnKeyForHistory } from "./request.js";
 
 type Message = SessionContext["messages"][number];
@@ -158,6 +158,65 @@ describe("captureAssembledRequest", () => {
     expect(routingFingerprint(changed.entries)).not.toBe(routingFingerprint(base.entries));
     expect(JSON.stringify(changed.entries)).toContain("hook-time system mutation");
     expect(JSON.stringify(changed.entries)).toContain("hook-time assistant mutation");
+  });
+
+  test("a completed advisor interaction alone does not change the fingerprint", () => {
+    const before = captureAssembledRequest(
+      request({
+        messages: [
+          user([text("migrate the schema")]),
+          assistant([text("Planning the migration")]),
+        ] as never,
+      }),
+    );
+    const completedInline = captureAssembledRequest(
+      request({
+        messages: [
+          user([text("migrate the schema")]),
+          assistant([
+            text("Planning the migration"),
+            { type: "tool-call", id: "call_advisor", name: "advisor", input: {} },
+            {
+              type: "tool-result",
+              id: "call_advisor",
+              name: "advisor",
+              result: { type: "text", value: "advisor advice" },
+            },
+          ]),
+        ] as never,
+      }),
+    );
+    const completedToolMessage = captureAssembledRequest(
+      request({
+        messages: [
+          user([text("migrate the schema")]),
+          assistant([
+            text("Planning the migration"),
+            { type: "tool-call", id: "call_advisor", name: "advisor", input: {} },
+          ]),
+          {
+            id: "msg-tool",
+            role: "tool",
+            content: [
+              {
+                type: "tool-result",
+                id: "call_advisor",
+                name: "advisor",
+                result: { type: "text", value: "advisor advice" },
+              },
+            ],
+          } as Message,
+        ] as never,
+      }),
+    );
+
+    expect(routingFingerprint(completedInline.entries)).toBe(routingFingerprint(before.entries));
+    expect(routingFingerprint(completedToolMessage.entries)).toBe(
+      routingFingerprint(before.entries),
+    );
+    expect(JSON.stringify(fingerprintPreimage(completedInline.entries))).not.toContain(
+      "advisor advice",
+    );
   });
 
   test("keys the turn from the last user message id, falling back to content identity", () => {

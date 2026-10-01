@@ -1,7 +1,13 @@
-import type { AdvisorService } from "./advisor-service.js";
+import {
+  type AdvisorContextDiagnostics,
+  type AdvisorProjectionBuilder,
+  buildAdvisorProjection,
+} from "./advisor-projection.js";
+import { type AdvisorService, resolveAdvisorModel } from "./advisor-service.js";
 import type { AdvisorConfig, RoutingConfig } from "./config.js";
-import { fingerprintPreimage, routingFingerprint } from "./fingerprint.js";
-import type { SessionID } from "./messages.js";
+import { routingFingerprint } from "./fingerprint.js";
+import type { ModelReference, SessionID } from "./messages.js";
+import { computeInputBudget, type ModelLimitResolver, type ModelLimits } from "./model-limits.js";
 import { normalizeAssessment, RouterError } from "./router.js";
 import type {
   AdvisorRouter,
@@ -12,14 +18,18 @@ import type {
   RoutingOpportunity,
   RoutingPolicySnapshot,
 } from "./routing-types.js";
-import { serializeAdvisorContext } from "./serialize.js";
 import { refKey } from "./serialize-assistant.js";
 import { createTurnStore } from "./turn-store.js";
+
+export const ADVISOR_LIMITS_SKIP_REASON = "advisor-model-limits-unavailable";
+export const ADVISOR_CONSULT_ERROR_CLASS = "ConsultationError";
 
 export interface RoutingDomainDeps {
   readonly loadConfig: () => Promise<AdvisorConfig>;
   readonly router: AdvisorRouter;
   readonly service: AdvisorService;
+  readonly resolveLimits?: ModelLimitResolver;
+  readonly project?: AdvisorProjectionBuilder;
 }
 
 export interface RoutingDomain {
@@ -32,6 +42,8 @@ export function createRoutingDomain(
   options: { readonly maxSessions?: number } = {},
 ): RoutingDomain {
   const turns = createTurnStore(options);
+  const project = deps.project ?? buildAdvisorProjection;
+  const resolveLimits = deps.resolveLimits ?? (async () => undefined);
 
   return {
     observe: async (opportunity) => {
@@ -58,12 +70,16 @@ export function createRoutingDomain(
       if (turn.fingerprint === fingerprint) return { action: "suppress", mode, fingerprint };
       turn.fingerprint = fingerprint;
 
+      if (mode === "active" && turn.consumed >= config.routing.maxConsultationsPerTurn) {
+        return { action: "deny", mode, fingerprint, policy };
+      }
+
       let assessment: NormalizedAssessment;
       try {
         assessment = normalizeAssessment(
           await deps.router.evaluate({
             sessionID: opportunity.sessionID,
-            entries: fingerprintPreimage(captured.entries),
+            entries: captured.entries,
           }),
         );
       } catch (cause) {
@@ -84,12 +100,33 @@ export function createRoutingDomain(
       if (turn.consumed >= config.routing.maxConsultationsPerTurn) {
         return { action: "deny", mode, fingerprint, assessment, policy };
       }
-      turn.consumed += 1;
-      if (mode === "observe") return { action: "accept", mode, fingerprint, assessment, policy };
+      if (mode === "observe") {
+        turn.consumed += 1;
+        return { action: "accept", mode, fingerprint, assessment, policy };
+      }
 
+      const advisorModel = resolveAdvisorModel(config, captured.executorModel);
+      const limits = await resolveLimitsSafely(resolveLimits, advisorModel);
+      const inputBudget = limits === undefined ? undefined : computeInputBudget(limits);
+      if (inputBudget === undefined) {
+        return {
+          action: "skip",
+          mode,
+          fingerprint,
+          assessment,
+          policy,
+          skipReason: ADVISOR_LIMITS_SKIP_REASON,
+          error: `advisor model limits unavailable${advisorModel ? ` for ${refKey(advisorModel)}` : ""}`,
+        };
+      }
+
+      turn.consumed += 1;
+      let advisorContext: AdvisorContextDiagnostics | undefined;
       try {
+        const projection = project(captured.entries, { inputBudget });
+        advisorContext = projection.diagnostics;
         const consultation = await deps.service.consult({
-          transcript: serializeAdvisorContext(captured.entries),
+          transcript: projection.transcript,
           ...(captured.executorModel ? { executorModel: captured.executorModel } : {}),
         });
         return {
@@ -100,15 +137,38 @@ export function createRoutingDomain(
           policy,
           advice: consultation.advice,
           ...(consultation.model ? { advisorModel: refKey(consultation.model) } : {}),
+          ...(advisorContext ? { advisorContext } : {}),
         };
       } catch (cause) {
-        return { action: "fail", mode, fingerprint, assessment, policy, error: describe(cause) };
+        return {
+          action: "fail",
+          mode,
+          fingerprint,
+          assessment,
+          policy,
+          error: describe(cause),
+          failure: { errorClass: ADVISOR_CONSULT_ERROR_CLASS, disposition: "terminal" },
+          ...(advisorContext ? { advisorContext } : {}),
+        };
       }
     },
     forget: (sessionID) => {
       turns.forget(sessionID);
+      deps.router.forget?.(sessionID);
     },
   };
+}
+
+async function resolveLimitsSafely(
+  resolveLimits: ModelLimitResolver,
+  model: ModelReference | undefined,
+): Promise<ModelLimits | undefined> {
+  if (model === undefined) return undefined;
+  try {
+    return await resolveLimits(model);
+  } catch {
+    return undefined;
+  }
 }
 
 function policySnapshot(routing: RoutingConfig): RoutingPolicySnapshot {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ADVISOR_OMISSION_MARKER } from "./advisor-projection.js";
 import { ConfigError } from "./config.js";
 import type { ContextMessage, SessionID } from "./context.js";
 import { registerPlugin } from "./index.js";
@@ -129,6 +130,33 @@ describe("advisor tool wiring", () => {
 
     expect(result?.content).toContain("routing.mode");
     expect(context.prompts).toHaveLength(0);
+  });
+
+  test("explicit consultations stay unbounded by the automatic model budget", async () => {
+    const context = contextWith([ADVISOR_MESSAGE]);
+    const ctx = {
+      ...context.ctx,
+      model: {
+        list: async () => ({
+          data: [
+            {
+              id: "jev-1.14",
+              providerID: "opencode",
+              modelID: "jev-1.14",
+              limit: { context: 1000, output: 800 },
+            },
+          ],
+        }),
+      },
+    };
+    await registerPlugin(ctx as never, { loadConfig: configWithoutFile });
+
+    const result = await context.added[0]?.execute({}, TOOL_CONTEXT);
+
+    const prompt = context.prompts[0]?.prompt ?? "";
+    expect(result?.content).toBe("Check the rollback path before migrating.");
+    expect(prompt).toContain("I should double-check the migration.");
+    expect(prompt).not.toContain(ADVISOR_OMISSION_MARKER);
   });
 });
 

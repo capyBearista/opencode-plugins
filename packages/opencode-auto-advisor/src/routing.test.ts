@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { type AdvisorProjectionBuilder, buildAdvisorProjection } from "./advisor-projection.js";
 import type {
   AdvisorConsultationInput,
   AdvisorConsultationResult,
@@ -6,8 +7,15 @@ import type {
 } from "./advisor-service.js";
 import type { AdvisorConfig, RoutingConfig } from "./config.js";
 import type { ModelReference, SessionID } from "./messages.js";
+import type { ModelLimitResolver, ModelLimits } from "./model-limits.js";
 import { RouterError } from "./router.js";
-import { acceptsConsultation, createRoutingDomain, isPrimaryDispatch } from "./routing.js";
+import {
+  ADVISOR_CONSULT_ERROR_CLASS,
+  ADVISOR_LIMITS_SKIP_REASON,
+  acceptsConsultation,
+  createRoutingDomain,
+  isPrimaryDispatch,
+} from "./routing.js";
 import type {
   AdvisorRouter,
   DispatchKind,
@@ -51,10 +59,12 @@ function configWith(overrides: Partial<RoutingConfig> = {}): AdvisorConfig {
   return { advisor: {}, routing: routingConfig(overrides) };
 }
 
+const DEFAULT_EXECUTOR_MODEL: ModelReference = { providerID: "opencode", id: "jev-1.13" };
+
 function stateWith(
   entries: readonly SerializedEntry[],
   lastUserMessageID = "msg-user-1",
-  executorModel?: ModelReference,
+  executorModel: ModelReference | undefined = DEFAULT_EXECUTOR_MODEL,
 ): RoutingStateCapture {
   return { entries, lastUserMessageID, ...(executorModel ? { executorModel } : {}) };
 }
@@ -106,6 +116,8 @@ function domain(options: {
   readonly router: AdvisorRouter;
   readonly service?: AdvisorService;
   readonly maxSessions?: number;
+  readonly resolveLimits?: ModelLimitResolver;
+  readonly project?: AdvisorProjectionBuilder;
 }) {
   return createRoutingDomain(
     {
@@ -115,6 +127,8 @@ function domain(options: {
       },
       router: options.router,
       service: options.service ?? { consult: async () => ({ advice: "advice" }) },
+      resolveLimits: options.resolveLimits ?? (async () => ({ context: 200_000, output: 32_000 })),
+      ...(options.project ? { project: options.project } : {}),
     },
     options.maxSessions === undefined ? {} : { maxSessions: options.maxSessions },
   );
@@ -378,14 +392,46 @@ describe("router result normalization", () => {
       consequenceThreshold: 3,
     });
   });
+
+  test("carries raw and normalized consequence plus probability metadata into the decision", async () => {
+    const metadata = {
+      model: "jev-1.13-free",
+      attempts: 1,
+      rawConsequence: 2.6,
+      consequenceProbabilities: { "0": 0.05, "1": 0.1, "2": 0.6, "3": 0.2, "4": 0.05 },
+      consequenceConfidence: 0.9,
+    };
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 3, metadata }]);
+    const routing = domain({ config: configWith({ mode: "observe" }), router: router.router });
+
+    const decision = await routing.observe(opportunity(stateWith([USER("hi")])).value);
+
+    expect(decision.action).toBe("accept");
+    expect(decision.assessment?.consequence).toBe(3);
+    expect(decision.assessment?.metadata).toEqual(metadata);
+  });
+
+  test("fails open at the routing boundary when the router times out", async () => {
+    const failure = {
+      errorClass: "Timeout",
+      model: "jev-1.13-free",
+      attempts: 1,
+      disposition: "terminal" as const,
+    };
+    const router = scripted([new RouterError("zen evaluation exceeded 5000ms", failure)]);
+    const routing = domain({ config: configWith({ mode: "active" }), router: router.router });
+
+    const decision = await routing.observe(opportunity(stateWith([USER("hi")])).value);
+
+    expect(decision.action).toBe("fail");
+    expect(decision.failure).toEqual(failure);
+    expect(decision.advice).toBeUndefined();
+  });
 });
 
 describe("automatic consultation budget", () => {
-  test("consumes one attempt per turn and denies the next accepted opportunity", async () => {
-    const router = scripted([
-      { advisorWouldHelp: 0.9, consequence: 4 },
-      { advisorWouldHelp: 0.9, consequence: 4 },
-    ]);
+  test("active skips evaluation once the turn budget is exhausted", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
     const advisor = countingService();
     const routing = domain({
       config: configWith({ mode: "active" }),
@@ -402,9 +448,40 @@ describe("automatic consultation budget", () => {
 
     expect(first.action).toBe("accept");
     expect(second.action).toBe("deny");
-    expect(second.assessment).toEqual({ advisorWouldHelp: 0.9, consequence: 4 });
+    expect(second.mode).toBe("active");
+    expect(second.assessment).toBeUndefined();
+    expect(second.policy).toEqual({
+      advisorWouldHelpThreshold: 0.7,
+      consequenceThreshold: 3,
+    });
+    expect(router.calls).toHaveLength(1);
     expect(advisor.calls).toHaveLength(1);
+  });
+
+  test("observe keeps evaluating hypothetically past the exhausted budget", async () => {
+    const router = scripted([
+      { advisorWouldHelp: 0.9, consequence: 4 },
+      { advisorWouldHelp: 0.8, consequence: 3 },
+    ]);
+    const advisor = countingService();
+    const routing = domain({
+      config: configWith({ mode: "observe" }),
+      router: router.router,
+      service: advisor.service,
+    });
+
+    const first = await routing.observe(
+      opportunity(stateWith([USER("hi"), ASSISTANT(false, [RESULT("one")])])).value,
+    );
+    const second = await routing.observe(
+      opportunity(stateWith([USER("hi"), ASSISTANT(false, [RESULT("two")])])).value,
+    );
+
+    expect(first.action).toBe("accept");
+    expect(second.action).toBe("deny");
+    expect(second.assessment).toEqual({ advisorWouldHelp: 0.8, consequence: 3 });
     expect(router.calls).toHaveLength(2);
+    expect(advisor.calls).toHaveLength(0);
   });
 
   test("consumes the attempt even when the automatic consultation fails", async () => {
@@ -430,6 +507,26 @@ describe("automatic consultation budget", () => {
     expect(failed.error).toContain("provider exploded");
     expect(denied.action).toBe("deny");
     expect(advisor.calls).toHaveLength(1);
+  });
+
+  test("classifies automatic consultation failures distinctly from router failures", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
+    const advisor = countingService(new Error("provider exploded"));
+    const routing = domain({
+      config: configWith({ mode: "active" }),
+      router: router.router,
+      service: advisor.service,
+    });
+
+    const failed = await routing.observe(
+      opportunity(stateWith([USER("hi"), ASSISTANT(false, [RESULT("one")])])).value,
+    );
+
+    expect(failed.action).toBe("fail");
+    expect(failed.failure).toEqual({
+      errorClass: ADVISOR_CONSULT_ERROR_CLASS,
+      disposition: "terminal",
+    });
   });
 
   test("applies the budget hypothetically in observe mode", async () => {
@@ -547,6 +644,20 @@ describe("session cleanup", () => {
     expect(afterForget.action).toBe("accept");
     expect(router.calls).toHaveLength(2);
   });
+
+  test("forget also clears the router's session-scoped state", () => {
+    const forgotten: SessionID[] = [];
+    const router: AdvisorRouter = {
+      evaluate: async () => ({ advisorWouldHelp: 0.9, consequence: 4 }),
+      forget: (sessionID) => {
+        forgotten.push(sessionID);
+      },
+    };
+
+    domain({ config: configWith(), router }).forget("ses_1" as SessionID);
+
+    expect(forgotten).toEqual(["ses_1"]);
+  });
 });
 
 describe("fail-open behavior", () => {
@@ -590,5 +701,253 @@ describe("fail-open behavior", () => {
     expect(decision.error).toContain("configuration unreadable");
     expect(router.calls).toHaveLength(0);
     expect(counts.captures).toBe(0);
+  });
+});
+
+describe("model-aware budget", () => {
+  test("resolves the inherited executor model and fits the transcript", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
+    const advisor = countingService({ advice: "check it" });
+    const resolved: ModelReference[] = [];
+    const executorModel: ModelReference = { providerID: "opencode", id: "jev-1.13" };
+
+    const decision = await domain({
+      config: configWith({ mode: "active" }),
+      router: router.router,
+      service: advisor.service,
+      resolveLimits: async (model) => {
+        resolved.push(model);
+        return { context: 200_000, output: 32_000 };
+      },
+    }).observe(
+      opportunity(stateWith([USER("migrate the schema")], "msg-user-1", executorModel)).value,
+    );
+
+    expect(decision.action).toBe("accept");
+    expect(resolved).toEqual([executorModel]);
+    expect(advisor.calls).toHaveLength(1);
+    expect(decision.advisorContext).toMatchObject({
+      complete: true,
+      omittedEntries: 0,
+      includedEntries: 1,
+      inputBudget: 150_000,
+    });
+    expect(decision.advisorContext?.estimatedTokens).toBeLessThanOrEqual(150_000);
+  });
+
+  test("resolves the pinned advisor model for the limit lookup", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
+    const resolved: ModelReference[] = [];
+    const pinned: ModelReference = { providerID: "anthropic", id: "claude-sonnet-4" };
+
+    const decision = await domain({
+      config: {
+        advisor: { model: pinned },
+        routing: routingConfig({ mode: "active" }),
+      },
+      router: router.router,
+      resolveLimits: async (model) => {
+        resolved.push(model);
+        return { context: 200_000, output: 32_000 };
+      },
+    }).observe(
+      opportunity(stateWith([USER("hi")], "msg-user-1", { providerID: "opencode", id: "jev-1.13" }))
+        .value,
+    );
+
+    expect(decision.action).toBe("accept");
+    expect(resolved).toEqual([pinned]);
+  });
+
+  test("unknown limits fail open without consulting or consuming the budget", async () => {
+    const router = scripted([
+      { advisorWouldHelp: 0.9, consequence: 4 },
+      { advisorWouldHelp: 0.9, consequence: 4 },
+    ]);
+    const advisor = countingService();
+    let available = false;
+    const routing = domain({
+      config: configWith({ mode: "active" }),
+      router: router.router,
+      service: advisor.service,
+      resolveLimits: async () => (available ? { context: 200_000, output: 32_000 } : undefined),
+    });
+
+    const skipped = await routing.observe(opportunity(stateWith([USER("hi")])).value);
+    expect(skipped).toMatchObject({
+      action: "skip",
+      mode: "active",
+      skipReason: ADVISOR_LIMITS_SKIP_REASON,
+      fingerprint: expect.any(String),
+      assessment: { advisorWouldHelp: 0.9, consequence: 4 },
+    });
+    expect(skipped.error).toBeString();
+    expect(advisor.calls).toHaveLength(0);
+
+    available = true;
+    const accepted = await routing.observe(
+      opportunity(stateWith([USER("hi"), ASSISTANT(false, [RESULT("done")])])).value,
+    );
+    expect(accepted.action).toBe("accept");
+    expect(advisor.calls).toHaveLength(1);
+  });
+
+  test("malformed limits fail open without consuming the budget", async () => {
+    const router = scripted([
+      { advisorWouldHelp: 0.9, consequence: 4 },
+      { advisorWouldHelp: 0.9, consequence: 4 },
+    ]);
+    const advisor = countingService();
+    let limits: ModelLimits | undefined = { context: 100, output: 200 };
+    const routing = domain({
+      config: configWith({ mode: "active" }),
+      router: router.router,
+      service: advisor.service,
+      resolveLimits: async () => limits,
+    });
+
+    const skipped = await routing.observe(opportunity(stateWith([USER("hi")])).value);
+    expect(skipped.action).toBe("skip");
+    expect(skipped.skipReason).toBe(ADVISOR_LIMITS_SKIP_REASON);
+    expect(advisor.calls).toHaveLength(0);
+
+    limits = { context: 200_000, output: 32_000 };
+    const accepted = await routing.observe(
+      opportunity(stateWith([USER("hi"), ASSISTANT(false, [RESULT("done")])])).value,
+    );
+    expect(accepted.action).toBe("accept");
+    expect(advisor.calls).toHaveLength(1);
+  });
+
+  test("resolver failures fail open", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
+    const advisor = countingService();
+    const decision = await domain({
+      config: configWith({ mode: "active" }),
+      router: router.router,
+      service: advisor.service,
+      resolveLimits: async () => {
+        throw new Error("catalog exploded");
+      },
+    }).observe(opportunity(stateWith([USER("hi")])).value);
+
+    expect(decision.action).toBe("skip");
+    expect(advisor.calls).toHaveLength(0);
+  });
+
+  test("an unknown advisor model fails open", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
+    const advisor = countingService();
+    let resolved = 0;
+    const decision = await domain({
+      config: configWith({ mode: "active" }),
+      router: router.router,
+      service: advisor.service,
+      resolveLimits: async () => {
+        resolved += 1;
+        return { context: 200_000, output: 32_000 };
+      },
+    }).observe(
+      opportunity({
+        entries: [USER("hi")],
+        lastUserMessageID: "msg-user-1",
+      }).value,
+    );
+
+    expect(decision.action).toBe("skip");
+    expect(decision.skipReason).toBe(ADVISOR_LIMITS_SKIP_REASON);
+    expect(resolved).toBe(0);
+    expect(advisor.calls).toHaveLength(0);
+  });
+
+  test("reduces the transcript for a small-context advisor instead of rejecting", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
+    const advisor = countingService();
+    const history = USER(`OLD-${"x".repeat(8000)}`);
+
+    const decision = await domain({
+      config: configWith({ mode: "active" }),
+      router: router.router,
+      service: advisor.service,
+      resolveLimits: async () => ({ context: 2000, output: 1500 }),
+    }).observe(opportunity(stateWith([history, USER("CURRENT-TASK")])).value);
+
+    expect(decision.action).toBe("accept");
+    expect(advisor.calls).toHaveLength(1);
+    expect(advisor.calls[0]?.transcript).toContain("CURRENT-TASK");
+    expect(advisor.calls[0]?.transcript).not.toContain("OLD-");
+    expect(decision.advisorContext?.complete).toBe(false);
+    expect(decision.advisorContext?.omittedEntries).toBe(1);
+    expect(decision.advisorContext?.inputBudget).toBe(500);
+  });
+
+  test("observe never resolves limits or builds the projection", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
+    let resolved = 0;
+    let projected = 0;
+    const decision = await domain({
+      config: configWith({ mode: "observe" }),
+      router: router.router,
+      resolveLimits: async () => {
+        resolved += 1;
+        return { context: 200_000, output: 32_000 };
+      },
+      project: (state, options) => {
+        projected += 1;
+        return buildAdvisorProjection(state, options);
+      },
+    }).observe(opportunity(stateWith([USER("hi")])).value);
+
+    expect(decision.action).toBe("accept");
+    expect(decision.advisorContext).toBeUndefined();
+    expect(resolved).toBe(0);
+    expect(projected).toBe(0);
+  });
+
+  test("rejected opportunities never resolve limits or build the projection", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.1, consequence: 0 }]);
+    let resolved = 0;
+    let projected = 0;
+    const decision = await domain({
+      config: configWith({ mode: "active" }),
+      router: router.router,
+      resolveLimits: async () => {
+        resolved += 1;
+        return { context: 200_000, output: 32_000 };
+      },
+      project: (state, options) => {
+        projected += 1;
+        return buildAdvisorProjection(state, options);
+      },
+    }).observe(opportunity(stateWith([USER("hi")])).value);
+
+    expect(decision.action).toBe("reject");
+    expect(resolved).toBe(0);
+    expect(projected).toBe(0);
+  });
+
+  test("budget-denied opportunities never resolve limits or build the projection", async () => {
+    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
+    let projected = 0;
+    const routing = domain({
+      config: configWith({ mode: "active" }),
+      router: router.router,
+      resolveLimits: async () => ({ context: 200_000, output: 32_000 }),
+      project: (state, options) => {
+        projected += 1;
+        return buildAdvisorProjection(state, options);
+      },
+    });
+
+    const first = await routing.observe(
+      opportunity(stateWith([USER("hi"), ASSISTANT(false, [RESULT("one")])])).value,
+    );
+    const denied = await routing.observe(
+      opportunity(stateWith([USER("hi"), ASSISTANT(false, [RESULT("two")])])).value,
+    );
+
+    expect(first.action).toBe("accept");
+    expect(denied.action).toBe("deny");
+    expect(projected).toBe(1);
   });
 });

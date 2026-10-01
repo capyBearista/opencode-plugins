@@ -139,6 +139,18 @@ function createMockContext() {
         return { text: "smoke advice" };
       },
     },
+    model: {
+      list: async () => ({
+        data: [
+          {
+            id: "jev-1.13",
+            providerID: "opencode",
+            modelID: "jev-1.13",
+            limit: { context: 200_000, output: 32_000 },
+          },
+        ],
+      }),
+    },
     storage: {
       get: async (key: string) => values.get(key),
       set: async (key: string, value: unknown) => {
@@ -304,6 +316,14 @@ const stored = [...modeMock.values.values()]
   .at(-1);
 assert(stored !== undefined, "active mode did not record telemetry");
 assert((stored as { delivered?: boolean }).delivered === true, "telemetry missed the delivery");
+assert(
+  (stored as { advisorContext?: { complete?: boolean } }).advisorContext?.complete === true,
+  "active telemetry missed the advisor context diagnostics",
+);
+assert(
+  (stored as { advisorContext?: { inputBudget?: number } }).advisorContext?.inputBudget === 150_000,
+  "the advisor input budget did not honor the model limits",
+);
 assert(modeMock.signals.length === 1, "session.deleted cleanup did not subscribe");
 
 await modeCleanup?.();

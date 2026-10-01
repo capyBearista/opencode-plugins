@@ -47,6 +47,18 @@ export function createTestContext() {
         };
       },
     },
+    model: {
+      list: async () => ({
+        data: [
+          {
+            id: "jev-1.13",
+            providerID: "opencode",
+            modelID: "jev-1.13",
+            limit: { context: 200_000, output: 32_000 },
+          },
+        ],
+      }),
+    },
   };
   return { ctx, added, disposers, hooks, hookCallbacks };
 }

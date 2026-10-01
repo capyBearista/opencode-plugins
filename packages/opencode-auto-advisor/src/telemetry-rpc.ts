@@ -16,6 +16,9 @@ const TELEMETRY_EVENT = {
     fingerprint: { type: "string" },
     advisorWouldHelp: { type: "number" },
     consequence: { type: "number" },
+    rawConsequence: { type: "number" },
+    consequenceProbabilities: { type: "object", additionalProperties: { type: "number" } },
+    consequenceConfidence: { type: "number" },
     policy: {
       type: "object",
       properties: {
@@ -29,7 +32,21 @@ const TELEMETRY_EVENT = {
     attempts: { type: "number" },
     latencyMs: { type: "number" },
     errorClass: { type: "string" },
+    failureDisposition: { type: "string", enum: ["retry", "fallback", "terminal"] },
     advisorModel: { type: "string" },
+    skipReason: { type: "string" },
+    advisorContext: {
+      type: "object",
+      properties: {
+        complete: { type: "boolean" },
+        omittedEntries: { type: "number" },
+        includedEntries: { type: "number" },
+        estimatedTokens: { type: "number" },
+        inputBudget: { type: "number" },
+      },
+      required: ["complete", "omittedEntries", "includedEntries", "estimatedTokens", "inputBudget"],
+      additionalProperties: false,
+    },
     delivered: { type: "boolean" },
   },
   required: ["seq", "time", "sessionID", "turnKey", "mode", "decision"],

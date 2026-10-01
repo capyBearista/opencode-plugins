@@ -147,12 +147,15 @@ rg -n "ui\.slot|keymap" packages/*/src
 - `git log --all -- <path>` also lists merges that deleted the path; prove artifact absence with `git rev-list --objects --all --reflog` plus `git cat-file -e <blob>`, not log output
 - Release-channel policy edits never move npm dist-tags (guard returns `noop` for published versions); promotion is an authenticated `npm dist-tag` op — E401 in unattended sessions means handing exact commands to an operator
 - `gh pr edit --body-file` fails on this repo (classic-projects GraphQL deprecation); patch PR bodies via `gh api repos/capyBearista/opencode-plugins/pulls/<n> -X PATCH -F 'body=@file'` instead
+- Issue bodies use the same form-field pattern on the sibling endpoint: `gh api repos/capyBearista/opencode-plugins/issues/<n> -X PATCH -F 'body=@file'`; and `gh issue comment` accepts no `--jq` flag (unlike `gh api`), so confirm comments by URL instead of parsed output
+- A pipe to `tail` masks `||` fallback branches (the exit status is the tail's, so the fallback never runs): verify `gh`-plus-fallback sequences by exit code or output content, not by piped tail output
 
 ## Testing Requirements
 - **Unit tests**: colocated (bun test)
 - Run tests before committing (enforced by CI)
 - Add runtime smoke coverage or an explicit built-artifact verification step for plugin entrypoints, TUI render paths, or config-driven loading changes.
 - Turbo replays cached task logs, so after a fix re-run with `--force` and cite only the fresh run as completion evidence.
+- Delegated implementation lanes must carry a validation protocol in the brief: TDD red→green per behavior, `typecheck` + focused tests during work, full package suite + lint once at lane end. Smoke/build and fresh root gates stay orchestrator-run so lane reports never substitute for them.
 
 ## Reference Docs
 

@@ -7,7 +7,8 @@ export interface ZenFailure {
   readonly errorClass: string;
 }
 
-const RETRYABLE_CLASSES = new Set(["RateLimit", "ProviderInternal", "Transport"]);
+const FALLBACK_CLASSES = new Set(["QuotaExceeded", "RateLimit"]);
+const RETRY_CLASSES = new Set(["Transport", "ProviderInternal", "UnknownProvider"]);
 const RETRY_HEADER = "x-should-retry";
 
 export function classifyZenFailure(cause: unknown): ZenFailure {
@@ -15,12 +16,19 @@ export function classifyZenFailure(cause: unknown): ZenFailure {
     return { disposition: "terminal", errorClass: "UnknownError" };
   }
   const errorClass = cause.reason._tag;
+  const base = baseDisposition(errorClass);
   const override = readHeader(cause.reason.http?.headers, RETRY_HEADER);
   if (override === "true") return { disposition: "retry", errorClass };
-  if (override === "false") return { disposition: "terminal", errorClass };
-  if (errorClass === "QuotaExceeded") return { disposition: "fallback", errorClass };
-  if (RETRYABLE_CLASSES.has(errorClass)) return { disposition: "retry", errorClass };
-  return { disposition: "terminal", errorClass };
+  if (override === "false") {
+    return { disposition: base === "fallback" ? "fallback" : "terminal", errorClass };
+  }
+  return { disposition: base, errorClass };
+}
+
+function baseDisposition(errorClass: string): ZenDisposition {
+  if (FALLBACK_CLASSES.has(errorClass)) return "fallback";
+  if (RETRY_CLASSES.has(errorClass)) return "retry";
+  return "terminal";
 }
 
 function readHeader(

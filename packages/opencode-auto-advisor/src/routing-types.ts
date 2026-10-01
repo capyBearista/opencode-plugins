@@ -1,6 +1,7 @@
+import type { AdvisorContextDiagnostics } from "./advisor-projection.js";
+import type { CanonicalState } from "./canonical.js";
 import type { RoutingMode } from "./config.js";
 import type { ModelReference, SessionID } from "./messages.js";
-import type { SerializedEntry } from "./serialize.js";
 
 export type DispatchKind = "primary" | "compaction" | "title" | "generate";
 
@@ -18,15 +19,16 @@ export interface NormalizedAssessment {
 
 export interface RoutingState {
   readonly sessionID: SessionID;
-  readonly entries: readonly SerializedEntry[];
+  readonly entries: CanonicalState;
 }
 
 export interface AdvisorRouter {
   readonly evaluate: (state: RoutingState) => Promise<RouterAssessment>;
+  readonly forget?: (sessionID: SessionID) => void;
 }
 
 export interface RoutingStateCapture {
-  readonly entries: readonly SerializedEntry[];
+  readonly entries: CanonicalState;
   readonly lastUserMessageID: string;
   readonly executorModel?: ModelReference;
 }
@@ -39,10 +41,13 @@ export interface RoutingOpportunity {
 
 export type RoutingAction = "skip" | "suppress" | "deny" | "reject" | "accept" | "fail";
 
+export type RoutingFailureDisposition = "retry" | "fallback" | "terminal";
+
 export interface RoutingFailure {
   readonly errorClass: string;
   readonly model?: string;
   readonly attempts?: number;
+  readonly disposition?: RoutingFailureDisposition;
 }
 
 export interface RoutingPolicySnapshot {
@@ -57,8 +62,10 @@ export interface RoutingDecision {
   readonly assessment?: NormalizedAssessment;
   readonly advice?: string;
   readonly advisorModel?: string;
+  readonly advisorContext?: AdvisorContextDiagnostics;
   readonly failure?: RoutingFailure;
   readonly policy?: RoutingPolicySnapshot;
+  readonly skipReason?: string;
   readonly error?: string;
 }
 

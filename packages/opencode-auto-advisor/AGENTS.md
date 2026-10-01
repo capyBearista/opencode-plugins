@@ -35,6 +35,55 @@ never re-triggers routing. Explicit zero-argument
 inheritance, and a stateless `AdvisorService` over `ctx.generate.text`. Add a
 Changeset only when the package becomes releasable.
 
+Remediation phase A: routing and automatic consultation no longer consume the
+raw full transcript. The Zen router sends a bounded structured Jev projection
+derived from the canonical captured state; the fingerprint covers the full
+canonical material state with advisor-origin blocks excluded regardless of
+`inFlight`; and both consultation paths route through the Advisor projection
+seam where model-aware fitting lands next.
+
+Remediation phase B: `active` no longer pays classifier latency once the turn
+budget is exhausted, the `advisor_would_help` boolean carries explicit positive
+and negative criteria framed on the immediate pending action, the raw
+consequence score and probability/confidence metadata survive normalization into
+telemetry, the Zen call deadline is 5s, and the Zen chain distinguishes
+same-model retry (transient infrastructure), model fallback (quota/capacity/
+rate-limit), and fast fail-open (auth/config/schema/programming) with the
+verified host semantics of `x-should-retry`.
+
+Remediation phase C: the automatic consultation is model-aware. The selected
+Advisor model (`advisor.model` pinned, else the captured Executor model) is
+resolved through the host's own model catalog (`ctx.model.list()`) to its
+advertised `limit.context`/`limit.input`/`limit.output`; a deterministic
+priority retention pass fits the canonical transcript into the derived input
+budget, and the omission is disclosed to the Advisor with an internal marker
+plus compact diagnostics in telemetry. Unreachable or malformed model limits
+skip the automatic consultation gracefully without consuming the per-turn
+budget, and explicit `advisor()` remains unbounded by this budget. The rich
+Advisor projection is built lazily: only after an opportunity is accepted by
+policy and has budget remaining, and never in `observe`.
+
+Remediation phase D: a failed automatic consultation is recorded in telemetry
+as `ConsultationError` with a `terminal` disposition instead of being mislabeled
+as `RouterError`; the router-error path keeps its Zen class and resolved
+disposition. The durable docs also distinguish the four state representations
+(canonical captured state, fingerprint projection, Jev routing projection,
+Advisor consultation projection) so no reader assumes one shared serialized
+transcript feeds both routing and the Advisor, and they state plainly that
+`observe` sends the bounded Jev routing projection to Zen and is not
+local-only.
+
+Remediation phase E: the context hook is fail-open end to end — an unexpected
+throw from snapshot capture, the routing domain, delivery, or telemetry is
+swallowed and the primary dispatch proceeds unmutated. An exhausted fallback
+chain normalizes its terminal throw to a `terminal` disposition while preserving
+model, error class, and total attempts. Because the host catalog exposes no
+free-vs-paid pre-signal for System One models, a paid model that terminally
+rejects the public bearer is instead cached as ineligible for that session:
+later opportunities skip it without attempting (same terminal `Authentication`
+record, `attempts: 0`), the configured `routing.models` chain is never mutated,
+and the cache clears on `session.deleted`.
+
 ## Configuration
 
 - Global-only strict JSON at `<config dir>/opencode/auto-advisor.json`. The
@@ -73,6 +122,11 @@ src/
 ├── context.ts          # Durable session history → captured, serialized context
 ├── request.ts          # Assembled model request → captured routing state
 ├── request-serialize.ts  # Assembled-request serializer; unknown part types become type-name-only markers (no payload) so future host types alter the fingerprint instead of colliding
+├── canonical.ts        # CanonicalState: the rich, capture-normalized entry form every derivation reads
+├── material.ts         # Advisor-origin block exclusion shared by the fingerprint and projections
+├── jev-projection.ts   # Bounded structured Zen routing state (JEV_MAX_* caps) built from canonical state
+├── advisor-projection.ts # Advisor consultation projection: model-aware priority fitting + diagnostics
+├── model-limits.ts     # Host model-catalog lookup → advertised limits + reserve/budget math
 ├── consult.ts          # Explicit merge: captured request + current-turn delta
 ├── snapshot-store.ts   # Bounded, turn-keyed per-session request snapshots
 ├── messages.ts         # Host message/tool shapes derived from @opencode/plugin types
@@ -126,7 +180,8 @@ src/
 - Turn-key logic is shared: capture and explicit lookup both go through the single `contentTurnKey` helper (`turnKeyFor` / `turnKeyForHistory` in `request.ts`) — a key-format change must land in both paths together or snapshots become write-only.
 - `serializeAdvisorContext` and `stableStringify` are pure, deterministic
   (sorted keys) exports, so all three serializers share one canonical entry form
-  that fingerprints build on. Automatic advice is never persisted or serialized:
+  that fingerprints build on, and the routing and Advisor projections derive
+  from. Automatic advice is never persisted or serialized:
   it is injected into the in-flight dispatch only, so no serializer needs an
   advisor-origin escape hatch.
 - Media (images, audio, video, documents, unknown) becomes metadata placeholders
@@ -140,6 +195,39 @@ src/
 - Explicit-consultation failures — session read, configuration, or generation —
   are returned as a visible `Auto Advisor consultation failed: …` tool result
   with `metadata.error`; they are never thrown past the tool boundary.
+
+## State representations
+
+`captureAssembledRequest` normalizes the assembled hook request once into the
+rich **canonical captured state**; every other representation is a separate
+derivation of it, and no single shared serialized transcript is passed to both
+routing and the Advisor. `captureAssembledRequest`, the durable capture
+(`captureSessionHistory`), and `mergeExplicitConsult` (which composes the two)
+are the only valid `CanonicalState` constructors; every derivation trusts their
+capture-normalized input and never builds or re-normalizes entries itself.
+
+- Canonical captured state — the full material Executor request
+  (`CanonicalState`): system instructions, user/assistant text, tool
+  calls/results/errors, compaction markers, state markers, and sanitized media
+  placeholders. Consumers: all three derivations below. Bounds: normalized and
+  sanitized at capture (media is metadata-only, URI query strings and fragments
+  are stripped); bounded by the assembled request itself.
+- Fingerprint projection — a SHA-256 digest over the full canonical material
+  state, with every advisor-origin block excluded regardless of `inFlight`,
+  `inFlight` normalized to `false`, and `idle` markers dropped. Consumer:
+  routing opportunity gating, which suppresses unchanged states. Bounds:
+  fixed-size digest; the preimage is never persisted.
+- Jev routing projection — a compact structured state
+  (`{objective, currentTurn, recentHistory, omittedHistoryTurns, executor}`).
+  Consumer: the Zen/System One classifier behind the `AdvisorRouter` seam
+  (`observe` and `active` both send it; `off` sends nothing). Bounds: internal
+  `JEV_MAX_*` caps; omitted history is reported as `omittedHistoryTurns`.
+- Advisor consultation projection — the rich canonical transcript fitted to the
+  selected Advisor model's input budget by whole-entry priority retention, with
+  an omission marker and compact diagnostics when anything is dropped.
+  Consumers: automatic consultation (`active`) with an `inputBudget`; explicit
+  `advisor()` without one. Bounds: automatic = model-advertised input budget;
+  explicit = unbounded by design (user-invoked).
 
 ## Routing
 
@@ -156,23 +244,110 @@ src/
   `(sessionID, last-user-message-id)`; a snapshot is only reused while its turn
   key still matches the durable history, so stale snapshots never attach to a
   later consultation. Unreadable dispatches fail open without throwing.
-- Modes: `off` short-circuits before evaluating; `observe` captures, fingerprints,
-  evaluates, and applies policy hypothetically with zero Advisor invocations and
-  zero context mutations; `active` additionally performs the automatic
+- Modes: `off` short-circuits before evaluating. `observe` is **not
+  local-only**: it captures, fingerprints, sends the bounded Jev routing
+  projection to Zen/System One, applies policy hypothetically, and persists
+  compact routing telemetry, with zero automatic Advisor invocations and zero
+  Executor-context mutations. `active` additionally performs the automatic
   consultation and injects accepted advice as a system-role message. No mode
   reads the session context.
   Every primary dispatch writes the request snapshot before the mode branches,
   so `off` still snapshots for explicit `advisor()` consults — the snapshot is
   the only source of hook-time system and user content.
-- Fingerprint: `routingFingerprint(entries)` is a SHA-256 digest over the
-  canonical fingerprint preimage emitted by `fingerprintPreimage`, which is on
-  the live routing path (the router evaluates the same material entries that the
-  digest covers). The preimage preserves transcript
-  order and drops the in-flight advisor tool-call block, `inFlight` flags
-  (normalized to `false`), and `idle` markers; state markers such as model or
-  agent switches stay. Identical
+- Canonical state: `captureAssembledRequest` produces the rich canonical entry
+  form (`CanonicalState` in `canonical.ts`) — media and URIs are normalized and
+  sanitized exactly once at capture, and every downstream derivation reads this
+  full-detail state.
+- Fingerprint: `routingFingerprint(canonical)` is a SHA-256 digest over the
+  canonical fingerprint preimage emitted by `fingerprintPreimage`. The preimage
+  preserves transcript order, normalizes `inFlight` to `false`, drops `idle`
+  markers, and excludes every `advisor`-named tool-call/result/error block
+  regardless of `inFlight` (settled/completed interactions included; assistant
+  and tool entries alike). An entry whose blocks were all advisor-origin is
+  dropped with them; unrelated blocks in the same message always stay. State
+  markers such as model or agent switches stay. The fingerprint is a separate
+  derivation from the Jev projection, so a material change the projection omits
+  still opens a new opportunity. Identical
   fingerprints are suppressed, so a failed or completed opportunity is never
   retried against unchanged state.
+- Jev routing projection: the Zen backend derives a deliberately compact,
+  structured state from the canonical entries (`buildJevRoutingProjection` in
+  `jev-projection.ts`) and sends it as the Evaluation `state` — never the
+  serialized transcript. Priority order: current user objective (with sanitized
+  media hints), current-turn assistant text, current-turn tool calls/results/
+  errors (advisor-origin excluded), the most recent settled turns for reference
+  resolution, and minimal executor agent/model metadata; older turns are omitted
+  and reported as `omittedHistoryTurns`. By design the projection carries text
+  plus tool activity only: assistant reasoning blocks, media blocks, and state
+  markers are excluded, so a router miss is investigated against that contract
+  rather than assumed projection loss. Every cap is an internal `JEV_MAX_*`
+  constant, never configuration. The projection lives on the Zen/Jev side of
+  the `AdvisorRouter` seam: the generic boundary only carries canonical state,
+  so no Jev assumption leaks into `routing.ts` or `routing-types.ts`.
+- Advisor projection seam: `buildAdvisorProjection(canonical, options)` in
+  `advisor-projection.ts` is the single place the rich Advisor consultation
+  context is built, used by both the automatic path (`routing.ts`) and the
+  explicit merge (`consult.ts`). With no `inputBudget` it returns the full
+  canonical transcript (`serializeAdvisorContext`) and no diagnostics — the
+  explicit path stays unbounded because it is user-invoked. With an
+  `inputBudget` it fits the transcript by priority and reports
+  `AdvisorContextDiagnostics` (`complete`, `omittedEntries`, `includedEntries`,
+  `estimatedTokens`, `inputBudget`); callers must not build transcripts
+  themselves. The rich projection is constructed lazily: `routing.ts` builds it
+  only after policy acceptance and a free per-turn budget, never in `observe`
+  and never for rejected/denied opportunities (`project` is the injectable
+  builder seam the tests assert that with).
+- Model-aware budget: the selected Advisor model (`resolveAdvisorModel`:
+  `config.advisor.model` else the captured executor model) is resolved through
+  the host's own model catalog to its advertised `limit` fields. The lookup is
+  `ctx.model.list()` in the V2 promise plugin API, which the host serves from
+  `Model.Service.available()` (enabled models) as `{ location, data: Model.Info[] }`;
+  entries match by `modelID` (or `id`) plus `providerID`, and the limit shape is
+  `{ context: int, input?: int, output: int }` (`@opencode/schema/model`). No
+  local model-capability table exists. The resolver returns `undefined` on a
+  missing catalog, a failed call, an unknown model, or malformed limits, and the
+  automatic path then returns `skip` with `skipReason:
+  "advisor-model-limits-unavailable"` without consuming the per-turn budget —
+  fail open, no consultation, Executor proceeds, telemetry records the cause.
+  Because `@opencode/client` is not installed in this package, `index.ts`
+  accesses the catalog through a narrow structural `ModelCatalog` with a
+  runtime function guard instead of the unresolved host type.
+- Input budget: `reserve = max(floor(context_limit * ADVISOR_RESERVE_FRACTION), output_limit)`
+  with internal `ADVISOR_RESERVE_FRACTION = 0.25` (no config knob), then
+  `input_budget = min(input_limit ?? context_limit - reserve, context_limit - reserve)`;
+  a non-positive budget is treated as unusable limits and fails open. The
+  reserve is generation/reasoning headroom plus operational safety margin for a
+  single-shot consultation — it is not a claim that any model degrades at a
+  particular fill level. Worked examples: context 200k / output 32k → reserve
+  50k → input 150k; context 200k / output 60k → reserve 60k → input 140k.
+- Retention and size: when the canonical entries exceed the input budget,
+  `buildAdvisorProjection` drops whole entries lowest-priority first —
+  (1) system entries (instructions and system/task constraints), (2) current
+  user turn, (3) current assistant/tool state, (4) compaction/checkpoint
+  entries, (5) history — and never cuts mid-entry, so every included tool
+  call/result and JSON object stays complete. A tier that cannot
+  be fully included stops all lower tiers, so a dropped entry is never replaced
+  by lower-priority content. History is offered newest-first, so the oldest
+  entries are dropped first. The size heuristic is deterministic and internal:
+  `estimateTokens(text) = round(length / 4)` characters per token, mirroring the
+  host's own `Token.estimate`; it is pinned by tests, not configurable. It is
+  approximate by design — the fit sums `stableStringify` lengths per entry plus
+  an envelope approximation, and the final prompt is measured post-hoc into the
+  `advisorContext` diagnostics instead of being trusted from the estimate.
+- Omission marker and diagnostics: when anything is omitted, the transcript
+  gains a leading structured marker entry (`role: "marker"`,
+  `type: "context-omitted"`, detail `ADVISOR_OMISSION_MARKER`) stating that
+  earlier/lower-priority Executor context was omitted for the Advisor model's
+  context budget. The marker appears only when reduction occurs; the mandatory
+  marker can push the estimate marginally past the budget within the reserve.
+  Compact diagnostics travel as additive fields (`advisorContext` on the
+  decision and the telemetry event, plus `skipReason`) and store counts and
+  estimates only — omitted content is never persisted anywhere. The guarantee is
+  the fullest useful Executor-visible view fitting the budget, never "the
+  complete session": the host may already have compacted history, and media is
+  metadata placeholders by design. If the provider still rejects the fitted
+  prompt for length, the consultation fails open (`action: "fail"` with the
+  built diagnostics), nothing is injected, and the Executor continues.
 - Consequence anchors (the `consequence` router answer is an integer 0-4 on this five-level rubric; the Eval client enforces `0..n−1` dynamically, so any future rubric change must keep exactly five levels to preserve the 0-4 contract):
 
   | Level | Summary | Guidance |
@@ -187,58 +362,116 @@ src/
   consequence >= routing.consequenceThreshold`, read from live configuration for
   every opportunity. `advisorWouldHelp` is clamped to `[0, 1]` for finite values;
   NaN and ±Infinity are rejected as router errors; a non-integer or
-  out-of-range consequence is a router error.
+  out-of-range consequence is a router error. The `advisor_would_help` boolean
+  is framed on the Executor's immediate pending action — not overall project
+  difficulty — with explicit positive criteria (independent review could change
+  that next action or catch a non-obvious correctness, security, data-integrity,
+  concurrency, compatibility, or design problem) and explicit negative criteria
+  (routine, mechanical, read-only, easily reversible, already well-supported, or
+  low-value-for-independent-review actions).
 - Budget: keyed by `(sessionID, turn key)` where the turn key is the last user
   message id; an id-less last user message falls back to
   `content:<message-index>:<content-hash>` so identical id-less turns in
   different positions stay distinct, and a dispatch with no user message falls
   back to `content:no-user:<entries-hash>` instead of sharing the empty key.
   A new user message resets the turn. The budget is checked after policy: rejected opportunities
-  never consume it, and budget-exhausted opportunities are still evaluated so
-  `observe` can record what `active` would have done. An accepted opportunity
+  never consume it. `active` short-circuits before evaluation once the turn is
+  exhausted — no classifier call is made when consultation is impossible — while
+  `observe` keeps evaluating hypothetically past the limit so calibration data
+  still records what `active` would have done; because `observe` consumes the
+  same hypothetical per-turn budget, its post-exhaustion `deny` decisions mirror
+  exactly what `active` would deny. An accepted opportunity
   consumes one attempt whether the automatic consultation succeeds or fails;
   explicit `advisor()` never consumes. Router errors, capture failures, and
   configuration errors fail open without consuming an attempt, and the
   fingerprint is still recorded so the same state is not retried. Turn and
   budget state is an LRU keyed by session with the same cap as the snapshot
   store (64, refreshed on access, oldest session evicted), so a long-lived
-  process cannot accumulate routing state across closed sessions.
+  process cannot accumulate routing state across closed sessions. An identical
+  dispatch after exhaustion records `suppress` (the fingerprint check runs
+  before the short-circuit), not `deny` — both skip evaluation, so telemetry
+  readers must not treat `suppress` as an evaluated decision.
 - Router seam: stable code depends on
   `AdvisorRouter.evaluate(state) → { advisorWouldHelp, consequence, metadata? }`.
   The `@opencode/ai` Evaluation/System One adapter stays behind this seam in
   `zen-evaluation.ts`/`zen-router.ts`; only those `zen-*.ts` files may import
   evaluation types (enforced by `router.test.ts`), `advice-delivery.ts` may
   import the host `Message` constructor, and `index.ts` is the only
-  composition point. The adapter resolves auth through
+  composition point. The no-direct-`effect`-import guard (`router.test.ts`)
+  excludes `.test.` files, so host-path validation tests may import `effect`
+  while the manifest must never pin it. The adapter resolves auth through
   `ctx.integration.connection.active("opencode")` + `resolve` and falls back to
   the public bearer exactly like the host's own provider plugin; it never reads
   key files or invents env-var contracts. `SystemOne.model` appends `/systemone`
   itself — configure the `…/zen/v1` base, not the full endpoint. Official V2 docs
   expose no Evaluation/System One API or changelog, so verify Zen behavior
   against opencode source and the installed `@opencode/ai` types, never docs.
-- Zen chain: each opportunity restarts from the top of `routing.models`. A
-  retryable class (RateLimit/ProviderInternal/Transport) retries up to
-  `MAX_ATTEMPTS_PER_MODEL` with backoff, then advances the chain; QuotaExceeded
-  advances immediately; Authentication/ContentPolicy/InvalidRequest/Timeout and
-  other terminal classes fail open for the opportunity without consuming budget
-  (`RouterError.failure` carries model/attempts/errorClass into telemetry).
-  `x-should-retry` overrides both directions (header lookup is
-  case-insensitive). Continuous System One scores are
-  rounded onto the discrete 0-4 rubric before `normalizeAssessment`. Every
-  adapter call carries a caller deadline (`ZEN_CALL_TIMEOUT_MS`, 30s) that
-  aborts the evaluation and surfaces a classified `Timeout` AIError, so a hung
-  provider call cannot hold the primary dispatch.
+- Zen chain: each opportunity restarts from the top of `routing.models` and
+  resolves every failure into one of three outcomes. `retry`
+  (Transport/ProviderInternal/UnknownProvider — transient transport and generic
+  infrastructure) retries the SAME model up to `MAX_ATTEMPTS_PER_MODEL` with
+  backoff, then fails open without walking the chain, because a model change
+  cannot plausibly resolve generic infrastructure. `fallback`
+  (QuotaExceeded/RateLimit — quota exhaustion, model-specific capacity, or
+  model-specific rate limiting) advances to the next model immediately.
+  `terminal` (Authentication/ContentPolicy/InvalidRequest/Timeout/
+  UnsupportedOperation/InvalidProviderOutput and non-AIError) fails open for the
+  opportunity without walking the chain. None of the outcomes consume budget.
+  An exhausted fallback chain normalizes the terminal throw to a `terminal`
+  disposition, preserving the last model, error class, and total attempts.
+  No reliable free-vs-paid pre-signal exists for System One models: they are
+  absent from the host model catalog (`ctx.model.list()` exposes enabled models
+  only, and the catalog has no `jev-1.13*` entries), and the Zen `/v1/models`
+  listing marks neither free nor paid models. Eligibility is therefore learned
+  at runtime: a terminal Authentication failure — the paid-model-on-public-token
+  rejection verified live — marks that model ineligible in a session-scoped
+  cache when the active Zen credential is the public bearer (`isPublicAuth` on
+  the evaluation seam, backed by `resolveZenToken`). Later opportunities skip an
+  ineligible model without attempting it and record the same terminal
+  `Authentication` failure with `attempts: 0`; the configured `routing.models`
+  chain is never mutated; the cache is bounded like the other session state and
+  cleared on `session.deleted`; and a missing or failing public-auth probe leaves
+  caching disabled (fail open). Two sharp edges: a 5xx caused by free-tier
+  capacity is indistinguishable from generic infrastructure 5xx and fails open
+  instead of falling back; and a model cached ineligible under the public bearer
+  stays skipped until `session.deleted` even if credentials change mid-session.
+  `x-should-retry` governs the same-model retry decision only, matching the host
+  `isRetryable` semantics verified in opencode source
+  (`packages/ai/src/provider-error.ts`, consumed by the session runner's retry
+  policy): `true` forces a same-model retry on any class, `false` forbids a
+  same-model retry (fallback classes still fall back, retry classes become
+  terminal) and never by itself forbids a fallback model; the header lookup is
+  case-insensitive. `RouterError.failure` carries model/attempts/errorClass plus
+  the resolved disposition into telemetry. Continuous System One scores are
+  rounded half-up onto the discrete 0-4 rubric and clamped, and the raw score,
+  per-level probabilities, and confidence are preserved in assessment metadata
+  and telemetry alongside the normalized value. Every adapter call carries a
+  caller deadline (`ZEN_CALL_TIMEOUT_MS`, 5s) that aborts the evaluation and
+  surfaces a classified `Timeout` AIError, so a hung provider call cannot hold
+  the primary dispatch.
 - Telemetry: `ctx.storage` keys `head` + `evt:<zero-padded seq>`; cap 5000 with
   oldest-first eviction, writes serialized in-process and fail-open, reads
   paginated within the host scan limit (≤1000). Events store the fingerprint
-  digest, decision, policy snapshot, router model/attempts, latency, error class,
-  advisor model, and delivery outcome — never transcript text. The head is
+  digest, decision, policy snapshot, router model/attempts, latency, error class
+  plus failure disposition, the raw and normalized consequence with the score
+  answer's probabilities/confidence when provided, advisor model, the compact
+  `advisorContext` diagnostics (completeness, omitted/included counts, estimated
+  prompt tokens, input budget), the `skipReason` for a graceful model-limits
+  skip, and delivery outcome — never transcript text, credentials, or secrets.
+  A failed automatic consultation records `ConsultationError` with a `terminal`
+  disposition; router failures keep their Zen class and resolved disposition.
+  The head is
   reserved before the event write, so a crash can never reuse a sequence; an
   event write that fails after the head write leaves a permanent sequence hole
   (sparse telemetry, never duplicate ids) and can advance the eviction window
   past the missing event. RPC
   `experimental.auto-advisor` exposes only `telemetry.query` and
-  `telemetry.event` (no mutation surface).
+  `telemetry.event` (no mutation surface). The host RPC path silently strips
+  event fields the schema does not declare (Effect decode discards excess
+  properties instead of erroring), so every field `routing-observer.ts` can
+  emit must exist as an optional schema property — verify with a
+  maximal-event round-trip test through the host's real validation path, not
+  by reading the schema.
 - Reentrancy: the only routing trigger is the primary `context` hook. Advisor
   consultation (`ctx.generate.text`) and Zen evaluation run on host paths that
   do not fire that hook, and injected advice is never persisted, so neither
@@ -266,10 +499,12 @@ src/
   `ctx.event.subscribe` (`session.deleted`) and clears snapshots, turn state,
   and live advice; setup cleanup aborts the subscription and disposes RPC,
   routing, the Zen runtime, and the tool.
-- Known limits carried forward: advisor prompts embed the full transcript with no
-  size bound — shipping `active` as opt-in experimental on the `off` default is
-  the accepted risk, and a truncation policy is required before recommending
-  `active` broadly;
+- Known limits carried forward: automatic consultations are fitted to the
+  Advisor model's advertised budget, while explicit `advisor()` prompts still
+  embed the full transcript with no size bound by design (user-invoked) —
+  shipping `active` as opt-in experimental on the `off` default is
+  the accepted risk, and live calibration of the 25% reserve is still required
+  before recommending `active` broadly;
   `sanitizeUri` preserves http(s) path segments, so a secret embedded in a URL
   path can still reach the prompt (query strings and fragments are stripped, but
   paths are not); no-user turns fall back to durable history in real flows (the

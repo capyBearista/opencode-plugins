@@ -6,8 +6,11 @@ export const ADVISOR_WOULD_HELP_QUESTION = "advisor_would_help";
 export const CONSEQUENCE_QUESTION = "consequence";
 
 export const ADVISOR_WOULD_HELP_INSTRUCTIONS =
-  "Would independent expert review at this point materially improve correctness or catch an " +
-  "important issue in the primary agent's next action?";
+  "Judge only the Executor's immediate pending action, not the overall difficulty of the project. " +
+  "Answer true only when independent expert review has a meaningful chance of changing that next " +
+  "action or catching a non-obvious correctness, security, data-integrity, concurrency, compatibility, " +
+  "or design problem in it. Answer false for routine, mechanical, read-only, easily reversible, " +
+  "already well-supported, or otherwise low-value-for-independent-review actions.";
 
 export const CONSEQUENCE_INSTRUCTIONS =
   "How consequential would an incorrect next action be if the Executor proceeds without " +
@@ -16,6 +19,9 @@ export const CONSEQUENCE_INSTRUCTIONS =
 export interface ZenAnswers {
   readonly advisorWouldHelp: number;
   readonly consequence: number;
+  readonly rawConsequence: number;
+  readonly consequenceProbabilities?: Readonly<Record<string, number>>;
+  readonly consequenceConfidence?: number;
 }
 
 export function buildZenQuestions(): EvaluationQuestions {
@@ -46,6 +52,11 @@ export function readZenAnswers(answers: Readonly<Record<string, EvaluationAnswer
   return {
     advisorWouldHelp: wouldHelp.probability,
     consequence: normalizeScore(consequence.score),
+    rawConsequence: consequence.score,
+    ...(consequence.probabilities ? { consequenceProbabilities: consequence.probabilities } : {}),
+    ...(consequence.confidence !== undefined
+      ? { consequenceConfidence: consequence.confidence }
+      : {}),
   };
 }
 

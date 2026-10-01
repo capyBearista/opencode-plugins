@@ -32,23 +32,87 @@ describe("zen questions", () => {
     }
   });
 
+  test("frames the help question on the immediate action with explicit positive and negative criteria", () => {
+    const instructions = ADVISOR_WOULD_HELP_INSTRUCTIONS;
+    expect(instructions).toContain("immediate pending action");
+    expect(instructions).toContain("changing that next action");
+    for (const category of [
+      "correctness",
+      "security",
+      "data-integrity",
+      "concurrency",
+      "compatibility",
+      "design",
+    ]) {
+      expect(instructions).toContain(category);
+    }
+    for (const negative of [
+      "routine",
+      "mechanical",
+      "read-only",
+      "easily reversible",
+      "already well-supported",
+      "low-value-for-independent-review",
+    ]) {
+      expect(instructions).toContain(negative);
+    }
+  });
+
   test("reads the normalized boolean probability and integer score", () => {
     const answers: Record<string, EvaluationAnswer> = {
       [ADVISOR_WOULD_HELP_QUESTION]: { type: "boolean", probability: 0.82 },
       [CONSEQUENCE_QUESTION]: { type: "score", score: 3 },
     };
-    expect(readZenAnswers(answers)).toEqual({ advisorWouldHelp: 0.82, consequence: 3 });
+    expect(readZenAnswers(answers)).toEqual({
+      advisorWouldHelp: 0.82,
+      consequence: 3,
+      rawConsequence: 3,
+    });
   });
 
-  test("rounds continuous System One scores onto the discrete 0-4 rubric", () => {
+  test("rounds continuous System One scores half-up onto the discrete 0-4 rubric", () => {
     const score = (value: number): Record<string, EvaluationAnswer> => ({
       [ADVISOR_WOULD_HELP_QUESTION]: { type: "boolean", probability: 0.5 },
       [CONSEQUENCE_QUESTION]: { type: "score", score: value },
     });
     expect(readZenAnswers(score(2.4)).consequence).toBe(2);
     expect(readZenAnswers(score(2.5)).consequence).toBe(3);
+    expect(readZenAnswers(score(3.5)).consequence).toBe(4);
+    expect(readZenAnswers(score(0.5)).consequence).toBe(1);
     expect(readZenAnswers(score(0.2)).consequence).toBe(0);
+  });
+
+  test("clamps the rounded score to the 0-4 rubric and preserves the raw score", () => {
+    const score = (value: number): Record<string, EvaluationAnswer> => ({
+      [ADVISOR_WOULD_HELP_QUESTION]: { type: "boolean", probability: 0.5 },
+      [CONSEQUENCE_QUESTION]: { type: "score", score: value },
+    });
+    const high = readZenAnswers(score(4.5));
+    expect(high.consequence).toBe(4);
+    expect(high.rawConsequence).toBe(4.5);
+    expect(readZenAnswers(score(5.2)).consequence).toBe(4);
     expect(readZenAnswers(score(3.7)).consequence).toBe(4);
+    expect(readZenAnswers(score(-0.5)).consequence).toBe(0);
+    expect(readZenAnswers(score(-1.2)).consequence).toBe(0);
+  });
+
+  test("preserves probability and confidence metadata when the answer provides it", () => {
+    const answers: Record<string, EvaluationAnswer> = {
+      [ADVISOR_WOULD_HELP_QUESTION]: { type: "boolean", probability: 0.82 },
+      [CONSEQUENCE_QUESTION]: {
+        type: "score",
+        score: 2.6,
+        probabilities: { "0": 0.05, "1": 0.1, "2": 0.6, "3": 0.2, "4": 0.05 },
+        confidence: 0.9,
+      },
+    };
+    expect(readZenAnswers(answers)).toEqual({
+      advisorWouldHelp: 0.82,
+      consequence: 3,
+      rawConsequence: 2.6,
+      consequenceProbabilities: { "0": 0.05, "1": 0.1, "2": 0.6, "3": 0.2, "4": 0.05 },
+      consequenceConfidence: 0.9,
+    });
   });
 
   test("rejects mismatched answer shapes as router errors", () => {

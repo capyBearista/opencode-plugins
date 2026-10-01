@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AIError } from "@opencode/ai";
-import { createZenEvaluation } from "./zen-evaluation.js";
+import { createZenEvaluation, ZEN_CALL_TIMEOUT_MS } from "./zen-evaluation.js";
 import { buildZenQuestions } from "./zen-questions.js";
 
 const connectionInfo = { type: "credential", id: "cred-1" } as never;
@@ -39,6 +39,10 @@ function startStandIn() {
 }
 
 describe("zen evaluation", () => {
+  test("bounds every provider call with the tightened 5s internal deadline", () => {
+    expect(ZEN_CALL_TIMEOUT_MS).toBe(5_000);
+  });
+
   test("runs the Evaluation client against a System One stand-in with the public bearer", async () => {
     const stand = startStandIn();
     const evaluation = createZenEvaluation({ baseURL: stand.baseURL });
@@ -86,6 +90,24 @@ describe("zen evaluation", () => {
     } finally {
       await evaluation.dispose();
       stand.server.stop(true);
+    }
+  });
+
+  test("reports whether the active Zen credential is the public bearer", async () => {
+    const publicEvaluation = createZenEvaluation({ baseURL: "http://127.0.0.1:1" });
+    const keyedEvaluation = createZenEvaluation({
+      baseURL: "http://127.0.0.1:1",
+      connection: {
+        active: async () => connectionInfo,
+        resolve: async () => ({ type: "key", key: "secret-key" }) as never,
+      },
+    });
+    try {
+      expect(await publicEvaluation.isPublicAuth()).toBe(true);
+      expect(await keyedEvaluation.isPublicAuth()).toBe(false);
+    } finally {
+      await publicEvaluation.dispose();
+      await keyedEvaluation.dispose();
     }
   });
 

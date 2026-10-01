@@ -1,6 +1,11 @@
 import type { Context as PluginContext } from "@opencode/plugin/promise/plugin";
+import type { AdvisorContextDiagnostics } from "./advisor-projection.js";
 import type { RoutingMode } from "./config.js";
-import type { RoutingAction, RoutingPolicySnapshot } from "./routing-types.js";
+import type {
+  RoutingAction,
+  RoutingFailureDisposition,
+  RoutingPolicySnapshot,
+} from "./routing-types.js";
 
 export const TELEMETRY_CAP = 5000;
 export const TELEMETRY_PAGE_LIMIT = 100;
@@ -33,12 +38,18 @@ export interface TelemetryEvent {
   readonly fingerprint?: string;
   readonly advisorWouldHelp?: number;
   readonly consequence?: number;
+  readonly rawConsequence?: number;
+  readonly consequenceProbabilities?: Readonly<Record<string, number>>;
+  readonly consequenceConfidence?: number;
   readonly policy?: RoutingPolicySnapshot;
   readonly model?: string;
   readonly attempts?: number;
   readonly latencyMs?: number;
   readonly errorClass?: string;
+  readonly failureDisposition?: RoutingFailureDisposition;
   readonly advisorModel?: string;
+  readonly skipReason?: string;
+  readonly advisorContext?: AdvisorContextDiagnostics;
   readonly delivered?: boolean;
 }
 
