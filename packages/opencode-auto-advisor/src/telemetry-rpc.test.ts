@@ -1,0 +1,202 @@
+import { describe, expect, test } from "bun:test";
+import type { RpcDomain } from "@opencode/plugin/promise/rpc";
+import { registerTelemetryRpc, TELEMETRY_RPC_ID, TelemetryRpc } from "./telemetry-rpc.js";
+import type { TelemetryEvent, TelemetryQuery, TelemetryStore } from "./telemetry-types.js";
+
+interface SchemaNode {
+  readonly type?: string;
+  readonly properties?: Readonly<Record<string, SchemaNode>>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function expectSchemaCoversEvent(
+  schema: SchemaNode,
+  value: Record<string, unknown>,
+  path: string,
+): void {
+  const properties = schema.properties;
+  expect(properties, `no declared properties at ${path}`).toBeDefined();
+  for (const key of Object.keys(value)) {
+    const sub = properties?.[key];
+    expect(sub, `undeclared field ${path}.${key} (the host RPC path strips it)`).toBeDefined();
+    const subValue = value[key];
+    if (sub?.type === "object" && sub.properties !== undefined && isRecord(subValue)) {
+      expectSchemaCoversEvent(sub, subValue, `${path}.${key}`);
+    }
+  }
+}
+
+function queryEventSchema(): SchemaNode {
+  const output = TelemetryRpc.methods["telemetry.query"].output as unknown as {
+    readonly properties: { readonly events: { readonly items: SchemaNode } };
+  };
+  return output.properties.events.items;
+}
+
+function singleEventSchema(): SchemaNode {
+  const output = TelemetryRpc.methods["telemetry.event"].output as unknown as {
+    readonly anyOf: readonly [SchemaNode, ...unknown[]];
+  };
+  return output.anyOf[0] as SchemaNode;
+}
+
+const maximalEvent: TelemetryEvent = {
+  seq: 42,
+  time: 1_700_000_000_000,
+  sessionID: "ses_max",
+  turnKey: "msg-max",
+  mode: "active",
+  decision: "fail",
+  fingerprint: "f".repeat(64),
+  advisorWouldHelp: 0.91,
+  consequence: 3,
+  rawConsequence: 3.42,
+  consequenceProbabilities: { "0": 0.01, "1": 0.05, "2": 0.19, "3": 0.55, "4": 0.2 },
+  consequenceConfidence: 0.83,
+  policy: { advisorWouldHelpThreshold: 0.7, consequenceThreshold: 3 },
+  model: "jev-1.13",
+  attempts: 2,
+  latencyMs: 512,
+  errorClass: "Timeout",
+  failureDisposition: "terminal",
+  advisorModel: "opencode/gpt-5",
+  skipReason: "advisor-model-limits-unavailable",
+  advisorContext: {
+    complete: false,
+    omittedEntries: 4,
+    includedEntries: 11,
+    estimatedTokens: 8192,
+    inputBudget: 150_000,
+  },
+  advisorInvocations: 1,
+  advisorLatencyMs: 3210,
+  advisorOutcome: "timeout",
+  advisorTimedOut: true,
+  delivered: false,
+};
+
+const stored: TelemetryEvent = {
+  seq: 7,
+  time: 123,
+  sessionID: "ses_1",
+  turnKey: "msg-1",
+  mode: "observe",
+  decision: "accept",
+  fingerprint: "a".repeat(64),
+};
+
+function fakeStore() {
+  const queries: Array<TelemetryQuery | undefined> = [];
+  const reads: number[] = [];
+  const store: TelemetryStore = {
+    record: async () => undefined,
+    query: async (input) => {
+      queries.push(input);
+      return { events: [stored], next: "evt:cursor" };
+    },
+    event: async (seq) => {
+      reads.push(seq);
+      return seq === stored.seq ? stored : undefined;
+    },
+  };
+  return { store, queries, reads };
+}
+
+type Handler = (input: unknown) => Promise<unknown>;
+
+function fakeRpc() {
+  let registered: { definition: unknown; handlers: Record<string, Handler> } | undefined;
+  let disposed = 0;
+  const rpc = {
+    register: async (definition: unknown, handlers: Record<string, Handler>) => {
+      registered = { definition, handlers };
+      return {
+        dispose: async () => {
+          disposed += 1;
+        },
+        events: { emit: async () => undefined },
+      };
+    },
+  } as unknown as RpcDomain;
+  return {
+    rpc,
+    registered: () => registered,
+    disposed: () => disposed,
+  };
+}
+
+describe("telemetry rpc", () => {
+  test("exposes exactly the two read-only telemetry handlers", () => {
+    expect(TELEMETRY_RPC_ID).toBe("experimental.auto-advisor");
+    expect(Object.keys(TelemetryRpc.methods).sort()).toEqual([
+      "telemetry.event",
+      "telemetry.query",
+    ]);
+    expect(Object.keys(TelemetryRpc.events)).toEqual([]);
+    for (const name of Object.keys(TelemetryRpc.methods)) {
+      expect(name).not.toMatch(/record|set|remove|clear|write|delete/i);
+    }
+  });
+
+  test("query output preserves every field the store can produce", async () => {
+    expectSchemaCoversEvent(
+      queryEventSchema(),
+      maximalEvent as unknown as Record<string, unknown>,
+      "telemetry.query.events[]",
+    );
+  });
+
+  test("declares the advisor invocation fields so the host decoder keeps them", () => {
+    const schema = queryEventSchema();
+    expect(schema.properties?.advisorInvocations).toEqual({ type: "number" });
+    expect(schema.properties?.advisorLatencyMs).toEqual({ type: "number" });
+    expect(schema.properties?.advisorOutcome).toEqual({
+      type: "string",
+      enum: ["completed", "failed", "timeout"],
+    });
+    expect(schema.properties?.advisorTimedOut).toEqual({ type: "boolean" });
+  });
+
+  test("single-event output preserves every field the store can produce", async () => {
+    expectSchemaCoversEvent(
+      singleEventSchema(),
+      maximalEvent as unknown as Record<string, unknown>,
+      "telemetry.event",
+    );
+  });
+
+  test("query handler reads the bounded store and returns the page", async () => {
+    const fake = fakeStore();
+    const rpc = fakeRpc();
+    await registerTelemetryRpc(rpc.rpc, fake.store);
+
+    const handlers = rpc.registered()?.handlers;
+    const page = await handlers?.["telemetry.query"]?.({ after: "evt:0", limit: 5 });
+
+    expect(fake.queries).toEqual([{ after: "evt:0", limit: 5 }]);
+    expect(page).toEqual({ events: [stored], next: "evt:cursor" });
+  });
+
+  test("event handler returns one event or null", async () => {
+    const fake = fakeStore();
+    const rpc = fakeRpc();
+    await registerTelemetryRpc(rpc.rpc, fake.store);
+
+    const handler = rpc.registered()?.handlers?.["telemetry.event"];
+    expect(await handler?.({ seq: 7 })).toEqual(stored);
+    expect(await handler?.({ seq: 8 })).toBeNull();
+    expect(fake.reads).toEqual([7, 8]);
+  });
+
+  test("registration disposes once", async () => {
+    const fake = fakeStore();
+    const rpc = fakeRpc();
+    const registration = await registerTelemetryRpc(rpc.rpc, fake.store);
+
+    await registration.dispose();
+    expect(rpc.disposed()).toBe(1);
+  });
+});

@@ -19,7 +19,7 @@ Subdirectories contain specialized files that extend these rules.
 
 ### Plugin Development (MUST)
 
-Scope: V1 packages. The four V2 ports use the Promise API instead; see the V2 boundary below.
+Scope: V1 packages. The five V2 plugins use the Promise API instead; see the V2 boundary below.
 
 - **MUST** keep server and TUI entrypoints split. If a plugin exposes both, publish separate `./server` and `./tui` exports instead of exporting both from one module.
 - **MUST** verify the real runtime path when testing local plugins. Check both the package build output and the harness config that OpenCode actually loads.
@@ -30,7 +30,7 @@ Scope: V1 packages. The four V2 ports use the Promise API instead; see the V2 bo
 
 ### V2 Boundary (MUST)
 
-Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
+Five packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
 
 | Package | V2 status |
 | --- | --- |
@@ -40,6 +40,7 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port TBD |
 | `opencode-output-styles` | V1 only; deprecated for V2 |
 | `opencode-ram-monitor` | Ported: dual server+TUI plugin, plural `plugins` (`opencode.json` + `cli.json`); `2.0.0` on `latest` |
+| `opencode-auto-advisor` | New: server plugin, plural `plugins` in `opencode.json`; `2.0.0` on `latest` |
 
 - **MUST** use the V2 Promise API in ports: `Plugin.define({ id, setup })` from `@opencode/plugin` 2.x. Do not carry V1 `server`/`config` hook signatures into a port.
 - **MUST** keep V2 entrypoints at the package root: `server.js` for the loader, `tui.js` for the timeline. Filesystem-local config points at the package directory, not the entry file.
@@ -48,6 +49,9 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 - **MUST** keep V1 and V2 lines apart. The loader and timeline V1 releases are frozen but available by exact pin. Both lines may share the default config directory, so use separate profiles (`OPENCODE_CONFIG_DIR`) for side-by-side testing.
 - **SHOULD** manage V2 targets with `opencode plugin check` / `opencode plugin update`; a restart or reload alone does not upgrade a cached target, and exact pins stay fixed.
 - Channel source of truth: [`tools/release-channels.json`](tools/release-channels.json), enforced by [`tools/release-channel-guard.ts`](tools/release-channel-guard.ts).
+- Registering a new package touches four files together: `tools/release-channels.json`, the `APPROVED_POLICY` map plus the exact-count checks in `tools/release-channel-guard.ts`, the package fixtures in `tools/release-channel-guard.test.ts`, and the new `package.json` itself (v2 class requires a stable version ≥2.0.0).
+- `bun run release:check` fails closed with HTTP 404 for never-published packages while typecheck/lint/test stay green; plan a first-publish bootstrap instead of treating it as a regression.
+- When adding a package, update the V2 status table, the packages list, and the specialized-context list together — all three enumerate packages by hand.
 
 ### Bug Fix Workflow (MUST)
 - **MUST** identify and record the root cause before broad fixes; for bugs/regressions, use the `systematic-debugging` skill first and escalate to `five-whys` if the cause remains unclear or review findings keep shifting.
@@ -95,6 +99,7 @@ CI runs typecheck, lint, and test only — `bun run build` is a local-only gate;
 - **`packages/opencode-double-tap-timeline/`** → OpenCode plugin (see packages/opencode-double-tap-timeline/AGENTS.md)
 - **`packages/opencode-output-styles/`** → OpenCode plugin (see packages/opencode-output-styles/AGENTS.md)
 - **`packages/opencode-ram-monitor/`** → Dual server/TUI plugin for live RAM telemetry and the `/ram` command (see `packages/opencode-ram-monitor/AGENTS.md`)
+- **`packages/opencode-auto-advisor/`** → OpenCode V2 server plugin for independent Advisor consultation and experimental automatic routing (see `packages/opencode-auto-advisor/AGENTS.md`)
 
 ### Supporting Directories
 - **`.agents/`** → Shared commands and skills used by local harness workflows
@@ -106,17 +111,17 @@ CI runs typecheck, lint, and test only — `bun run build` is a local-only gate;
 ## Quick Find Commands
 
 ### Code Navigation
-`# Find plugin hooks or commands
-rg -n "export (default )?class .*Plugin" packages/
+`# Find V2 plugin entrypoints
+rg -n "Plugin\.define" packages/*/src
 
-# Find server/TUI plugin entrypoints
+# Find V1 server/TUI plugin entrypoints
 rg -n "export default \{|const (server|tui):" packages/*/src
 
 # Find prompt-transform plugins
 rg -n "experimental\.chat\.system\.transform" packages/
 
 # Find TUI slot registrations
-rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
+rg -n "ui\.slot|keymap" packages/*/src
 `
 <!-- bootstrap:managed:end jit-index -->
 
@@ -137,14 +142,20 @@ rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
 - Merge PRs with a merge commit, not squash or rebase: preserve the feature branch's commits in `main` so the local branch can be removed with `git branch -d`.
 - Keep the remote feature branch after merging (disable automatic branch deletion on GitHub); delete only the local branch unless the user explicitly asks to remove the remote one.
 - Safety-net-blocked git forms have recoverable equivalents: `git stash -u` before `worktree remove` (never `--force`), `git update-ref` for pointer-only moves on verified-identical trees, `git merge --ff-only` where ancestry allows, `git branch -d` (never `-D` in chained commands)
+- Blocked `git restore <path>` (unstaged) has two recoverable forms: `git restore --staged <path>` to unstage only, or `git show HEAD:<path>` plus recreating the file to revert a worktree deletion without touching other changes.
 - Merge commits also need conventional messages — the commitlint hook rejects empty subject/type on merges too
 - `git log --all -- <path>` also lists merges that deleted the path; prove artifact absence with `git rev-list --objects --all --reflog` plus `git cat-file -e <blob>`, not log output
 - Release-channel policy edits never move npm dist-tags (guard returns `noop` for published versions); promotion is an authenticated `npm dist-tag` op — E401 in unattended sessions means handing exact commands to an operator
+- `gh pr edit --body-file` fails on this repo (classic-projects GraphQL deprecation); patch PR bodies via `gh api repos/capyBearista/opencode-plugins/pulls/<n> -X PATCH -F 'body=@file'` instead
+- Issue bodies use the same form-field pattern on the sibling endpoint: `gh api repos/capyBearista/opencode-plugins/issues/<n> -X PATCH -F 'body=@file'`; and `gh issue comment` accepts no `--jq` flag (unlike `gh api`), so confirm comments by URL instead of parsed output
+- A pipe to `tail` masks `||` fallback branches (the exit status is the tail's, so the fallback never runs): verify `gh`-plus-fallback sequences by exit code or output content, not by piped tail output
 
 ## Testing Requirements
 - **Unit tests**: colocated (bun test)
 - Run tests before committing (enforced by CI)
 - Add runtime smoke coverage or an explicit built-artifact verification step for plugin entrypoints, TUI render paths, or config-driven loading changes.
+- Turbo replays cached task logs, so after a fix re-run with `--force` and cite only the fresh run as completion evidence.
+- Delegated implementation lanes must carry a validation protocol in the brief: TDD red→green per behavior, `typecheck` + focused tests during work, full package suite + lint once at lane end. Smoke/build and fresh root gates stay orchestrator-run so lane reports never substitute for them.
 
 ## Reference Docs
 
@@ -174,6 +185,7 @@ When working in specific directories, refer to their AGENTS.md:
 - opencode-double-tap-timeline: packages/opencode-double-tap-timeline/AGENTS.md
 - opencode-output-styles: packages/opencode-output-styles/AGENTS.md
 - opencode-ram-monitor: packages/opencode-ram-monitor/AGENTS.md
+- opencode-auto-advisor: packages/opencode-auto-advisor/AGENTS.md
 
 ## Project Keywords & Context
 
@@ -194,3 +206,5 @@ This repository uses **Bun Workspaces** for dependency management and **Turborep
    - Root: `bun run build`, `bun run test`, `bun run lint`
 4. **Releasing:** Use the `release-plugin` skill.
    - Run `bun changeset` at the root to record change intents.
+- Review routing: send diff-level gate reviews to `code-reviewer`; `oracle` excludes final diff auditing and declines such requests.
+- Delegation briefs must be self-contained: a lane given findings "below" with nothing pasted reconstructs them from local state and may take unsupervised architectural judgment calls — always paste the full review text, API map, or acceptance criteria into the dispatch prompt.

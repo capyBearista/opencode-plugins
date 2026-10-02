@@ -27,6 +27,10 @@ A collection of plugins for the OpenCode AI harness. These extensions add qualit
 
 Two clean-context code reviewers that stay unbiased by conversation history: an adversarial reviewer that challenges your implementation approach and design choices, prioritizing auth gaps, data loss, and similar risks (structured JSON findings with severity, confidence, and recommendations), plus a constructive reviewer that checks correctness first and suggests improvements. *Inspired by Codex*
 
+### [opencode-auto-advisor](./packages/opencode-auto-advisor/)
+
+An independent reviewer for OpenCode V2. The Executor can call the zero-argument `advisor()` tool, or opt into experimental automatic review routing (off by default). An optional TUI shows automatic review status and the latest completed advice. The package is version 2.0.0 but has not been published yet; see its [README](./packages/opencode-auto-advisor/README.md) for behavior, configuration, and local setup.
+
 ### 🛠️ [opencode-agents-loader](./packages/opencode-agents-loader/)
 
 Extends **command** and **agent** discovery to the `.agents/` directory standard. This enables interoperability with other AI tools and keeps project configuration organized.
@@ -55,6 +59,7 @@ Persistent response styles for OpenCode sessions. This plugin injects selected g
 | `opencode-agents-loader` | `@latest` in `opencode.json(c)` | `@1.0.0` in `opencode.json(c)` |
 | `opencode-double-tap-timeline` | `@latest` in `cli.json(c)` | `@1.0.1` in `tui.json(c)` |
 | `opencode-ram-monitor` | `@latest` in `opencode.json(c)` and/or `cli.json(c)` | `@1.1.0` in `opencode.json(c)` and `tui.json(c)` |
+| `opencode-auto-advisor` | Not yet published (2.0.0); V2 server with optional TUI | V2 only |
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port TBD | `@1.0.0` in `opencode.json(c)` |
 | `opencode-output-styles` | V1 only; V2 unplanned |  `@1.0.1` in `opencode.json(c)` |
 
@@ -88,6 +93,51 @@ TUI profile. Add to `cli.json`:
   ]
 }
 ```
+
+#### Auto-Advisor (not yet published)
+
+For a local checkout of this repository, build the package and add its root as a
+server plugin target in an `opencode.json` at the repository root. The plural
+`plugins` key loads the package-root server entrypoint; OpenCode V2.0.21 can also
+discover the optional TUI entrypoint from that target.
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["./packages/opencode-auto-advisor"]
+}
+```
+
+The package remains version `2.0.0` and is not available from npm. First
+publication must wait for final validation, focused manual checks, and merge; the
+approved bootstrap is expected to publish `2.0.0` without an artificial patch
+Changeset. That bootstrap/release operation is not approved or implemented in
+this pass. Later releases use normal Changesets. After publication, use the
+package name in place of the local directory target:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["@capybearista/opencode-auto-advisor@latest"]
+}
+```
+
+Until then, use the local target above. A release check may return HTTP 404 for
+this never-published package; that is expected before its first publication.
+
+To disable only Auto-Advisor's optional TUI plugin, add its plugin ID as a
+removal directive to the V2 `cli.json` `plugins` array:
+
+```json
+{
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "plugins": ["-capybearista.opencode-auto-advisor-tui"]
+}
+```
+
+This is a TUI plugin removal directive by ID, not a package specifier. See the
+[Auto-Advisor README](./packages/opencode-auto-advisor/README.md) for its global
+`auto-advisor.json` settings, focused manual checks, and routing behavior.
 
 ### Updating
 

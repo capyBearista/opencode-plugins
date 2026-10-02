@@ -32,6 +32,7 @@ const packageNames = {
   styles: "@capybearista/opencode-output-styles",
   ram: "@capybearista/opencode-ram-monitor",
   review: "@capybearista/opencode-adversarial-review",
+  advisor: "@capybearista/opencode-auto-advisor",
 } as const;
 
 type PackageName = (typeof packageNames)[keyof typeof packageNames];
@@ -44,6 +45,7 @@ const baselineVersions: VersionMap = {
   [packageNames.styles]: "1.0.1",
   [packageNames.ram]: "1.1.0",
   [packageNames.review]: "1.0.0",
+  [packageNames.advisor]: "2.0.0",
 };
 
 const registryVersions: VersionMap = { ...baselineVersions };
@@ -114,6 +116,7 @@ async function createFixture(
       [packageNames.styles]: { releaseClass: "v1", channel: "latest" },
       [packageNames.ram]: { releaseClass: "v2", channel: "latest" },
       [packageNames.review]: { releaseClass: "v2", channel: "latest" },
+      [packageNames.advisor]: { releaseClass: "v2", channel: "latest" },
     },
   });
   await mkdir(path.join(root, ".changeset"), { recursive: true });
