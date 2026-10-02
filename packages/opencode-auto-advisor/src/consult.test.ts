@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { buildAdvisorProjection } from "./advisor-projection.js";
 import { mergeExplicitConsult } from "./consult.js";
 import type { CapturedHistory } from "./context.js";
 import { turnKeyForHistory } from "./request.js";
-import type { SerializedEntry } from "./serialize.js";
+import { type SerializedEntry, serializeAdvisorContext } from "./serialize.js";
 import type { RequestSnapshot } from "./snapshot-store.js";
 
 const system = (text: string): SerializedEntry => ({ role: "system", text });
@@ -66,12 +67,26 @@ describe("mergeExplicitConsult", () => {
       user("HOOK-MUTATION-USER"),
       assistant(true),
     ]);
-    expect(occurrences(merged.transcript, "HOOK-ONLY-SYSTEM")).toBe(1);
-    expect(occurrences(merged.transcript, "HOOK-MUTATION-USER")).toBe(1);
-    expect(occurrences(merged.transcript, "HOOK-MUTATION-ASSISTANT")).toBe(1);
-    expect(occurrences(merged.transcript, "HOOK-MUTATION-REASONING")).toBe(1);
-    expect(occurrences(merged.transcript, "call_advisor")).toBe(1);
-    expect(merged.transcript).toContain('"inFlight":true');
+    const transcript = serializeAdvisorContext(merged.entries);
+    expect(occurrences(transcript, "HOOK-ONLY-SYSTEM")).toBe(1);
+    expect(occurrences(transcript, "HOOK-MUTATION-USER")).toBe(1);
+    expect(occurrences(transcript, "HOOK-MUTATION-ASSISTANT")).toBe(1);
+    expect(occurrences(transcript, "HOOK-MUTATION-REASONING")).toBe(1);
+    expect(buildAdvisorProjection(merged.entries).transcript).not.toContain(
+      "HOOK-MUTATION-REASONING",
+    );
+    expect(occurrences(transcript, "call_advisor")).toBe(1);
+    expect(transcript).toContain('"inFlight":true');
+  });
+
+  test("returns canonical entries without a prebuilt unbounded transcript", () => {
+    const merged = mergeExplicitConsult({
+      snapshot: snapshot(),
+      history: history(),
+      messageID: "msg-current",
+    });
+
+    expect(Object.keys(merged).sort()).toEqual(["entries", "executorModel"]);
   });
 
   test("keeps earlier turns from the snapshot exactly once across multi-turn history", () => {
@@ -98,6 +113,7 @@ describe("mergeExplicitConsult", () => {
     });
 
     expect(merged.entries).toEqual([...snapshotEntries, currentAssistant]);
+    const transcript = serializeAdvisorContext(merged.entries);
     for (const marker of [
       "HOOK-ONLY-SYSTEM",
       "SNAPSHOT-USER-ONE",
@@ -105,10 +121,10 @@ describe("mergeExplicitConsult", () => {
       "SNAPSHOT-USER-TWO",
       "CURRENT-ASSISTANT-DELTA",
     ]) {
-      expect(occurrences(merged.transcript, marker)).toBe(1);
+      expect(occurrences(transcript, marker)).toBe(1);
     }
     for (const marker of ["DURABLE-USER-ONE", "DURABLE-ASSISTANT-ONE", "DURABLE-USER-TWO"]) {
-      expect(merged.transcript).not.toContain(marker);
+      expect(transcript).not.toContain(marker);
     }
   });
 
@@ -120,7 +136,7 @@ describe("mergeExplicitConsult", () => {
     });
 
     expect(merged.entries).toEqual(history().entries);
-    expect(merged.transcript).not.toContain("HOOK-ONLY-SYSTEM");
+    expect(serializeAdvisorContext(merged.entries)).not.toContain("HOOK-ONLY-SYSTEM");
     expect(merged.executorModel).toBeUndefined();
   });
 
@@ -160,7 +176,7 @@ describe("mergeExplicitConsult", () => {
       user("IDLESS-USER"),
       currentAssistant,
     ]);
-    expect(merged.transcript).toContain("HOOK-ONLY-SYSTEM");
+    expect(serializeAdvisorContext(merged.entries)).toContain("HOOK-ONLY-SYSTEM");
   });
 
   test("never attaches an id-less snapshot from a different content turn", () => {
@@ -179,7 +195,7 @@ describe("mergeExplicitConsult", () => {
     });
 
     expect(merged.entries).toEqual(durable.entries);
-    expect(merged.transcript).not.toContain("HOOK-ONLY-SYSTEM");
+    expect(serializeAdvisorContext(merged.entries)).not.toContain("HOOK-ONLY-SYSTEM");
   });
 
   test("keys no-user turns by their full content identity", () => {
@@ -204,8 +220,8 @@ describe("mergeExplicitConsult", () => {
     });
 
     expect(key.startsWith("content:no-user:")).toBe(true);
-    expect(merged.transcript).toContain("HOOK-ONLY-SYSTEM");
-    expect(stale.transcript).not.toContain("HOOK-ONLY-SYSTEM");
+    expect(serializeAdvisorContext(merged.entries)).toContain("HOOK-ONLY-SYSTEM");
+    expect(serializeAdvisorContext(stale.entries)).not.toContain("HOOK-ONLY-SYSTEM");
   });
 
   test("prefers the current executor model and falls back to the snapshot model", () => {

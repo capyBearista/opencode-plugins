@@ -1,9 +1,15 @@
 import {
-  type AdvisorContextDiagnostics,
+  type AdvisorProjection,
   type AdvisorProjectionBuilder,
   buildAdvisorProjection,
 } from "./advisor-projection.js";
-import { type AdvisorService, resolveAdvisorModel } from "./advisor-service.js";
+import {
+  AdvisorInvalidatedError,
+  type AdvisorService,
+  AdvisorTimeoutError,
+  resolveAdvisorModel,
+} from "./advisor-service.js";
+import type { CanonicalState } from "./canonical.js";
 import type { AdvisorConfig, RoutingConfig } from "./config.js";
 import { routingFingerprint } from "./fingerprint.js";
 import type { ModelReference, SessionID } from "./messages.js";
@@ -11,6 +17,7 @@ import { computeInputBudget, type ModelLimitResolver, type ModelLimits } from ".
 import { normalizeAssessment, RouterError } from "./router.js";
 import type {
   AdvisorRouter,
+  AutomaticPreparation,
   DispatchKind,
   NormalizedAssessment,
   RoutingDecision,
@@ -22,6 +29,10 @@ import { refKey } from "./serialize-assistant.js";
 import { createTurnStore } from "./turn-store.js";
 
 export const ADVISOR_LIMITS_SKIP_REASON = "advisor-model-limits-unavailable";
+export const ADVISOR_PROJECTION_SKIP_REASON = "advisor-projection-unusable";
+export const ADVISOR_HISTORY_CAPACITY_SKIP_REASON = "advisor-history-capacity";
+export const ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON = "advisor-history-unavailable";
+export const ADVISOR_OPERATION_INVALIDATED_SKIP_REASON = "advisor-operation-invalidated";
 export const ADVISOR_CONSULT_ERROR_CLASS = "ConsultationError";
 
 export interface RoutingDomainDeps {
@@ -35,6 +46,7 @@ export interface RoutingDomainDeps {
 export interface RoutingDomain {
   readonly observe: (opportunity: RoutingOpportunity) => Promise<RoutingDecision>;
   readonly forget: (sessionID: SessionID) => void;
+  readonly markReviewed: (sessionID: SessionID, turnKey: string, entries: CanonicalState) => void;
 }
 
 export function createRoutingDomain(
@@ -47,6 +59,7 @@ export function createRoutingDomain(
 
   return {
     observe: async (opportunity) => {
+      const isCurrent = opportunity.isCurrent ?? (() => true);
       let config: AdvisorConfig;
       try {
         config = await deps.loadConfig();
@@ -54,6 +67,13 @@ export function createRoutingDomain(
         return { action: "fail", error: describe(cause) };
       }
       const mode = config.routing.mode;
+      const invalidated = (extra: Partial<RoutingDecision> = {}): RoutingDecision => ({
+        action: "skip",
+        mode,
+        skipReason: ADVISOR_OPERATION_INVALIDATED_SKIP_REASON,
+        ...extra,
+      });
+      if (!isCurrent()) return invalidated();
       if (mode === "off") return { action: "skip", mode };
       if (!isPrimaryDispatch(opportunity.kind)) return { action: "skip", mode };
       const policy = policySnapshot(config.routing);
@@ -62,8 +82,10 @@ export function createRoutingDomain(
       try {
         captured = await opportunity.capture();
       } catch (cause) {
+        if (!isCurrent()) return invalidated({ policy });
         return { action: "fail", mode, policy, error: describe(cause) };
       }
+      if (!isCurrent()) return invalidated({ policy });
 
       const fingerprint = routingFingerprint(captured.entries);
       const turn = turns.turnFor(opportunity.sessionID, captured.lastUserMessageID);
@@ -72,6 +94,33 @@ export function createRoutingDomain(
 
       if (mode === "active" && turn.consumed >= config.routing.maxConsultationsPerTurn) {
         return { action: "deny", mode, fingerprint, policy };
+      }
+
+      if (mode === "active" && opportunity.prepareAutomatic) {
+        let preparation: AutomaticPreparation;
+        try {
+          preparation = await opportunity.prepareAutomatic();
+        } catch (cause) {
+          if (!isCurrent()) return invalidated({ fingerprint, policy });
+          return {
+            action: "skip",
+            mode,
+            fingerprint,
+            policy,
+            skipReason: ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON,
+            error: describe(cause),
+          };
+        }
+        if (!isCurrent()) return invalidated({ fingerprint, policy });
+        if (!preparation.ready) {
+          return {
+            action: "skip",
+            mode,
+            fingerprint,
+            policy,
+            skipReason: preparation.skipReason ?? ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON,
+          };
+        }
       }
 
       let assessment: NormalizedAssessment;
@@ -83,6 +132,7 @@ export function createRoutingDomain(
           }),
         );
       } catch (cause) {
+        if (!isCurrent()) return invalidated({ fingerprint, policy });
         const failure = failureOf(cause);
         return {
           action: "fail",
@@ -93,6 +143,7 @@ export function createRoutingDomain(
           ...(failure ? { failure } : {}),
         };
       }
+      if (!isCurrent()) return invalidated({ fingerprint, policy });
 
       if (!acceptsConsultation(config.routing, assessment)) {
         return { action: "reject", mode, fingerprint, assessment, policy };
@@ -107,6 +158,7 @@ export function createRoutingDomain(
 
       const advisorModel = resolveAdvisorModel(config, captured.executorModel);
       const limits = await resolveLimitsSafely(resolveLimits, advisorModel);
+      if (!isCurrent()) return invalidated({ fingerprint, assessment, policy });
       const inputBudget = limits === undefined ? undefined : computeInputBudget(limits);
       if (inputBudget === undefined) {
         return {
@@ -120,15 +172,39 @@ export function createRoutingDomain(
         };
       }
 
-      turn.consumed += 1;
-      let advisorContext: AdvisorContextDiagnostics | undefined;
+      let projection: AdvisorProjection;
       try {
-        const projection = project(captured.entries, { inputBudget });
-        advisorContext = projection.diagnostics;
+        const projectionEntries =
+          captured.advisorEntries && captured.advisorEntries.length > 0
+            ? [...captured.entries, ...captured.advisorEntries]
+            : captured.entries;
+        projection = project(projectionEntries, { inputBudget });
+      } catch (cause) {
+        return {
+          action: "skip",
+          mode,
+          fingerprint,
+          assessment,
+          policy,
+          skipReason: ADVISOR_PROJECTION_SKIP_REASON,
+          error: describe(cause),
+        };
+      }
+
+      if (!isCurrent()) return invalidated({ fingerprint, assessment, policy });
+
+      turn.consumed += 1;
+      const advisorContext = projection.diagnostics;
+      const advisorStartedAt = Date.now();
+      try {
         const consultation = await deps.service.consult({
           transcript: projection.transcript,
+          ...(advisorModel ? { advisorModel } : {}),
           ...(captured.executorModel ? { executorModel: captured.executorModel } : {}),
+          ...(opportunity.onAdvisorStart ? { onStart: opportunity.onAdvisorStart } : {}),
+          ...(opportunity.isCurrent ? { isCurrent: opportunity.isCurrent } : {}),
         });
+        if (!isCurrent()) return invalidated({ fingerprint, assessment, policy });
         return {
           action: "accept",
           mode,
@@ -138,8 +214,16 @@ export function createRoutingDomain(
           advice: consultation.advice,
           ...(consultation.model ? { advisorModel: refKey(consultation.model) } : {}),
           ...(advisorContext ? { advisorContext } : {}),
+          advisorInvocations: 1,
+          advisorLatencyMs: Date.now() - advisorStartedAt,
+          advisorOutcome: "completed",
+          advisorTimedOut: false,
         };
       } catch (cause) {
+        if (cause instanceof AdvisorInvalidatedError) {
+          return invalidated({ fingerprint, assessment, policy });
+        }
+        const timedOut = cause instanceof AdvisorTimeoutError;
         return {
           action: "fail",
           mode,
@@ -149,12 +233,19 @@ export function createRoutingDomain(
           error: describe(cause),
           failure: { errorClass: ADVISOR_CONSULT_ERROR_CLASS, disposition: "terminal" },
           ...(advisorContext ? { advisorContext } : {}),
+          advisorInvocations: 1,
+          advisorLatencyMs: Date.now() - advisorStartedAt,
+          advisorOutcome: timedOut ? "timeout" : "failed",
+          advisorTimedOut: timedOut,
         };
       }
     },
     forget: (sessionID) => {
       turns.forget(sessionID);
       deps.router.forget?.(sessionID);
+    },
+    markReviewed: (sessionID, turnKey, entries) => {
+      turns.turnFor(sessionID, turnKey).fingerprint = routingFingerprint(entries);
     },
   };
 }

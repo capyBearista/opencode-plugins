@@ -2,10 +2,13 @@ import { Model } from "@opencode/plugin";
 import {
   type AdvisorConfig,
   ConfigError,
+  DEFAULT_ADVISOR_TIMEOUT_MS,
   ROUTING_MODES,
   type RoutingConfig,
   type RoutingMode,
 } from "./config-types.js";
+
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 export function parseConfig(raw: unknown, path: string): AdvisorConfig {
   const root = asObject(raw, path, "root");
@@ -18,16 +21,30 @@ export function parseConfig(raw: unknown, path: string): AdvisorConfig {
 
 function parseAdvisor(value: unknown, path: string): AdvisorConfig["advisor"] {
   const advisor = asObject(value, path, "advisor");
-  only(advisor, ["model"], path, "advisor");
+  only(advisor, ["model", "timeoutMs"], path, "advisor");
+  const timeoutMs = parseTimeout(advisor.timeoutMs, path);
   const model = advisor.model;
-  if (model === undefined || model === "inherit") return {};
+  if (model === undefined || model === "inherit") return { timeoutMs };
   if (typeof model !== "string")
     fail(path, "advisor.model", 'must be "inherit" or "providerID/modelID"');
   try {
-    return { model: Model.Ref.parse(model) };
+    return { model: Model.Ref.parse(model), timeoutMs };
   } catch {
     fail(path, "advisor.model", `is not a valid model reference: ${model}`);
   }
+}
+
+function parseTimeout(value: unknown, path: string): number {
+  if (value === undefined) return DEFAULT_ADVISOR_TIMEOUT_MS;
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value <= 0 ||
+    value > MAX_TIMEOUT_MS
+  ) {
+    fail(path, "advisor.timeoutMs", "must be a positive integer within the timer range");
+  }
+  return value;
 }
 
 function parseRouting(value: unknown, path: string): RoutingConfig {

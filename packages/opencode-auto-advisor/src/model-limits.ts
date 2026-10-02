@@ -61,7 +61,7 @@ export function findModelLimits(
 }
 
 export function computeInputBudget(limits: ModelLimits): number | undefined {
-  const reserve = Math.max(Math.floor(limits.context * ADVISOR_RESERVE_FRACTION), limits.output);
+  const reserve = Math.max(limits.context * ADVISOR_RESERVE_FRACTION, limits.output);
   const room = limits.context - reserve;
   const budget = limits.input === undefined ? room : Math.min(limits.input, room);
   return budget > 0 ? budget : undefined;

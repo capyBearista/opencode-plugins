@@ -71,6 +71,10 @@ const maximalEvent: TelemetryEvent = {
     estimatedTokens: 8192,
     inputBudget: 150_000,
   },
+  advisorInvocations: 1,
+  advisorLatencyMs: 3210,
+  advisorOutcome: "timeout",
+  advisorTimedOut: true,
   delivered: false,
 };
 
@@ -143,6 +147,17 @@ describe("telemetry rpc", () => {
       maximalEvent as unknown as Record<string, unknown>,
       "telemetry.query.events[]",
     );
+  });
+
+  test("declares the advisor invocation fields so the host decoder keeps them", () => {
+    const schema = queryEventSchema();
+    expect(schema.properties?.advisorInvocations).toEqual({ type: "number" });
+    expect(schema.properties?.advisorLatencyMs).toEqual({ type: "number" });
+    expect(schema.properties?.advisorOutcome).toEqual({
+      type: "string",
+      enum: ["completed", "failed", "timeout"],
+    });
+    expect(schema.properties?.advisorTimedOut).toEqual({ type: "boolean" });
   });
 
   test("single-event output preserves every field the store can produce", async () => {

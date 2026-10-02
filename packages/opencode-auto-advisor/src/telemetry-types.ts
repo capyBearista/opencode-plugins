@@ -50,6 +50,10 @@ export interface TelemetryEvent {
   readonly advisorModel?: string;
   readonly skipReason?: string;
   readonly advisorContext?: AdvisorContextDiagnostics;
+  readonly advisorInvocations?: number;
+  readonly advisorLatencyMs?: number;
+  readonly advisorOutcome?: "completed" | "failed" | "timeout";
+  readonly advisorTimedOut?: boolean;
   readonly delivered?: boolean;
 }
 

@@ -3,6 +3,8 @@ import type { Model } from "@opencode/plugin";
 export const ROUTING_MODES = ["off", "observe", "active"] as const;
 export type RoutingMode = (typeof ROUTING_MODES)[number];
 
+export const DEFAULT_ADVISOR_TIMEOUT_MS = 300_000;
+
 export interface RoutingConfig {
   readonly mode: RoutingMode;
   readonly models: readonly string[];
@@ -12,13 +14,13 @@ export interface RoutingConfig {
 }
 
 export interface AdvisorConfig {
-  readonly advisor: { readonly model?: Model.Ref };
+  readonly advisor: { readonly model?: Model.Ref; readonly timeoutMs?: number };
   readonly routing: RoutingConfig;
 }
 
 export function defaultConfig(): AdvisorConfig {
   return {
-    advisor: {},
+    advisor: { timeoutMs: DEFAULT_ADVISOR_TIMEOUT_MS },
     routing: {
       mode: "off",
       models: ["jev-1.13-free", "jev-1.13"],

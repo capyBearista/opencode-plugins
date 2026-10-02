@@ -1,8 +1,8 @@
 # OpenCode Auto Advisor
 
-**Status:** Implementation approved — implementation may proceed  
+**Status:** Remediation approved — manual-test readiness requires fresh automated gates and final review  
 **Package:** `@capybearista/opencode-auto-advisor`  
-**Host baseline:** OpenCode V2, initially `@opencode/plugin@2.0.19` and `@opencode/ai@2.0.19`  
+**Host baseline:** OpenCode V2.0.21, exact `@opencode/plugin@2.0.21` and `@opencode/ai@2.0.21`  
 **Distribution:** npm `latest`
 
 ## Goal
@@ -20,9 +20,11 @@ Both paths converge on one fresh, stateless Advisor service. The Executor must n
 - Use current supported V2 Promise APIs; do not bypass the public plugin API for hidden transcript/session mutation.
 - The explicit `advisor()` tool has no user arguments.
 - Explicit and automatic consultations use the same Advisor service.
+- Both paths require an eligible root session and native `advisor` permission; parented sessions never expose the tool or route automatically. Do not hard-code agent names or add an agent-list knob.
 - Advisor inference is fresh/stateless; no private persistent Advisor conversation.
 - Automatic routing occurs at safe pre-provider `session.context` boundaries, not by interrupting generation.
 - Automatic advice is supplied with system authority; never fabricate an Executor tool call and never inject it as synthetic user input.
+- Automatic advice belongs in the privileged `session.context.system` surface, not a chronological `Message.system` in `messages`. This correction was explicitly approved during remediation: released 2.0.21 lowers chronological system updates to lower-authority user text on OpenAI-compatible routes. Keep wire-role validation strict. The same rule applies to retained advice; prompt caching may change when the privileged prompt changes.
 - Automatic-routing infrastructure fails open.
 - Explicit consultation failures are visible to the Executor.
 - Automatic routing remains experimental in v1.
@@ -39,7 +41,7 @@ The canonical serializer must represent, as applicable:
 - system instructions;
 - user text;
 - assistant text;
-- reasoning text that OpenCode exposes to the plugin;
+- visible assistant text, excluding hidden reasoning by default;
 - tool calls and arguments;
 - tool results;
 - compaction/checkpoint information where relevant;
@@ -84,8 +86,15 @@ state, and the Advisor transcript are independent derivations.
 - **Advisor consultation projection** — the rich canonical transcript fitted to
   the selected Advisor model's advertised input budget by whole-entry priority
   retention, with an omission marker and compact diagnostics when anything is
-  dropped. The explicit `advisor()` path uses the same projection without a
-  budget and stays unbounded by design.
+  dropped. Explicit and automatic paths share the model-aware budget, including
+  mandatory Advisor instructions, context framing, and any omission marker.
+
+Reserve is `max(context * 0.25, output)` without a floor; input budget is
+`min(input ?? infinity, context - reserve)`. The final internal prompt estimate
+must not exceed it. Skip oversized whole entries and continue considering later
+useful entries; do not summarize or truncate them. Missing limits or unusable
+framing skip automatic review and return an explicit-tool error. Do not maintain
+an external model-limit database.
 
 ## Advisor model
 
@@ -93,7 +102,15 @@ The Advisor uses a configured model when one is provided.
 
 If `advisor.model` is omitted, the default is to **inherit the current Executor model** for that consultation. The consultation remains fresh/stateless even when it uses the same model.
 
-v1 uses one Advisor model at a time. No Advisor-model fallback chain is required in v1.
+v1 uses one Advisor model at a time. No Advisor fallback chain is permitted.
+Explicit errors surface directly; automatic failures fail open.
+
+Keep three prompt layers: eligible Executor guidance, a concise zero-argument
+tool description, and independent Advisor reviewer instructions. Advisor has no
+tools, file access, delegation, follow-up questions, or persistent conversation.
+Its qualitative advice has no confidence score. User constraints and direct
+evidence take precedence; reconcile conflicts rather than silently obeying the
+reviewer. Add Executor guidance only when the tool is exposed.
 
 ## Configuration
 
@@ -106,6 +123,9 @@ Conceptual path on Unix-like systems:
 ```
 
 The implementation must resolve the platform-appropriate OpenCode config directory rather than hard-coding that literal path on every OS.
+An explicit `OPENCODE_CONFIG_DIR` resolves directly to
+`$OPENCODE_CONFIG_DIR/auto-advisor.json`; otherwise use
+`$XDG_CONFIG_HOME/opencode/auto-advisor.json` or the normal home default.
 
 ### Semantics
 
@@ -120,12 +140,13 @@ Secrets do not belong in `auto-advisor.json`.
 
 ### User-facing knobs
 
-v1 intentionally exposes six meaningful settings:
+v1 intentionally exposes seven meaningful settings:
 
 ```json
 {
   "advisor": {
-    "model": "inherit"
+    "model": "inherit",
+    "timeoutMs": 300000
   },
   "routing": {
     "mode": "off",
@@ -133,14 +154,14 @@ v1 intentionally exposes six meaningful settings:
       "jev-1.13-free",
       "jev-1.13"
     ],
-    "advisorWouldHelpThreshold": "<conservative default>",
-    "consequenceThreshold": "<conservative default>",
+    "advisorWouldHelpThreshold": 0.7,
+    "consequenceThreshold": 3,
     "maxConsultationsPerTurn": 1
   }
 }
 ```
 
-The six knobs are:
+The seven knobs are:
 
 1. `advisor.model`
 2. `routing.mode` — `off | observe | active`
@@ -148,6 +169,13 @@ The six knobs are:
 4. `routing.advisorWouldHelpThreshold`
 5. `routing.consequenceThreshold`
 6. `routing.maxConsultationsPerTurn`
+7. `advisor.timeoutMs` — positive integer, default `300000`
+
+Advisor has a soft deadline: OpenCode 2.0.21 `ctx.generate.text()` exposes no
+AbortSignal. Automatic timeout stops waiting and fails open; explicit timeout is
+visible. Underlying stateless generation may continue. No fallback, stream
+interception, or private cancellation hacks. Jev retains its separate abortable
+five-second deadline.
 
 Internal behavior such as fingerprint implementation, telemetry schema, advice lifetime, retry timing, and serialization rules is not user-configurable in v1 unless implementation evidence shows a need.
 
@@ -177,7 +205,7 @@ Durable telemetry is mandatory for `observe`.
 - evaluate routing opportunities;
 - apply deterministic routing policy;
 - synchronously consult the Advisor when policy accepts and budget allows;
-- inject resulting advice into the waiting Executor request with system authority.
+- inject resulting advice into the waiting Executor request's privileged `system` context.
 
 ## Routing opportunities
 
@@ -188,6 +216,10 @@ A primary dispatch is not synonymous with a new user message: tool-driven contin
 The router evaluates a dispatch only when its normalized routing-relevant state fingerprint is materially new. Equivalent/unchanged states are suppressed. Plugin-injected automatic advice must not itself make the state appear newly routable.
 
 A materially new tool result may therefore create a new routing opportunity within the same user turn.
+Successful explicit review records its material fingerprint and suppresses an
+immediate automatic duplicate. Advisor-origin tool activity and own injected
+system parts must not create a new fingerprint. Meaningful new evidence can
+re-enable routing; explicit review consumes no automatic quota.
 
 ## AdvisorRouter boundary
 
@@ -268,9 +300,8 @@ A small bounded internal retry/backoff handles transient transport/provider fail
 Fallback to the next configured model is appropriate for errors such as:
 
 - quota exhaustion;
-- rate limiting when retry is not appropriate/exhausted;
-- model unavailable;
-- provider/model capacity exhaustion.
+- model-specific rate limiting;
+- model-specific capacity classified by the host as a fallback class.
 
 Do not treat the following as model-fallback conditions:
 
@@ -278,6 +309,12 @@ Do not treat the following as model-fallback conditions:
 - invalid configuration;
 - malformed requests;
 - schema/programming errors.
+- timeouts or generic transport/provider-internal failures merely because another paid model exists.
+
+Preserve retry/fallback/terminal distinctions. `x-should-retry` controls same-model
+retry, not blanket fallback. Empirically established paid-Jev public-credential
+ineligibility may be cached by session; terminal auth/workspace failures remain
+terminal.
 
 If the entire chain fails, automatic routing fails open **for that opportunity only**. Auto Advisor is not disabled globally. The next materially new routing opportunity starts again from the first configured model.
 
@@ -295,11 +332,10 @@ routing.maxConsultationsPerTurn = 1
 
 It is a positive integer.
 
-Only successful/attempted automatic consultations as defined by the implementation contract consume the automatic budget; explicit `advisor()` calls do not consume it.
-
-The implementation planner must define exact accounting around Advisor failures so behavior is deterministic and testable.
-
-Once the per-turn budget is exhausted, further routing opportunities may be suppressed from automatic consultation for that turn according to mode semantics, while explicit `advisor()` remains available.
+Accepted automatic inference attempts consume budget whether they succeed or
+fail; projection/eligibility/capacity skips do not. Explicit calls never consume
+it. Exhausted `active` skips unnecessary Jev work; `observe` continues calibration
+and hypothetical budget accounting under the existing policy.
 
 ## Automatic advice lifetime
 
@@ -307,13 +343,32 @@ Automatic advice is plugin-owned state associated with the session and originati
 
 For v1:
 
-1. successful automatic advice is injected as system-role context through `session.context`;
-2. the applicable advice is reinjected on relevant continuations within that same user turn;
-3. a newer automatic review supersedes an older active review;
-4. normal new user input expires prior active advice;
-5. advice does not grow unbounded across later turns.
+1. commit successful reviews to bounded plugin-owned session/turn history before delivery;
+2. inject current and relevant retained advice into privileged `session.context.system`, without duplication or advice-created messages;
+3. preserve retained advice across later turns;
+4. supply captured records to compaction as privileged system context;
+5. retire only captured records proven absorbed by exact ID and advice text in a successful result;
+6. preserve records after failed/unproven compaction; deletion cleans them up and invalidates pending callbacks;
+7. bound capacity without silently evicting unabsorbed advice to start another paid review.
 
 Do not use `session.synthetic` and do not fabricate an Executor `advisor()` call.
+Do not fall back to chronological `Message.system`: 2.0.21 may lower it to user
+text. Leading privileged context may change prefix caching; authority takes
+precedence.
+
+## Optional TUI companion
+
+Separate TUI entrypoint and plugin ID; core server behavior must not require it.
+Use supported append slots: `prompt.footer.status` for `Auto-Advisor reviewing`
+and a roughly 2.5-second `✓ Auto-Advisor finished` pulse; `session.composer.top`
+for latest final advice. No fake transcript row, private spinner, inputs, reasoning,
+probabilities, or routine failure banner.
+
+Session-scoped start/finish events and a status query in
+`experimental.auto-advisor.review` reconstruct running state. Preserve query/event
+epoch/revision authority and bounded cleanup. SDK21 snapshots its setup client:
+same-endpoint reconnect works, but endpoint/port/auth replacement requires a TUI
+restart. Do not claim seamless replacement or patch private host internals.
 
 ## Reentrancy
 
@@ -337,7 +392,8 @@ A deliberate `advisor()` failure must be visible as the tool result/error.
 
 ## Telemetry
 
-Telemetry is disabled by default. `observe` requires durable telemetry.
+Default `off` produces no automatic routing opportunities. `observe` requires
+durable telemetry; `active` also records routing and delivery metadata.
 
 Use OpenCode plugin-owned storage (`ctx.storage`) for compact structured events rather than copying full conversation transcripts by default.
 
@@ -352,6 +408,7 @@ Useful event fields include:
 - mode;
 - consultation identifier when applicable;
 - Advisor model when applicable;
+- Advisor invocation count, outcome, timeout, projection diagnostics, and delivery success;
 - latency/usage/cost metadata when available;
 - classified error/fallback/retry information;
 - later validation signals when reasonably attributable.
@@ -365,11 +422,11 @@ Expose read-only plugin RPC(s) for telemetry scan/export so evaluation tooling c
 ## Package/release expectations
 
 - Package is V2-only.
-- Initial dependency compatibility is deliberately based on OpenCode 2.0.19.
+- Current dependency compatibility is pinned exactly to OpenCode 2.0.21.
 - Publish on npm `latest`.
 - Current repository release tooling already supports V2 packages on `latest`; no redesign based on the obsolete `opencode2` assumption is required.
 - Register the new package in existing release policy/guard data and tests as needed.
-- Add a Changeset only when the package becomes releasable.
+- Keep initial unpublished version `2.0.0`. After validation, manual testing and merge, first publication requires the approved bootstrap path, not an artificial patch-bump Changeset. Future releases use normal Changesets.
 - Run repository quality gates and real package-root OpenCode runtime smoke validation before release.
 
 ## Non-goals for v1
@@ -388,6 +445,12 @@ Expose read-only plugin RPC(s) for telemetry scan/export so evaluation tooling c
 - project-level Auto Advisor config;
 - Advisor-model fallback chain;
 - elaborate cooldown/circuit-breaker machinery.
+- true cancellation until the host exposes a supported signal;
+- hidden reasoning except as future opt-in work;
+- smarter tool-output compression/summarization;
+- semantic Advisor-aware compaction beyond bounded exact-proof retention;
+- Decisions API or alternate routing backends;
+- full Advisor benchmarks.
 
 ## Execution structure
 

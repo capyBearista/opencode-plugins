@@ -1,9 +1,20 @@
+import { buildAdvisorPrompt } from "./advisor-prompts.js";
 import type { AdvisorConfig } from "./config.js";
+import { DEFAULT_ADVISOR_TIMEOUT_MS } from "./config-types.js";
 import type { ModelReference } from "./messages.js";
+
+export {
+  ADVISOR_CONTEXT_MARKER,
+  ADVISOR_INSTRUCTIONS,
+  buildAdvisorPrompt,
+} from "./advisor-prompts.js";
 
 export interface AdvisorConsultationInput {
   readonly transcript: string;
   readonly executorModel?: ModelReference;
+  readonly advisorModel?: ModelReference;
+  readonly onStart?: () => void;
+  readonly isCurrent?: () => boolean;
 }
 
 export interface AdvisorConsultationResult {
@@ -23,20 +34,18 @@ export interface AdvisorServiceDeps {
   }) => Promise<{ readonly text: string }>;
 }
 
-export const ADVISOR_INSTRUCTIONS = [
-  "You are the Auto Advisor: an independent reviewer consulted by an OpenCode Executor agent.",
-  "The Executor context below is a JSON array of chronological transcript entries.",
-  "Media entries are metadata placeholders; their contents were not inspected and must not be assumed.",
-  'The assistant entry marked "inFlight": true is the Executor message that just called you.',
-  "Reply with concise, actionable advice for the Executor's next action: likely mistakes, risks,",
-  "missed considerations, and unknowns. If the context is insufficient, say what is missing",
-  "instead of guessing.",
-].join("\n");
+export class AdvisorTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`Advisor consultation timed out after ${timeoutMs}ms`);
+    this.name = "AdvisorTimeoutError";
+  }
+}
 
-export const ADVISOR_CONTEXT_MARKER = "EXECUTOR CONTEXT (JSON)";
-
-export function buildAdvisorPrompt(transcript: string): string {
-  return `${ADVISOR_INSTRUCTIONS}\n\n${ADVISOR_CONTEXT_MARKER}\n${transcript}`;
+export class AdvisorInvalidatedError extends Error {
+  constructor() {
+    super("advisor consultation invalidated by session deletion or plugin disposal");
+    this.name = "AdvisorInvalidatedError";
+  }
 }
 
 export function resolveAdvisorModel(
@@ -49,13 +58,50 @@ export function resolveAdvisorModel(
 export function createAdvisorService(deps: AdvisorServiceDeps): AdvisorService {
   return {
     consult: async (input) => {
+      const isCurrent = input.isCurrent ?? (() => true);
       const config = await deps.loadConfig();
-      const model = resolveAdvisorModel(config, input.executorModel);
-      const response = await deps.generateText({
-        prompt: buildAdvisorPrompt(input.transcript),
-        ...(model ? { model } : {}),
-      });
+      if (!isCurrent()) throw new AdvisorInvalidatedError();
+      const model = input.advisorModel ?? resolveAdvisorModel(config, input.executorModel);
+      const timeoutMs = config.advisor.timeoutMs ?? DEFAULT_ADVISOR_TIMEOUT_MS;
+      const prompt = buildAdvisorPrompt(input.transcript);
+      invokeStart(input.onStart);
+      if (!isCurrent()) throw new AdvisorInvalidatedError();
+      const response = await withDeadline(
+        deps.generateText({
+          prompt,
+          ...(model ? { model } : {}),
+        }),
+        timeoutMs,
+      );
+      if (!isCurrent()) throw new AdvisorInvalidatedError();
       return { advice: response.text, ...(model ? { model } : {}) };
     },
   };
+}
+
+function invokeStart(onStart: (() => void) | undefined): void {
+  if (onStart === undefined) return;
+  try {
+    onStart();
+  } catch {
+    return;
+  }
+}
+
+function withDeadline<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new AdvisorTimeoutError(timeoutMs));
+    }, timeoutMs);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (cause) => {
+        clearTimeout(timer);
+        reject(cause);
+      },
+    );
+  });
 }

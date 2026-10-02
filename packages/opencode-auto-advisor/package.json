@@ -16,14 +16,19 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./tui": {
+      "types": "./dist/tui.d.ts",
+      "default": "./dist/tui.js"
     }
   },
   "files": [
     "dist",
-    "server.js"
+    "server.js",
+    "tui.js"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json --emitDeclarationOnly && bun build src/index.ts --outfile=dist/index.js --target=bun --external '@opencode/*' && bun build src/tui.ts --outfile=dist/tui.js --target=bun --external '@opencode/*' --external '@opentui/*' --external 'solid-js'",
     "typecheck": "tsc --noEmit",
     "lint": "bunx @biomejs/biome check .",
     "check": "bunx @biomejs/biome check --write .",
@@ -32,11 +37,28 @@
     "smoke": "bun run build && bun scripts/smoke-built.ts"
   },
   "peerDependencies": {
-    "@opencode/ai": "2.0.19",
-    "@opencode/plugin": "2.0.19"
+    "@opencode/ai": "2.0.21",
+    "@opencode/plugin": "2.0.21",
+    "@opentui/core": ">=0.5.14",
+    "@opentui/solid": ">=0.5.14",
+    "solid-js": ">=1.9.0"
   },
   "devDependencies": {
-    "@opencode/ai": "2.0.19",
-    "@opencode/plugin": "2.0.19"
+    "@opencode/ai": "2.0.21",
+    "@opencode/plugin": "2.0.21",
+    "@opentui/core": "0.5.14",
+    "@opentui/solid": "0.5.14",
+    "solid-js": "1.9.12"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    }
   }
 }

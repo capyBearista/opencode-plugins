@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_FILE_NAME, ConfigError, loadConfig, resolveConfigPath } from "./config.js";
+import { parseConfig } from "./config-parse.js";
 
 async function fixture(contents: string | undefined, run: (path: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), "auto-advisor-config-"));
@@ -24,8 +25,27 @@ async function configError(contents: string, key: string) {
   });
 }
 
+function capture(run: () => unknown): unknown {
+  try {
+    run();
+    return undefined;
+  } catch (cause) {
+    return cause;
+  }
+}
+
+async function timeoutError(value: unknown) {
+  await fixture(JSON.stringify({ advisor: { timeoutMs: value } }), async (path) => {
+    const error = await loadConfig({ path }).catch((cause: unknown) => cause);
+    if (!(error instanceof ConfigError))
+      throw new Error(`expected ConfigError, received ${String(error)}`);
+    expect(error.key).toBe("advisor.timeoutMs");
+    expect(error.message).toContain("positive integer");
+  });
+}
+
 const DEFAULTS = {
-  advisor: {},
+  advisor: { timeoutMs: 300000 },
   routing: {
     mode: "off",
     models: ["jev-1.13-free", "jev-1.13"],
@@ -98,6 +118,44 @@ describe("loadConfig", () => {
     );
   });
 
+  test("advisor.timeoutMs defaults to 300000 when missing, including model inherit and override", async () => {
+    await fixture(JSON.stringify({ advisor: { model: "inherit" } }), async (path) => {
+      const config = await loadConfig({ path });
+      expect(config.advisor.timeoutMs).toBe(300000);
+      expect(config.advisor.model).toBeUndefined();
+    });
+    await fixture(JSON.stringify({ advisor: { model: "opencode/jev-1.13" } }), async (path) => {
+      const config = await loadConfig({ path });
+      expect(config.advisor.timeoutMs).toBe(300000);
+      expect(config.advisor.model).toEqual({ providerID: "opencode", id: "jev-1.13" });
+    });
+  });
+
+  test("advisor.timeoutMs accepts positive integers within the timer range", async () => {
+    await fixture(JSON.stringify({ advisor: { timeoutMs: 15000 } }), async (path) => {
+      expect((await loadConfig({ path })).advisor.timeoutMs).toBe(15000);
+    });
+    await fixture(JSON.stringify({ advisor: { timeoutMs: 2147483647 } }), async (path) => {
+      expect((await loadConfig({ path })).advisor.timeoutMs).toBe(2147483647);
+    });
+  });
+
+  test("advisor.timeoutMs rejects zero, negative, fractional, non-number, and out-of-range values", async () => {
+    for (const value of [0, -1, 1.5, "300000", true, null, 2147483648]) {
+      await timeoutError(value);
+    }
+  });
+
+  test("advisor.timeoutMs rejects NaN and infinities at the parser", () => {
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const error = capture(() => parseConfig({ advisor: { timeoutMs: value } }, CONFIG_FILE_NAME));
+      if (!(error instanceof ConfigError))
+        throw new Error(`expected ConfigError, received ${String(error)}`);
+      expect(error.key).toBe("advisor.timeoutMs");
+      expect(error.message).toContain("positive integer");
+    }
+  });
+
   test("malformed JSON names the config file", async () => {
     await configError("{ not json", CONFIG_FILE_NAME);
   });
@@ -105,6 +163,7 @@ describe("loadConfig", () => {
   test("unknown keys are rejected at every level", async () => {
     await configError(JSON.stringify({ telemetry: true }), "telemetry");
     await configError(JSON.stringify({ advisor: { fallback: "x" } }), "advisor.fallback");
+    await configError(JSON.stringify({ advisor: { timeoutSeconds: 5 } }), "advisor.timeoutSeconds");
     await configError(JSON.stringify({ routing: { retries: 2 } }), "routing.retries");
     await configError(JSON.stringify({ apiKey: "secret" }), "apiKey");
   });

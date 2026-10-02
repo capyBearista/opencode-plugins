@@ -31,17 +31,28 @@ export interface RoutingStateCapture {
   readonly entries: CanonicalState;
   readonly lastUserMessageID: string;
   readonly executorModel?: ModelReference;
+  readonly advisorEntries?: CanonicalState;
+}
+
+export interface AutomaticPreparation {
+  readonly ready: boolean;
+  readonly skipReason?: string;
 }
 
 export interface RoutingOpportunity {
   readonly sessionID: SessionID;
   readonly kind?: DispatchKind;
   readonly capture: () => Promise<RoutingStateCapture>;
+  readonly prepareAutomatic?: () => Promise<AutomaticPreparation>;
+  readonly onAdvisorStart?: () => void;
+  readonly isCurrent?: () => boolean;
 }
 
 export type RoutingAction = "skip" | "suppress" | "deny" | "reject" | "accept" | "fail";
 
 export type RoutingFailureDisposition = "retry" | "fallback" | "terminal";
+
+export type AdvisorOutcome = "completed" | "failed" | "timeout";
 
 export interface RoutingFailure {
   readonly errorClass: string;
@@ -63,6 +74,10 @@ export interface RoutingDecision {
   readonly advice?: string;
   readonly advisorModel?: string;
   readonly advisorContext?: AdvisorContextDiagnostics;
+  readonly advisorInvocations?: number;
+  readonly advisorLatencyMs?: number;
+  readonly advisorOutcome?: AdvisorOutcome;
+  readonly advisorTimedOut?: boolean;
   readonly failure?: RoutingFailure;
   readonly policy?: RoutingPolicySnapshot;
   readonly skipReason?: string;

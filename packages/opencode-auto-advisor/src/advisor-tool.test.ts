@@ -26,16 +26,21 @@ const ADVISOR_MESSAGE = {
 const TOOL_CONTEXT = {
   sessionID: "ses_1" as SessionID,
   messageID: "msg-current",
+  agent: "build",
 };
 
 function contextWith(messages: readonly ContextMessage[]) {
   const base = createTestContext();
   const prompts: Array<{ prompt: string; model?: unknown }> = [];
+  const contextReads: string[] = [];
   const ctx = {
     ...base.ctx,
     session: {
       ...base.ctx.session,
-      context: async () => messages,
+      context: async (input: { readonly sessionID: string }) => {
+        contextReads.push(input.sessionID);
+        return messages;
+      },
     },
     generate: {
       text: async (input: { prompt: string; model?: unknown }) => {
@@ -44,7 +49,7 @@ function contextWith(messages: readonly ContextMessage[]) {
       },
     },
   };
-  return { ...base, ctx, prompts };
+  return { ...base, ctx, prompts, contextReads };
 }
 
 describe("advisor tool wiring", () => {
@@ -132,7 +137,82 @@ describe("advisor tool wiring", () => {
     expect(context.prompts).toHaveLength(0);
   });
 
-  test("explicit consultations stay unbounded by the automatic model budget", async () => {
+  test("explicit consultations fit the shared model-aware projection budget", async () => {
+    const context = contextWith([ADVISOR_MESSAGE]);
+    await registerPlugin(context.ctx as never, { loadConfig: configWithoutFile });
+
+    const result = await context.added[0]?.execute({}, TOOL_CONTEXT);
+
+    const prompt = context.prompts[0]?.prompt ?? "";
+    expect(result?.content).toBe("Check the rollback path before migrating.");
+    expect(prompt).toContain("I should double-check the migration.");
+    expect(prompt).not.toContain(ADVISOR_OMISSION_MARKER);
+    expect(context.prompts[0]?.model).toEqual({ providerID: "opencode", id: "jev-1.14" });
+  });
+
+  test("parented sessions fail before reading history or generating", async () => {
+    const context = contextWith([ADVISOR_MESSAGE]);
+    const ctx = {
+      ...context.ctx,
+      session: { ...context.ctx.session, get: async () => ({ parentID: "ses_parent" }) },
+    };
+    await registerPlugin(ctx as never, { loadConfig: configWithoutFile });
+
+    const result = await context.added[0]?.execute({}, TOOL_CONTEXT);
+
+    expect(result?.content).toContain("Auto Advisor consultation failed");
+    expect(result?.content).toContain("parented");
+    expect(context.contextReads).toHaveLength(0);
+    expect(context.prompts).toHaveLength(0);
+  });
+
+  test("configured advisor denial fails before reading history or generating", async () => {
+    const context = contextWith([ADVISOR_MESSAGE]);
+    const ctx = {
+      ...context.ctx,
+      agent: {
+        get: async () => ({
+          data: { permissions: [{ action: "advisor", resource: "*", effect: "deny" }] },
+        }),
+      },
+    };
+    await registerPlugin(ctx as never, { loadConfig: configWithoutFile });
+
+    const result = await context.added[0]?.execute({}, TOOL_CONTEXT);
+
+    expect(result?.content).toContain("Auto Advisor consultation failed");
+    expect(result?.content).toContain("permission");
+    expect(context.contextReads).toHaveLength(0);
+    expect(context.prompts).toHaveLength(0);
+  });
+
+  test("a missing executor model without an override returns a clear tool error", async () => {
+    const context = contextWith([
+      { id: "msg-current", time: { created: 3 }, type: "user", text: "hi" } as ContextMessage,
+    ]);
+    await registerPlugin(context.ctx as never, { loadConfig: configWithoutFile });
+
+    const result = await context.added[0]?.execute({}, TOOL_CONTEXT);
+
+    expect(result?.content).toContain("no advisor model available");
+    expect(context.prompts).toHaveLength(0);
+  });
+
+  test("unavailable model limits return a clear tool error", async () => {
+    const context = contextWith([ADVISOR_MESSAGE]);
+    const ctx = {
+      ...context.ctx,
+      model: { list: async () => ({ data: [] }) },
+    };
+    await registerPlugin(ctx as never, { loadConfig: configWithoutFile });
+
+    const result = await context.added[0]?.execute({}, TOOL_CONTEXT);
+
+    expect(result?.content).toContain("limits are unavailable");
+    expect(context.prompts).toHaveLength(0);
+  });
+
+  test("an unusable model budget returns a clear tool error", async () => {
     const context = contextWith([ADVISOR_MESSAGE]);
     const ctx = {
       ...context.ctx,
@@ -153,10 +233,8 @@ describe("advisor tool wiring", () => {
 
     const result = await context.added[0]?.execute({}, TOOL_CONTEXT);
 
-    const prompt = context.prompts[0]?.prompt ?? "";
-    expect(result?.content).toBe("Check the rollback path before migrating.");
-    expect(prompt).toContain("I should double-check the migration.");
-    expect(prompt).not.toContain(ADVISOR_OMISSION_MARKER);
+    expect(result?.content).toContain("Auto Advisor consultation failed");
+    expect(context.prompts).toHaveLength(0);
   });
 });
 

@@ -2,76 +2,76 @@ import { describe, expect, test } from "bun:test";
 import {
   ADVISOR_DELIVERY_PREFIX,
   advisorAdviceText,
-  createAdviceLifetime,
   deliverAdvice,
+  deliverRetainedReviews,
+  retainedReviewEntry,
 } from "./advice-delivery.js";
-import type { AssembledMessage, SessionID } from "./messages.js";
+import type { AdviceRecord } from "./advice-history.js";
+import type { AssembledSystemPart } from "./messages.js";
 
-const SESSION = "ses_1" as SessionID;
+function priorSystem(): AssembledSystemPart[] {
+  return [{ type: "text", text: "hook-only system mutation" }];
+}
 
-function priorMessage(): AssembledMessage {
-  return {
-    id: "msg-user-1",
-    role: "user",
-    content: [{ type: "text", text: "fix it" }],
-  } as AssembledMessage;
+function record(id: string, advice: string, turnKey = "turn-1"): AdviceRecord {
+  return { id, sequence: 1, turnKey, materialFingerprint: "f".repeat(64), advice };
 }
 
 describe("advice delivery", () => {
-  test("injects the advice as a system-role message at the end of the dispatch", () => {
-    const messages: AssembledMessage[] = [priorMessage()];
+  test("appends the advice as one text system part", () => {
+    const system = priorSystem();
 
-    deliverAdvice({ messages, advice: "check the rollback" });
+    deliverAdvice({ system, advice: "check the rollback" });
 
-    expect(messages).toHaveLength(2);
-    expect(messages[0]).toEqual(priorMessage());
-    expect(messages[1]?.role).toBe("system");
-    expect(messages[1]?.content).toEqual([
-      { type: "text", text: advisorAdviceText("check the rollback") },
-    ]);
+    expect(system).toHaveLength(2);
+    expect(system[0]).toEqual(priorSystem()[0]);
+    expect(system[1]).toEqual({ type: "text", text: advisorAdviceText("check the rollback") });
     expect(advisorAdviceText("check the rollback")).toStartWith(ADVISOR_DELIVERY_PREFIX);
+  });
+
+  test("propagates an immutable system failure instead of claiming delivery", () => {
+    const system = priorSystem();
+    Object.freeze(system);
+
+    expect(() => deliverAdvice({ system, advice: "check the rollback" })).toThrow();
+    expect(system).toHaveLength(1);
   });
 });
 
-describe("advice lifetime", () => {
-  test("keeps a single live advice per turn and lets newer advice supersede it", () => {
-    const lifetime = createAdviceLifetime();
+describe("retained review delivery", () => {
+  test("builds one reviewer-framed system entry for retained records", () => {
+    const entry = retainedReviewEntry([record("adv_1", "recheck the migration")]);
 
-    lifetime.activate(SESSION, "turn-1", "first");
-    expect(lifetime.current(SESSION)).toEqual({ turnKey: "turn-1", text: "first" });
-
-    lifetime.activate(SESSION, "turn-1", "second");
-    expect(lifetime.current(SESSION)).toEqual({ turnKey: "turn-1", text: "second" });
+    expect(entry?.role).toBe("system");
+    expect(entry?.text).toContain("[Auto Advisor retained reviews]");
+    expect(entry?.text).toContain("recheck the migration");
+    expect(entry?.text).toContain("adv_1");
   });
 
-  test("expires advice when a new user turn starts", () => {
-    const lifetime = createAdviceLifetime();
-    lifetime.activate(SESSION, "turn-1", "first");
-
-    lifetime.expire(SESSION, "turn-1");
-    expect(lifetime.current(SESSION)).toEqual({ turnKey: "turn-1", text: "first" });
-
-    lifetime.expire(SESSION, "turn-2");
-    expect(lifetime.current(SESSION)).toBeUndefined();
+  test("omits the entry when there is nothing retained", () => {
+    expect(retainedReviewEntry([])).toBeUndefined();
   });
 
-  test("forgets a session on cleanup", () => {
-    const lifetime = createAdviceLifetime();
-    lifetime.activate(SESSION, "turn-1", "first");
+  test("appends exactly one retained system part", () => {
+    const system = priorSystem();
 
-    lifetime.forget(SESSION);
-    expect(lifetime.current(SESSION)).toBeUndefined();
-    expect(lifetime.sessions()).toBe(0);
+    const delivered = deliverRetainedReviews({
+      system,
+      records: [record("adv_1", "first"), record("adv_2", "second")],
+    });
+
+    expect(delivered).toBe(true);
+    expect(system).toHaveLength(2);
+    const text = system[1]?.text ?? "";
+    expect(text).toContain("[Auto Advisor retained reviews]");
+    expect(text).toContain("first");
+    expect(text).toContain("second");
   });
 
-  test("bounds the number of tracked sessions", () => {
-    const lifetime = createAdviceLifetime({ maxSessions: 2 });
-    lifetime.activate("ses_1" as SessionID, "t", "a");
-    lifetime.activate("ses_2" as SessionID, "t", "b");
-    lifetime.activate("ses_3" as SessionID, "t", "c");
+  test("does not append when there are no retained records", () => {
+    const system = priorSystem();
 
-    expect(lifetime.sessions()).toBe(2);
-    expect(lifetime.current("ses_1" as SessionID)).toBeUndefined();
-    expect(lifetime.current("ses_3" as SessionID)).toEqual({ turnKey: "t", text: "c" });
+    expect(deliverRetainedReviews({ system, records: [] })).toBe(false);
+    expect(system).toHaveLength(1);
   });
 });

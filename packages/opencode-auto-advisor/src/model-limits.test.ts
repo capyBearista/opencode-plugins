@@ -102,8 +102,13 @@ describe("computeInputBudget", () => {
     expect(computeInputBudget({ context: 200_000, input: 180_000, output: 32_000 })).toBe(150_000);
   });
 
-  test("floors the fractional reserve deterministically", () => {
-    expect(computeInputBudget({ context: 200_001, output: 32_000 })).toBe(150_001);
+  test("keeps the exact fractional reserve instead of flooring it", () => {
+    expect(computeInputBudget({ context: 200_001, output: 32_000 })).toBe(150_000.75);
+    expect(computeInputBudget({ context: 5, output: 1 })).toBe(3.75);
+  });
+
+  test("caps a fractional reserved window by the advertised input limit", () => {
+    expect(computeInputBudget({ context: 5, input: 3, output: 1 })).toBe(3);
   });
 
   test("fails open when the reserve leaves no room", () => {

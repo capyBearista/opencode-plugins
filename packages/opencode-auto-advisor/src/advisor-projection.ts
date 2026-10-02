@@ -3,7 +3,7 @@ import type { CanonicalState } from "./canonical.js";
 import { type SerializedEntry, serializeAdvisorContext, stableStringify } from "./serialize.js";
 
 export const ADVISOR_OMISSION_MARKER =
-  "Earlier or lower-priority Executor context was omitted to fit the Advisor model's context budget.";
+  "Executor context was omitted to fit the Advisor model's context budget.";
 
 export interface AdvisorContextDiagnostics {
   readonly complete: boolean;
@@ -35,22 +35,62 @@ export function buildAdvisorProjection(
   state: CanonicalState,
   options: AdvisorProjectionOptions = {},
 ): AdvisorProjection {
+  const eligible = withoutReasoning(state);
   const inputBudget = options.inputBudget;
-  if (inputBudget === undefined) return { transcript: serializeAdvisorContext(state) };
+  if (inputBudget === undefined) return { transcript: serializeAdvisorContext(eligible) };
+  if (!Number.isFinite(inputBudget) || inputBudget <= 0) {
+    throw new RangeError(
+      `Advisor projection input budget must be a finite positive number, received ${String(inputBudget)}`,
+    );
+  }
 
-  const envelope = buildAdvisorPrompt("").length;
-  const selection = select(state, envelope, inputBudget);
-  const included = state.filter((_, index) => selection.flags[index] === true);
-  const omitted = state.length - included.length;
-  const transcript = serializeAdvisorContext(
-    omitted > 0 ? [omissionMarker(), ...included] : included,
+  const envelopeChars = buildAdvisorPrompt("").length;
+  const fullTranscript = serializeAdvisorContext(eligible);
+  if (estimateChars(envelopeChars + fullTranscript.length) <= inputBudget) {
+    return withDiagnostics(fullTranscript, eligible.length, 0, inputBudget);
+  }
+
+  const marker = omissionMarker();
+  const markerTranscriptChars = stableStringify(marker).length + 2;
+  if (estimateChars(envelopeChars + markerTranscriptChars) > inputBudget) {
+    throw new RangeError(
+      state.length === 0
+        ? `Advisor projection input budget ${inputBudget} cannot fit the mandatory Advisor prompt framing`
+        : `Advisor projection input budget ${inputBudget} cannot fit the Advisor prompt with the required omission marker`,
+    );
+  }
+
+  const flags = select(eligible, envelopeChars, inputBudget, markerTranscriptChars);
+  const included = eligible.filter((_, index) => flags[index] === true);
+  const transcript = serializeAdvisorContext([marker, ...included]);
+  return withDiagnostics(
+    transcript,
+    included.length,
+    eligible.length - included.length,
+    inputBudget,
   );
+}
+
+function withoutReasoning(state: CanonicalState): CanonicalState {
+  return state.map((entry) => {
+    if (!("blocks" in entry)) return entry;
+    const blocks = entry.blocks.filter((block) => block.type !== "reasoning");
+    return blocks.length === entry.blocks.length ? entry : { ...entry, blocks };
+  });
+}
+
+function withDiagnostics(
+  transcript: string,
+  includedEntries: number,
+  omittedEntries: number,
+  inputBudget: number,
+): AdvisorProjection {
   return {
     transcript,
     diagnostics: {
-      complete: omitted === 0,
-      omittedEntries: omitted,
-      includedEntries: included.length,
+      complete: omittedEntries === 0,
+      omittedEntries,
+      includedEntries,
       estimatedTokens: estimateTokens(buildAdvisorPrompt(transcript)),
       inputBudget,
     },
@@ -65,27 +105,21 @@ function select(
   state: CanonicalState,
   envelopeChars: number,
   budget: number,
-): { readonly flags: readonly boolean[]; readonly omitted: number } {
+  markerTranscriptChars: number,
+): readonly boolean[] {
   const flags = state.map(() => false);
-  let chars = 2;
-  let count = 0;
+  let transcriptChars = markerTranscriptChars;
   for (const tier of priorityTiers(state)) {
-    let complete = true;
     for (const index of tier) {
       const entry = state[index];
       if (entry === undefined) continue;
-      const entryChars = stableStringify(entry).length + (count > 0 ? 1 : 0);
-      if (estimateChars(envelopeChars + chars + entryChars) > budget) {
-        complete = false;
-        continue;
-      }
+      const candidateChars = transcriptChars + stableStringify(entry).length + 1;
+      if (estimateChars(envelopeChars + candidateChars) > budget) continue;
       flags[index] = true;
-      chars += entryChars;
-      count += 1;
+      transcriptChars = candidateChars;
     }
-    if (!complete) break;
   }
-  return { flags, omitted: state.length - count };
+  return flags;
 }
 
 function estimateChars(chars: number): number {

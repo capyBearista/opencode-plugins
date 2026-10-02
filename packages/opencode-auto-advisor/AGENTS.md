@@ -1,7 +1,7 @@
 # opencode-auto-advisor — OpenCode plugin
 
-**Technology**: TypeScript / OpenCode V2 Plugin (`@opencode/plugin` 2.0.19)
-**Entry Point**: `server.js` (package root) → `src/index.ts`
+**Technology**: TypeScript / OpenCode V2 Plugin (exact `@opencode/plugin` / `@opencode/ai` 2.0.21)
+**Entry Points**: `server.js` → `src/index.ts`; optional `tui.js` → `src/tui.ts`
 **Parent Context**: This extends [../../AGENTS.md](../../AGENTS.md)
 
 ## Quick Reference
@@ -16,85 +16,43 @@
 
 ## Status
 
-Phase 2 (#50) implemented: routing consumes the live assembled request, explicit
-consultations merge it with the current delta, and the automatic path runs the
-full Zen/System One pipeline. `ctx.session.hook("context")` canonicalizes the
-request the host is about to dispatch (`event.system`, `event.messages`,
-`event.model`) into a bounded per-session snapshot, fingerprints that request
-with a SHA-256 digest, applies the deterministic policy, and accounts the
-per-turn consultation budget. The `AdvisorRouter` seam is now backed by the
-`@opencode/ai` Evaluation + System One adapter with the ordered
-`routing.models` chain, bounded per-model retries, and quota/terminal failure
-classification. `observe` persists bounded digest-only telemetry through
-`ctx.storage` and exposes it read-only over RPC (`experimental.auto-advisor`);
-`active` additionally consults the Advisor and injects accepted advice into the
-same turn as a system-role message through the `context` hook, with
-single-live-per-turn lifetime and reinjection on continuations so the advice
-never re-triggers routing. Explicit zero-argument
-`advisor()` works end to end — strict global configuration, Executor-model
-inheritance, and a stateless `AdvisorService` over `ctx.generate.text`. Add a
-Changeset only when the package becomes releasable.
+Foundation (#48) and routing (#50) exist. The current remediation is targeting
+focused manual-test readiness; final fresh gates and review, not historical green
+results, determine readiness. Do not commit, merge, publish, or begin dogfooding
+without authorization.
 
-Remediation phase A: routing and automatic consultation no longer consume the
-raw full transcript. The Zen router sends a bounded structured Jev projection
-derived from the canonical captured state; the fingerprint covers the full
-canonical material state with advisor-origin blocks excluded regardless of
-`inFlight`; and both consultation paths route through the Advisor projection
-seam where model-aware fitting lands next.
+Accepted contract: explicit zero-argument `advisor()` and automatic consultations
+share one stateless, tool-free Advisor service and model-aware projection. Root
+sessions are potentially eligible; parented sessions are never eligible. Native
+`advisor` permission denial excludes both paths, regardless of agent name. Only
+exposed Executors receive Advisor guidance. Explicit calls bypass Jev and the
+automatic quota; they return qualitative advice or a clear failure, never a
+confidence score or a fallback model.
 
-Remediation phase B: `active` no longer pays classifier latency once the turn
-budget is exhausted, the `advisor_would_help` boolean carries explicit positive
-and negative criteria framed on the immediate pending action, the raw
-consequence score and probability/confidence metadata survive normalization into
-telemetry, the Zen call deadline is 5s, and the Zen chain distinguishes
-same-model retry (transient infrastructure), model fallback (quota/capacity/
-rate-limit), and fast fail-open (auth/config/schema/programming) with the
-verified host semantics of `x-should-retry`.
+Automatic routing runs at the awaited primary `session.context` boundary. `off`
+does not route; `observe` sends the bounded Jev projection and records calibration
+without consulting Advisor; `active` synchronously reviews accepted opportunities
+and fails open on failure. Both new and retained automatic advice must use the
+privileged `dispatch.system` surface. Chronological `Message.system` updates are
+not equivalent: released 2.0.21 lowers them to lower-authority user text on some
+provider routes. This delivery correction was explicitly approved; do not loosen
+wire-role tests to accept that fallback.
 
-Remediation phase C: the automatic consultation is model-aware. The selected
-Advisor model (`advisor.model` pinned, else the captured Executor model) is
-resolved through the host's own model catalog (`ctx.model.list()`) to its
-advertised `limit.context`/`limit.input`/`limit.output`; a deterministic
-priority retention pass fits the canonical transcript into the derived input
-budget, and the omission is disclosed to the Advisor with an internal marker
-plus compact diagnostics in telemetry. Unreachable or malformed model limits
-skip the automatic consultation gracefully without consuming the per-turn
-budget, and explicit `advisor()` remains unbounded by this budget. The rich
-Advisor projection is built lazily: only after an opportunity is accepted by
-policy and has budget remaining, and never in `observe`.
-
-Remediation phase D: a failed automatic consultation is recorded in telemetry
-as `ConsultationError` with a `terminal` disposition instead of being mislabeled
-as `RouterError`; the router-error path keeps its Zen class and resolved
-disposition. The durable docs also distinguish the four state representations
-(canonical captured state, fingerprint projection, Jev routing projection,
-Advisor consultation projection) so no reader assumes one shared serialized
-transcript feeds both routing and the Advisor, and they state plainly that
-`observe` sends the bounded Jev routing projection to Zen and is not
-local-only.
-
-Remediation phase E: the context hook is fail-open end to end — an unexpected
-throw from snapshot capture, the routing domain, delivery, or telemetry is
-swallowed and the primary dispatch proceeds unmutated. An exhausted fallback
-chain normalizes its terminal throw to a `terminal` disposition while preserving
-model, error class, and total attempts. Because the host catalog exposes no
-free-vs-paid pre-signal for System One models, a paid model that terminally
-rejects the public bearer is instead cached as ineligible for that session:
-later opportunities skip it without attempting (same terminal `Authentication`
-record, `attempts: 0`), the configured `routing.models` chain is never mutated,
-and the cache clears on `session.deleted`.
+Version remains `2.0.0`, unpublished. First publication requires the repository's
+approved bootstrap path after validation and merge, not an artificial patch-bump
+Changeset. Normal Changesets apply to subsequent releases.
 
 ## Configuration
 
-- Global-only strict JSON at `<config dir>/opencode/auto-advisor.json`. The
-  config directory resolves as `OPENCODE_CONFIG_DIR`, else `XDG_CONFIG_HOME`,
-  else `<home>/.config`, mirroring OpenCode's own global roots on every
-  platform instead of hard-coding a Unix path.
+- Global-only strict JSON at `$OPENCODE_CONFIG_DIR/auto-advisor.json` when that
+  variable is set; otherwise `$XDG_CONFIG_HOME/opencode/auto-advisor.json`, or
+  `<home>/.config/opencode/auto-advisor.json`. Do not append another `opencode/`
+  to an explicitly supplied `OPENCODE_CONFIG_DIR`.
 - Sparse: a missing file yields all defaults, a missing key yields that key's
   default, and a valid explicit value wins. Malformed JSON, unknown keys, and
   invalid values raise `ConfigError` naming the offending key and never fall
   back silently. Secrets are never read from this file.
-- Six knobs only: `advisor.model`, `routing.mode`, `routing.models`,
+- Seven knobs only: `advisor.model`, `advisor.timeoutMs`, `routing.mode`, `routing.models`,
   `routing.advisorWouldHelpThreshold`, `routing.consequenceThreshold`,
   `routing.maxConsultationsPerTurn`.
 
@@ -103,6 +61,7 @@ Routing defaults (conservative; finalized by 1C):
 | Knob | Default | Rationale |
 | --- | --- | --- |
 | `advisor.model` | omitted | Inherit the in-flight Executor model for that consultation |
+| `advisor.timeoutMs` | `300000` | Soft deadline; stateless generation may continue because 2.0.21 exposes no cancellation signal |
 | `routing.mode` | `"off"` | Automatic routing stays opt-in until calibrated |
 | `routing.models` | `["jev-1.13-free", "jev-1.13"]` | Plan default: use free Zen capacity first, paid second |
 | `routing.advisorWouldHelpThreshold` | `0.7` | Demands fairly strong signal; Jev guidance treats concentrated distributions as confident and advises review below ~0.8, so `0.7` keeps automatic review conservative |
@@ -113,6 +72,7 @@ Routing defaults (conservative; finalized by 1C):
 
 ```text
 server.js               # Package-root V2 entry, re-exports dist/index.js
+tui.js                  # Optional package-root TUI entry, re-exports dist/tui.js
 scripts/smoke-built.ts  # Built-artifact smoke: id, tool contract, consult, context hook, cleanup
 src/
 ├── index.ts            # Plugin.define default export + registerPlugin wiring
@@ -136,7 +96,16 @@ src/
 ├── digest.ts           # SHA-256 helper
 ├── media.ts            # Media placeholders; raw bytes never leave this module
 ├── advisor-service.ts  # Fresh/stateless consultation service
-├── advice-delivery.ts  # System-role advice injection + single-live-advice lifetime
+├── advice-delivery.ts  # Privileged system advice injection + retained-review framing
+├── advice-history.ts   # Bounded persisted automatic-review records
+├── advice-compaction.ts # Privileged compaction context + exact absorption proof
+├── operation-lifetime.ts # Pending-operation invalidation on deletion/disposal
+├── eligibility.ts      # Root-session and native advisor permission eligibility
+├── advisor-prompts.ts  # Executor/tool/independent-reviewer prompt layers
+├── review-contract.ts  # Import-free JSON lifecycle RPC contract
+├── review-lifecycle.ts # Bounded session status, start/finish, final advice only
+├── tui-controller.ts   # Lifecycle query/event reconciliation and cleanup
+├── tui.ts              # Optional supported footer/composer contributions
 ├── zen-auth.ts         # Plugin-safe Zen credential resolution (integration connection)
 ├── zen-errors.ts       # Failure classification: retry / fallback / terminal
 ├── zen-questions.ts    # Boolean + 0-4 score questions and answer normalization
@@ -181,9 +150,10 @@ src/
 - `serializeAdvisorContext` and `stableStringify` are pure, deterministic
   (sorted keys) exports, so all three serializers share one canonical entry form
   that fingerprints build on, and the routing and Advisor projections derive
-  from. Automatic advice is never persisted or serialized:
-  it is injected into the in-flight dispatch only, so no serializer needs an
-  advisor-origin escape hatch.
+  from. Automatic advice is persisted separately as bounded plugin-owned history.
+  Own injected system parts must be excluded by identity from canonical capture,
+  fingerprints, snapshots, and routing projections; do not filter arbitrary
+  user evidence merely because its text resembles an Advisor marker.
 - Media (images, audio, video, documents, unknown) becomes metadata placeholders
   with `inspected: false`; base64 payloads and provider-native blobs never reach
   the prompt. URI sources drop query strings and fragments, local paths reduce
@@ -225,14 +195,14 @@ capture-normalized input and never builds or re-normalizes entries itself.
 - Advisor consultation projection — the rich canonical transcript fitted to the
   selected Advisor model's input budget by whole-entry priority retention, with
   an omission marker and compact diagnostics when anything is dropped.
-  Consumers: automatic consultation (`active`) with an `inputBudget`; explicit
-  `advisor()` without one. Bounds: automatic = model-advertised input budget;
-  explicit = unbounded by design (user-invoked).
+  Consumers: both explicit and automatic consultations with the selected model's
+  `inputBudget`. All mandatory Advisor instructions, framing, and any omission
+  marker count toward the final internal prompt estimate.
 
 ## Routing
 
 - Boundary: exactly one `ctx.session.hook("context", …)` observer. On
-  `@opencode/plugin` 2.0.19 the host only fires this hook for primary agent-loop
+  `@opencode/plugin` 2.0.21 the host only fires this hook for primary agent-loop
   dispatches (compaction, title, and generate dispatches have their own hook
   names), so a payload without `kind` is treated as primary; a payload that
   carries any other `kind` is skipped defensively.
@@ -249,7 +219,7 @@ capture-normalized input and never builds or re-normalizes entries itself.
   projection to Zen/System One, applies policy hypothetically, and persists
   compact routing telemetry, with zero automatic Advisor invocations and zero
   Executor-context mutations. `active` additionally performs the automatic
-  consultation and injects accepted advice as a system-role message. No mode
+   consultation and injects accepted advice into privileged system context. No mode
   reads the session context.
   Every primary dispatch writes the request snapshot before the mode branches,
   so `off` still snapshots for explicit `advisor()` consults — the snapshot is
@@ -287,10 +257,9 @@ capture-normalized input and never builds or re-normalizes entries itself.
 - Advisor projection seam: `buildAdvisorProjection(canonical, options)` in
   `advisor-projection.ts` is the single place the rich Advisor consultation
   context is built, used by both the automatic path (`routing.ts`) and the
-  explicit merge (`consult.ts`). With no `inputBudget` it returns the full
-  canonical transcript (`serializeAdvisorContext`) and no diagnostics — the
-  explicit path stays unbounded because it is user-invoked. With an
-  `inputBudget` it fits the transcript by priority and reports
+  explicit merge (`consult.ts`). Both runtime paths resolve model limits before
+  constructing a safe consultation. With an `inputBudget` it fits the transcript
+  by priority and reports
   `AdvisorContextDiagnostics` (`complete`, `omittedEntries`, `includedEntries`,
   `estimatedTokens`, `inputBudget`); callers must not build transcripts
   themselves. The rich projection is constructed lazily: `routing.ts` builds it
@@ -312,7 +281,7 @@ capture-normalized input and never builds or re-normalizes entries itself.
   Because `@opencode/client` is not installed in this package, `index.ts`
   accesses the catalog through a narrow structural `ModelCatalog` with a
   runtime function guard instead of the unresolved host type.
-- Input budget: `reserve = max(floor(context_limit * ADVISOR_RESERVE_FRACTION), output_limit)`
+- Input budget: `reserve = max(context_limit * ADVISOR_RESERVE_FRACTION, output_limit)`
   with internal `ADVISOR_RESERVE_FRACTION = 0.25` (no config knob), then
   `input_budget = min(input_limit ?? context_limit - reserve, context_limit - reserve)`;
   a non-positive budget is treated as unusable limits and fails open. The
@@ -321,25 +290,25 @@ capture-normalized input and never builds or re-normalizes entries itself.
   particular fill level. Worked examples: context 200k / output 32k → reserve
   50k → input 150k; context 200k / output 60k → reserve 60k → input 140k.
 - Retention and size: when the canonical entries exceed the input budget,
-  `buildAdvisorProjection` drops whole entries lowest-priority first —
+  `buildAdvisorProjection` considers whole entries in priority order —
   (1) system entries (instructions and system/task constraints), (2) current
   user turn, (3) current assistant/tool state, (4) compaction/checkpoint
   entries, (5) history — and never cuts mid-entry, so every included tool
-  call/result and JSON object stays complete. A tier that cannot
-  be fully included stops all lower tiers, so a dropped entry is never replaced
-  by lower-priority content. History is offered newest-first, so the oldest
+  call/result and JSON object stays complete. An oversized entry is omitted;
+  later useful entries and lower tiers are still considered. History is offered
+  newest-first, so the oldest
   entries are dropped first. The size heuristic is deterministic and internal:
   `estimateTokens(text) = round(length / 4)` characters per token, mirroring the
   host's own `Token.estimate`; it is pinned by tests, not configurable. It is
-  approximate by design — the fit sums `stableStringify` lengths per entry plus
-  an envelope approximation, and the final prompt is measured post-hoc into the
-  `advisorContext` diagnostics instead of being trusted from the estimate.
+  approximate by design, but the final internal estimate includes the mandatory
+  Advisor envelope and must not exceed `inputBudget`. Unusable framing fails
+  cleanly: automatic skip/fail open, explicit visible error.
 - Omission marker and diagnostics: when anything is omitted, the transcript
   gains a leading structured marker entry (`role: "marker"`,
   `type: "context-omitted"`, detail `ADVISOR_OMISSION_MARKER`) stating that
   earlier/lower-priority Executor context was omitted for the Advisor model's
   context budget. The marker appears only when reduction occurs; the mandatory
-  marker can push the estimate marginally past the budget within the reserve.
+  marker is budgeted before selection and must never push the estimate past the budget.
   Compact diagnostics travel as additive fields (`advisorContext` on the
   decision and the telemetry event, plus `skipReason`) and store counts and
   estimates only — omitted content is never persisted anywhere. The guarantee is
@@ -395,8 +364,7 @@ capture-normalized input and never builds or re-normalizes entries itself.
   `AdvisorRouter.evaluate(state) → { advisorWouldHelp, consequence, metadata? }`.
   The `@opencode/ai` Evaluation/System One adapter stays behind this seam in
   `zen-evaluation.ts`/`zen-router.ts`; only those `zen-*.ts` files may import
-  evaluation types (enforced by `router.test.ts`), `advice-delivery.ts` may
-  import the host `Message` constructor, and `index.ts` is the only
+  evaluation types (enforced by `router.test.ts`), and `index.ts` is the
   composition point. The no-direct-`effect`-import guard (`router.test.ts`)
   excludes `.test.` files, so host-path validation tests may import `effect`
   while the manifest must never pin it. The adapter resolves auth through
@@ -474,35 +442,32 @@ capture-normalized input and never builds or re-normalizes entries itself.
   by reading the schema.
 - Reentrancy: the only routing trigger is the primary `context` hook. Advisor
   consultation (`ctx.generate.text`) and Zen evaluation run on host paths that
-  do not fire that hook, and injected advice is never persisted, so neither
+  do not fire that hook, and own advice is excluded from material capture, so neither
   automatic consultations nor their output can recursively create routing
   opportunities. `routing-observer.test.ts` covers the auxiliary-kind skips and
   the same-turn reinjection path.
-- Delivery and lifetime: accepted `active` advice is injected into the current
-  dispatch as a system-role message (`Message.system`) appended at the tail of
-  `event.messages`, prefixed `[Auto Advisor automatic advice]`, so the primary
-  model reads it in the system role while the cached conversation prefix stays
-  warm. Never use `session.synthetic` for advice: it projects to user-role on
-  the wire, presenting plugin output as principal user intent. Injection runs after capture and evaluation, so advice never enters a
-  fingerprint, turn key, snapshot, or durable history. Advice is
-  single-live-per-turn: every later primary dispatch in the same turn reinjects
-  the live text, a newer review supersedes the older one, and a new user turn
-  expires it. Injection failures fail open and are recorded with
-  `delivered: false`. Both properties rest on host contracts rather than plugin
-  invariants: the appended message must reach the model as dispatch-tail content
-  (the verified 2.0.19 wire lowers it to a `<system-update>`-wrapped tail) and
-  hook-time `event.messages` mutations must not be persisted. If a host change
-  ever persisted them, prior advice would re-enter the next-turn fingerprint,
-  Zen state, and advisor transcript, so capture-side filtering would have to
-  come back.
+- Delivery and lifetime: accepted `active` advice is injected into privileged
+  `event.system` as a text part, prefixed `[Auto Advisor automatic advice]`.
+  Never fall back to chronological message updates, synthetic user input, or a
+  fabricated tool call (`session.synthetic()` lowers to a user-role message, so it
+  cannot carry privileged reviewer authority). Changing the leading prompt may
+  affect prefix caching.
+  Advice is committed to bounded plugin-owned history before delivery. Relevant
+  retained records are reinjected into later eligible system contexts without
+  duplication, and supplied to compaction as privileged system context. Retire
+  only captured records whose IDs and exact text are proven absorbed by a
+  successful compaction; failed or unproven compactions preserve them. Do not
+  silently evict unabsorbed records to make room for another paid consultation.
+  Injection failures fail open with `delivered: false`; deletion/disposal must
+  invalidate pending operations before any awaited cleanup to prevent late advice.
 - Session cleanup: there is no session-close hook, so `index.ts` subscribes to
   `ctx.event.subscribe` (`session.deleted`) and clears snapshots, turn state,
   and live advice; setup cleanup aborts the subscription and disposes RPC,
   routing, the Zen runtime, and the tool.
-- Known limits carried forward: automatic consultations are fitted to the
-  Advisor model's advertised budget, while explicit `advisor()` prompts still
-  embed the full transcript with no size bound by design (user-invoked) —
-  shipping `active` as opt-in experimental on the `off` default is
+- Known limits carried forward: both consultation paths use safe model-aware
+  projection; token estimation is approximate, and `advisor.timeoutMs` is a soft
+  deadline without provider cancellation. Shipping `active` as opt-in
+  experimental on the `off` default is
   the accepted risk, and live calibration of the 25% reserve is still required
   before recommending `active` broadly;
   `sanitizeUri` preserves http(s) path segments, so a secret embedded in a URL
@@ -513,8 +478,8 @@ capture-normalized input and never builds or re-normalizes entries itself.
 
 ## V2 Install and Compatibility
 
-- This package is **V2-only** and targets `@opencode/plugin` **2.0.19**, the
-  approved plan baseline. The rest of this monorepo currently installs 2.0.2;
+- This package is **V2-only** and targets exact `@opencode/plugin` / `@opencode/ai`
+  **2.0.21**, the approved baseline. The rest of this monorepo has separate pins;
   do not copy this pin into the older packages without an intentional upgrade.
 - Server plugins register in the V2 server profile (`~/.config/opencode/opencode.json`)
   under the plural `"plugins"` key; use `@latest` or an exact pin, never `@v2`.
@@ -524,6 +489,22 @@ capture-normalized input and never builds or re-normalizes entries itself.
 - Do not use V1 `server`/`config` hook signatures, `WithInstance`, or string
   event buses. The V2 boundary is documented in
   [../../docs/v1-plugins.md](../../docs/v1-plugins.md).
+
+### Optional TUI
+
+- Distinct plugin ID: `capybearista.opencode-auto-advisor-tui`; disable only the
+  companion with `"plugins": ["-capybearista.opencode-auto-advisor-tui"]` in `cli.json`.
+- Append supported `prompt.footer.status` and `session.composer.top` slots. Do not
+  patch private TUI internals, invent a transcript row, or add a private spinner.
+- Reviewing status is scoped to actual automatic inference; success pulse lasts
+  about 2.5s. The panel shows only the latest final advice, never inputs, reasoning,
+  probabilities, or debug telemetry. Failures clear running quietly.
+- Separate lifecycle RPC `experimental.auto-advisor.review` offers status/query
+  and review start/finish events. Reconnect subscribes before querying and preserves
+  authoritative epoch/revision ordering; binding follows session and directory.
+- SDK 2.0.21 captures its client at setup. Same-endpoint reconnect is supported;
+  managed endpoint/port/auth replacement requires a TUI restart. No private accessor hack.
+- Core server behavior must remain independent of TUI imports and optional peers.
 
 ## Code Style
 
@@ -540,28 +521,39 @@ capture-normalized input and never builds or re-normalizes entries itself.
 - Location: colocated
 - Framework: bun test
 - Running Tests: `bun test`
-- Mock contexts only. Config tests write fixtures to a `mkdtemp` temporary
+- Unit tests use mock contexts. Config tests write fixtures to a `mkdtemp` temporary
   directory and pass an explicit `path`; the real OpenCode config directory is
   never read or written.
 - Runtime smoke: `bun run smoke` loads the **built** package-root `server.js`
-  (never `dist/*` directly) with a temporary `OPENCODE_CONFIG_DIR`, asserts the
-  plugin id, the zero-argument tool contract, exactly one `context` hook, and the
-  telemetry RPC, fires frozen primary/auxiliary dispatches in all three modes
-  (routing never reads persisted history and never mutates the dispatch), then
-  executes a consultation through the hook snapshot + `session.context` +
-  `generate.text` and asserts the hook-time system, the captured user message,
-  and the current assistant delta each appear exactly once with executor-model
-  inheritance. A second registered instance with an injected router proves off
-  stays inert, observe persists telemetry without consulting, and active
-  consults plus injects a system-role advice message into the dispatch. Cleanup
-  must dispose the hook, RPC, and tool registrations and abort the event
-  subscription.
-- Live verification (2.0.19): a real `opencode run --standalone` loads the built
+  (never a stale `dist/*` entry) under private config roots. M1–M8 cover tool and
+  hook/RPC registration, root/native-permission eligibility, explicit shared
+  projection/errors/timeout, modes and awaited privileged-system delivery,
+  explicit→automatic deduplication, retention/compaction/storage/deletion,
+  lifecycle reconstruction, and idempotent server-only cleanup. Advice must
+  enter `system`, never create a conversation message. Structural smoke is not
+  proof of real provider encoding: separately run exact-host 2.0.21 probes and
+  assert advice occupies the actual privileged wire system prompt.
+- Live verification (2.0.21): a real `opencode run --standalone` loads the built
   package, uses a local OpenAI-compatible provider stand-in, and checks that the
   context hook sees the assembled request, the merged advisor prompt contains the
   hook-only system prompt exactly once plus the current assistant delta exactly
   once, and the hook turn key matches the durable user message id. Keep probe
   fixtures in tmpdirs with private `OPENCODE_CONFIG_DIR`/`XDG_*` roots.
+- Child-session probes: only the host `subagent` tool/command creates a native
+  child (`session.create` takes no `parentID`; `session.fork` yields a root fork
+  with `parent_id: null`). Identify the child on the wire by the
+  `x-opencode-session-id`/`x-opencode-parent-session-id` pair (both non-empty,
+  actual ≠ parent) — `x-opencode-session` is a parent/child-shared affinity value,
+  and a nonce echoed in subagent arguments/results also appears in the parent's
+  own continuation.
+- Run live probes against one explicit loopback host: a managed `api`/TUI start
+  with no explicit host silently targets the normal service and ignores a fresh
+  profile.
+- Zen is bundled into `dist/index.js` (there is no standalone
+  `dist/zen-evaluation.js`), so endpoint instrumentation must patch the bundled
+  base-URL literal in a private copy of the bundle.
+Historical evidence below is not a substitute for fresh 2.0.21 remediation gates:
+
 - The 2.0.18 probe is documented as BLOCKED by the upstream stateless-generation
   header issue (`ctx.generate.text` omitted `x-opencode-session`), not a
   context-capture failure.

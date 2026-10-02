@@ -1,7 +1,9 @@
-import { Message } from "@opencode/ai";
-import type { AssembledMessage, SessionID } from "./messages.js";
+import { SystemPart } from "@opencode/ai";
+import type { AdviceRecord } from "./advice-history.js";
+import { formatRetainedReviews } from "./advice-history-format.js";
+import type { AssembledSystemPart } from "./messages.js";
+import type { SerializedEntry } from "./serialize.js";
 
-export const DEFAULT_MAX_ADVICE_SESSIONS = 64;
 export const ADVISOR_DELIVERY_PREFIX = "[Auto Advisor automatic advice]";
 
 export function advisorAdviceText(advice: string): string {
@@ -9,51 +11,27 @@ export function advisorAdviceText(advice: string): string {
 }
 
 export interface AdviceDeliveryInput {
-  readonly messages: AssembledMessage[];
+  readonly system: AssembledSystemPart[];
   readonly advice: string;
 }
 
 export function deliverAdvice(input: AdviceDeliveryInput): void {
-  input.messages.push(Message.system(advisorAdviceText(input.advice)));
+  input.system.push(SystemPart.make(advisorAdviceText(input.advice)));
 }
 
-export interface LiveAdvice {
-  readonly turnKey: string;
-  readonly text: string;
+export interface RetainedReviewDeliveryInput {
+  readonly system: AssembledSystemPart[];
+  readonly records: readonly AdviceRecord[];
 }
 
-export interface AdviceLifetime {
-  readonly current: (sessionID: SessionID) => LiveAdvice | undefined;
-  readonly activate: (sessionID: SessionID, turnKey: string, text: string) => void;
-  readonly expire: (sessionID: SessionID, turnKey: string) => void;
-  readonly forget: (sessionID: SessionID) => void;
-  readonly sessions: () => number;
+export function retainedReviewEntry(records: readonly AdviceRecord[]): SerializedEntry | undefined {
+  const text = formatRetainedReviews(records);
+  return text.length > 0 ? { role: "system", text } : undefined;
 }
 
-export function createAdviceLifetime(
-  options: { readonly maxSessions?: number } = {},
-): AdviceLifetime {
-  const maxSessions = options.maxSessions ?? DEFAULT_MAX_ADVICE_SESSIONS;
-  const live = new Map<SessionID, LiveAdvice>();
-
-  return {
-    current: (sessionID) => live.get(sessionID),
-    activate: (sessionID, turnKey, text) => {
-      live.delete(sessionID);
-      live.set(sessionID, { turnKey, text });
-      while (live.size > maxSessions) {
-        const oldest = live.keys().next().value;
-        if (oldest === undefined) break;
-        live.delete(oldest);
-      }
-    },
-    expire: (sessionID, turnKey) => {
-      const current = live.get(sessionID);
-      if (current && current.turnKey !== turnKey) live.delete(sessionID);
-    },
-    forget: (sessionID) => {
-      live.delete(sessionID);
-    },
-    sessions: () => live.size,
-  };
+export function deliverRetainedReviews(input: RetainedReviewDeliveryInput): boolean {
+  const text = formatRetainedReviews(input.records);
+  if (text.length === 0) return false;
+  input.system.push(SystemPart.make(text));
+  return true;
 }

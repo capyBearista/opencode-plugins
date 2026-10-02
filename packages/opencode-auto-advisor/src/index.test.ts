@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { ADVISOR_DELIVERY_PREFIX } from "./advice-delivery.js";
+import { ADVICE_HISTORY_STORAGE_KEY } from "./advice-history.js";
 import { defaultConfig } from "./config.js";
 import plugin, { ADVISOR_TOOL_DESCRIPTION, ADVISOR_TOOL_NAME, registerPlugin } from "./index.js";
 
@@ -13,6 +15,7 @@ type AddedTool = {
     additionalProperties: boolean;
     required?: unknown;
   };
+  options?: { codemode?: boolean; permission?: string };
   execute: (input: unknown, context: unknown) => Promise<{ content?: string }>;
 };
 
@@ -46,6 +49,10 @@ export function createTestContext() {
           },
         };
       },
+      get: async () => ({ parentID: undefined, permissions: [] }),
+    },
+    agent: {
+      get: async () => ({ location: { directory: "/tmp" }, data: { permissions: [] } }),
     },
     model: {
       list: async () => ({
@@ -54,6 +61,18 @@ export function createTestContext() {
             id: "jev-1.13",
             providerID: "opencode",
             modelID: "jev-1.13",
+            limit: { context: 200_000, output: 32_000 },
+          },
+          {
+            id: "jev-1.14",
+            providerID: "opencode",
+            modelID: "jev-1.14",
+            limit: { context: 200_000, output: 32_000 },
+          },
+          {
+            id: "claude-sonnet-4",
+            providerID: "anthropic",
+            modelID: "claude-sonnet-4",
             limit: { context: 200_000, output: 32_000 },
           },
         ],
@@ -82,6 +101,7 @@ describe("@capybearista/opencode-auto-advisor", () => {
     expect(tool?.input.required).toBeUndefined();
     expect(tool?.description).toBe(ADVISOR_TOOL_DESCRIPTION);
     expect(tool?.description).toContain("no arguments");
+    expect(tool?.options).toEqual({ codemode: false, permission: ADVISOR_TOOL_NAME });
 
     expect(context.hooks).toEqual(["context"]);
     expect(context.hookCallbacks.get("context")).toBeFunction();
@@ -92,12 +112,16 @@ describe("@capybearista/opencode-auto-advisor", () => {
     expect(context.disposers).toEqual(["hook:context", `tool:${ADVISOR_TOOL_NAME}`]);
   });
 
-  test("package.json keeps a single package-root server export", async () => {
+  test("package.json keeps distinct package-root server and TUI entries", async () => {
     const manifest = await Bun.file(join(import.meta.dir, "..", "package.json")).json();
-    expect(Object.keys(manifest.exports)).toEqual(["."]);
+    expect(Object.keys(manifest.exports)).toEqual([".", "./tui"]);
     expect(manifest.exports["."].default).toBe("./dist/index.js");
-    expect(manifest.files).toEqual(["dist", "server.js"]);
-    expect(manifest.peerDependencies["@opencode/plugin"]).toBeString();
+    expect(manifest.exports["./tui"].default).toBe("./dist/tui.js");
+    expect(manifest.exports["."].default).not.toBe(manifest.exports["./tui"].default);
+    expect(manifest.files).toEqual(["dist", "server.js", "tui.js"]);
+    expect(manifest.version).toBe("2.0.0");
+    expect(manifest.peerDependencies["@opencode/plugin"]).toBe("2.0.21");
+    expect(manifest.peerDependencies["@opencode/ai"]).toBe("2.0.21");
   });
 
   test("full host context wires telemetry storage, rpc, delivery, and event cleanup", async () => {
@@ -155,13 +179,24 @@ describe("@capybearista/opencode-auto-advisor", () => {
       system: [],
       messages: [{ id: "msg-user-1", role: "user", content: [{ type: "text", text: "hi" }] }],
       options: {},
-      tools: {},
+      tools: { advisor: { description: "advisor", input: { type: "object" } } },
     };
     await base.hookCallbacks.get("context")?.(dispatch);
 
-    expect(dispatch.messages).toHaveLength(2);
-    expect(dispatch.messages[1]?.role).toBe("system");
-    expect(rpcIDs).toEqual(["experimental.auto-advisor"]);
+    expect(dispatch.messages).toEqual([
+      { id: "msg-user-1", role: "user", content: [{ type: "text", text: "hi" }] },
+    ]);
+    expect(dispatch.messages.some((message) => message.role === "system")).toBe(false);
+    expect(dispatch.system).toHaveLength(2);
+    expect(dispatch.system.every((part) => part.type === "text")).toBe(true);
+    expect(dispatch.system[0]?.text).toContain("advisor()");
+    const delivered = dispatch.system.filter((part) =>
+      part.text?.includes(ADVISOR_DELIVERY_PREFIX),
+    );
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.text).toContain("advice");
+    expect(base.hooks).toEqual(["context", "compaction"]);
+    expect(rpcIDs).toEqual(["experimental.auto-advisor", "experimental.auto-advisor.review"]);
     expect(values.has("head")).toBe(true);
     const stored = [...values.values()].find(
       (value) => (value as { decision?: string }).decision === "accept",
@@ -173,12 +208,14 @@ describe("@capybearista/opencode-auto-advisor", () => {
     expect(signals[0]?.aborted).toBe(true);
     expect(base.disposers).toEqual([
       "hook:context",
+      "rpc:experimental.auto-advisor.review",
       "rpc:experimental.auto-advisor",
+      "hook:compaction",
       `tool:${ADVISOR_TOOL_NAME}`,
     ]);
   });
 
-  test("real V2 host resolves the package root server wrapper to the built entry", () => {
+  test("real V2 host resolves the package root server and TUI entries", () => {
     const packageRoot = join(import.meta.dir, "..");
     const packageName = "@capybearista/opencode-auto-advisor";
     const child = Bun.spawnSync({
@@ -206,17 +243,302 @@ describe("@capybearista/opencode-auto-advisor", () => {
       throw new Error(new TextDecoder().decode(child.stderr));
     }
 
-    expect(JSON.parse(new TextDecoder().decode(child.stdout))).toEqual({
-      local: {
-        server: pathToFileURL(join(packageRoot, "server.js")).href,
-        tui: null,
-        rpc: null,
+    const resolved = JSON.parse(new TextDecoder().decode(child.stdout)) as {
+      local: { server: string | null; tui: string | null; rpc: string | null };
+      named: { server: string | null; tui: string | null; rpc: string | null };
+    };
+
+    expect(resolved.local).toEqual({
+      server: pathToFileURL(join(packageRoot, "server.js")).href,
+      tui: pathToFileURL(join(packageRoot, "tui.js")).href,
+      rpc: null,
+    });
+    expect(resolved.named).toEqual({
+      server: pathToFileURL(join(packageRoot, "dist", "index.js")).href,
+      tui: pathToFileURL(join(packageRoot, "dist", "tui.js")).href,
+      rpc: null,
+    });
+    expect(resolved.local.server).not.toBe(resolved.local.tui);
+    expect(resolved.named.server).not.toBe(resolved.named.tui);
+    expect(resolved.named.server).not.toBe(resolved.local.server);
+    expect(resolved.named.tui).not.toBe(resolved.local.tui);
+  });
+});
+
+interface Gate {
+  readonly started: Promise<void>;
+  readonly promise: Promise<void>;
+  readonly markStarted: () => void;
+  readonly release: () => void;
+}
+
+function gated(): Gate {
+  let release: () => void = () => undefined;
+  let markStarted: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { started, promise, markStarted, release: () => release() };
+}
+
+const ticks = async (count = 3): Promise<void> => {
+  for (let index = 0; index < count; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+};
+
+function pluginStorage(holdHistoryRead?: Gate) {
+  const values = new Map<string, unknown>();
+  return {
+    values,
+    get: async (key: string) => {
+      if (holdHistoryRead && key === ADVICE_HISTORY_STORAGE_KEY) {
+        holdHistoryRead.markStarted();
+        await holdHistoryRead.promise;
+      }
+      return values.get(key);
+    },
+    set: async (key: string, value: unknown) => {
+      values.set(key, value);
+    },
+    remove: async (key: string) => {
+      values.delete(key);
+    },
+    scan: async () => ({ entries: [] }),
+  };
+}
+
+function seedRetained(values: Map<string, unknown>): void {
+  values.set(ADVICE_HISTORY_STORAGE_KEY, {
+    version: 1,
+    nextSequence: 2,
+    sessions: [
+      {
+        sessionID: "ses_1",
+        records: [
+          {
+            id: "adv_seed_1",
+            sequence: 1,
+            turnKey: "turn-1",
+            materialFingerprint: "f".repeat(64),
+            advice: "seeded review",
+          },
+        ],
       },
-      named: {
-        server: pathToFileURL(join(packageRoot, "dist", "index.js")).href,
-        tui: null,
-        rpc: null,
+    ],
+  });
+}
+
+function storedAdvice(values: Map<string, unknown>): readonly string[] {
+  const value = values.get(ADVICE_HISTORY_STORAGE_KEY) as
+    | {
+        readonly sessions: readonly {
+          readonly sessionID: string;
+          readonly records: readonly { readonly advice: string }[];
+        }[];
+      }
+    | undefined;
+  return (
+    value?.sessions
+      .find((entry) => entry.sessionID === "ses_1")
+      ?.records.map((record) => record.advice) ?? []
+  );
+}
+
+async function compositionHarness(
+  options: {
+    readonly sessionGet?: () => Promise<{ readonly parentID?: string } | undefined>;
+    readonly holdContextDisposer?: Gate;
+    readonly holdHistoryRead?: Gate;
+  } = {},
+) {
+  const base = createTestContext();
+  const storage = pluginStorage(options.holdHistoryRead);
+  const pushes: unknown[] = [];
+  let wake: (() => void) | undefined;
+  let closed = false;
+  const signals: AbortSignal[] = [];
+  const ctx = {
+    ...base.ctx,
+    storage,
+    generate: { text: async () => ({ text: "advisor advice" }) },
+    session: {
+      ...base.ctx.session,
+      ...(options.sessionGet ? { get: options.sessionGet } : {}),
+      hook: async (name: string, callback: (input: unknown) => Promise<void> | void) => {
+        base.hooks.push(name);
+        base.hookCallbacks.set(name, callback);
+        return {
+          dispose: async () => {
+            base.disposers.push(`hook:${name}`);
+            if (name === "context" && options.holdContextDisposer) {
+              options.holdContextDisposer.markStarted();
+              await options.holdContextDisposer.promise;
+            }
+          },
+        };
+      },
+    },
+    event: {
+      subscribe: (subscribeOptions: { readonly signal?: AbortSignal }) => {
+        if (subscribeOptions.signal) signals.push(subscribeOptions.signal);
+        return (async function* () {
+          while (!closed) {
+            if (pushes.length === 0) {
+              await new Promise<void>((resolve) => {
+                wake = resolve;
+                subscribeOptions.signal?.addEventListener(
+                  "abort",
+                  () => {
+                    closed = true;
+                    resolve();
+                  },
+                  { once: true },
+                );
+              });
+            }
+            while (pushes.length > 0) yield pushes.shift();
+          }
+        })();
+      },
+    },
+  };
+  const cleanup = await registerPlugin(ctx as never, {
+    loadConfig: async () => ({
+      ...defaultConfig(),
+      routing: { ...defaultConfig().routing, mode: "active" },
+    }),
+    router: { evaluate: async () => ({ advisorWouldHelp: 0.9, consequence: 4 }) },
+  });
+  return {
+    base,
+    cleanup,
+    values: storage.values,
+    signals,
+    fire: (name: string, input: unknown) => base.hookCallbacks.get(name)?.(input),
+    push: (payload: unknown) => {
+      pushes.push(payload);
+      wake?.();
+      wake = undefined;
+    },
+  };
+}
+
+describe("plugin cleanup composition barrier", () => {
+  test("cleanup invalidates a pending compaction eligibility before earlier disposer awaits", async () => {
+    const eligibility = gated();
+    const disposer = gated();
+    const h = await compositionHarness({
+      sessionGet: async () => {
+        eligibility.markStarted();
+        await eligibility.promise;
+        return { parentID: undefined, permissions: [] };
+      },
+      holdContextDisposer: disposer,
+    });
+    seedRetained(h.values);
+
+    const event = {
+      sessionID: "ses_1",
+      agent: "build",
+      system: [{ type: "text", text: "native system" }],
+      messages: [],
+      options: {},
+      result: { summary: "native summary", metadata: { source: "compactor" } },
+    };
+    const firing = h.fire("compaction", event);
+    await eligibility.started;
+
+    const cleaning = h.cleanup();
+    await disposer.started;
+    eligibility.release();
+    await firing;
+
+    expect(event.system).toEqual([{ type: "text", text: "native system" }]);
+    expect(event.result).toEqual({ summary: "native summary", metadata: { source: "compactor" } });
+    expect(storedAdvice(h.values)).toEqual(["seeded review"]);
+
+    disposer.release();
+    await cleaning;
+    await h.cleanup();
+    expect(h.base.disposers.filter((entry) => entry === "hook:compaction")).toHaveLength(1);
+    expect(h.signals[0]?.aborted).toBe(true);
+  });
+
+  test("cleanup invalidates a pending compaction history read before earlier disposer awaits", async () => {
+    const read = gated();
+    const disposer = gated();
+    const h = await compositionHarness({
+      holdContextDisposer: disposer,
+      holdHistoryRead: read,
+    });
+    seedRetained(h.values);
+
+    const event = {
+      sessionID: "ses_1",
+      agent: "build",
+      system: [] as Array<{ type: string; text: string }>,
+      messages: [],
+      options: {},
+      result: { summary: "native summary" },
+    };
+    const firing = h.fire("compaction", event);
+    await read.started;
+
+    const cleaning = h.cleanup();
+    await disposer.started;
+    read.release();
+    await firing;
+
+    expect(event.system).toHaveLength(0);
+    expect(event.result).toEqual({ summary: "native summary" });
+    expect(storedAdvice(h.values)).toEqual(["seeded review"]);
+
+    disposer.release();
+    await cleaning;
+    await h.cleanup();
+    expect(h.base.disposers.filter((entry) => entry === "hook:compaction")).toHaveLength(1);
+  });
+
+  test("compaction.failed does not cancel an unrelated context review", async () => {
+    const eligibility = gated();
+    const h = await compositionHarness({
+      sessionGet: async () => {
+        eligibility.markStarted();
+        await eligibility.promise;
+        return { parentID: undefined, permissions: [] };
       },
     });
+    const dispatch = {
+      sessionID: "ses_1",
+      agent: "build",
+      model: { providerID: "opencode", id: "jev-1.13" },
+      system: [],
+      messages: [{ id: "msg-user-1", role: "user", content: [{ type: "text", text: "hi" }] }],
+      options: {},
+      tools: { advisor: { description: "advisor", input: { type: "object" } } },
+    };
+    const pending = h.fire("context", dispatch);
+    await eligibility.started;
+
+    h.push({ type: "session.compaction.failed", data: { sessionID: "ses_1" } });
+    await ticks();
+
+    eligibility.release();
+    await pending;
+
+    expect(dispatch.messages).toHaveLength(1);
+    expect(dispatch.messages.some((message) => message.role === "system")).toBe(false);
+    expect(dispatch.system).toHaveLength(2);
+    expect(dispatch.system[0]?.text).toContain("advisor()");
+    const delivered = dispatch.system.filter((part) =>
+      part.text?.includes(ADVISOR_DELIVERY_PREFIX),
+    );
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.text).toContain("advisor advice");
+    await h.cleanup();
   });
 });
