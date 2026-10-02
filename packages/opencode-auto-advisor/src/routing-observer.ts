@@ -140,23 +140,21 @@ export async function registerRoutingObserver(
           decision.action === "accept" &&
           decision.mode === "active" &&
           decision.advice !== undefined;
-        if (decision.mode === "active") {
-          injectRetained(deps, dispatch, ownedDelivery, retainedInjected, retained);
-        }
         let effective = decision;
         if (accepted && decision.advice !== undefined) {
-          const retention = await retainAdvice(
+          const retention = retainAdvice(
             deps,
             captured.sessionID,
             captured.turnKey,
             decision.advice,
           );
-          if (!isCurrent()) return;
           if (retention?.stored === false && retention.reason === "oversize") {
             // Advice is still delivered in full; skipReason is the debug
             // diagnostic that records the retention skip on an accepted event.
             effective = { ...decision, skipReason: RETAINED_REVIEW_OVERSIZE_SKIP_REASON };
           }
+        } else if (decision.mode === "active") {
+          injectRetained(deps, dispatch, ownedDelivery, retainedInjected, retained);
         }
         const delivered = deliverAccepted(deps, dispatch, ownedDelivery, effective);
         finishLifecycle(deps, handle, effective, delivered);
@@ -182,6 +180,7 @@ export async function registerRoutingObserver(
     forget: (sessionID) => {
       operations.forget(sessionID);
       domain.forget(sessionID);
+      deps.retained?.forget(sessionID);
     },
     markReviewed: (sessionID, turnKey, entries) => {
       domain.markReviewed(sessionID, turnKey, entries);
@@ -201,15 +200,15 @@ async function loadRetained(
   }
 }
 
-async function retainAdvice(
+function retainAdvice(
   deps: RoutingObserverDeps,
   sessionID: SessionID,
   turnKey: string,
   advice: string,
-): Promise<RetainedReviewWrite | undefined> {
+): RetainedReviewWrite | undefined {
   if (deps.retained === undefined) return undefined;
   try {
-    return await deps.retained.write(sessionID, { advice, turnKey });
+    return deps.retained.replace(sessionID, { advice, turnKey });
   } catch {
     return undefined;
   }

@@ -157,15 +157,19 @@ on the public bearer marks that Jev model ineligible for the current session;
 the configured model list is unchanged. These Jev rules do not provide an
 alternate Advisor model.
 
-Automatic advice is injected into privileged system context first; the latest
-successful automatic review is then retained best-effort as one small bounded
-record per session (`auto-advisor:retained:<sessionID>`, internal 8192-char
-limit), not a history archive. A storage failure never suppresses otherwise
-valid current advice, and an oversized review is delivered in full but not
-retained. A newer successful review replaces the old one. The retained review
-is reinjected on later eligible requests as clearly historical reviewer
-guidance and may inform later Advisor consultations, while staying out of
-routing fingerprints and Jev input. It survives conversation compaction
+Automatic advice is delivered into privileged system context first; the latest
+successful automatic review is then superseded in memory immediately and
+persisted best-effort as one small bounded record per session
+(`auto-advisor:retained:<sessionID>`, internal 8192-char limit), not a history
+archive. The hook never waits for storage: a storage failure cannot delay or
+suppress otherwise valid current advice, and the new review stays authoritative
+in-process (only restart durability may be lost). An oversized review is
+delivered in full but not retained, and still supersedes the previous retained
+review. A dispatch carrying fresh advice contains the fresh review only; the
+previous review feeds the new Advisor consultation as historical context. The
+retained review is reinjected on later eligible requests as clearly historical
+reviewer guidance and may inform later Advisor consultations, while staying out
+of routing fingerprints and Jev input. It survives conversation compaction
 because it lives outside the transcript. Session deletion clears it.
 
 When storage and RPC are available, `experimental.auto-advisor` exposes only

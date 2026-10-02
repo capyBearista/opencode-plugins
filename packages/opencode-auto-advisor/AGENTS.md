@@ -452,11 +452,16 @@ capture-normalized input and never builds or re-normalizes entries itself.
   fabricated tool call (`session.synthetic()` lowers to a user-role message, so it
   cannot carry privileged reviewer authority). Changing the leading prompt may
   affect prefix caching.
-  Advice is injected into privileged `event.system` first; the latest successful
-  automatic review is then retained best-effort for future requests. A storage
-  failure never suppresses otherwise valid current advice — only future
-  retention is lost. An oversized review is delivered in full but not retained.
-  The retained review is reinjected into later eligible system contexts as
+  Advice is delivered into privileged `event.system` first; the latest successful
+  automatic review is then superseded in memory immediately and persisted
+  best-effort asynchronously for future requests — the hook never awaits
+  storage. A storage failure never delays or suppresses otherwise valid current
+  advice, and the new review stays authoritative in-process (only restart
+  durability may be lost). An oversized review is delivered in full but not
+  retained, and still supersedes the previous retained review. A dispatch with
+  fresh advice carries fresh advice only; the old review feeds the new Advisor
+  consultation as historical context. The retained review is reinjected into
+  later eligible system contexts as
   clearly historical reviewer guidance (and as evidence in later Advisor
   consultations), never touching fingerprints or Jev input. A newer successful
   review replaces the old one; there is no compaction protocol because the

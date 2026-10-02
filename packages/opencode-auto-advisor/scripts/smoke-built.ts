@@ -3,7 +3,6 @@ import { join } from "node:path";
 import {
   ADVISOR_DELIVERY_PREFIX,
   ADVISOR_TOOL_NAME,
-  acceptingRouter,
   assert,
   type Cleanup,
   createHost,
@@ -49,9 +48,15 @@ process.env.OPENCODE_CONFIG_DIR = join(tmpdir(), `auto-advisor-smoke-${process.p
 try {
   const host = createHost();
   const config = smokeConfig("off");
+  let acceptTurn = true;
   const cleanup = await server.registerPlugin(host.ctx, {
     loadConfig: async () => config,
-    router: acceptingRouter(),
+    router: {
+      evaluate: async () =>
+        acceptTurn
+          ? { advisorWouldHelp: 0.9, consequence: 4 }
+          : { advisorWouldHelp: 0.1, consequence: 1 },
+    },
   });
 
   assert(host.tools.length === 1, `expected one tool, saw ${host.tools.length}`);
@@ -104,12 +109,20 @@ try {
   );
 
   const retainedKey = `${RETAINED_REVIEW_STORAGE_PREFIX}${SESSION_ID}`;
+  // Retention persists best-effort off the hook critical path: settle the
+  // detached durable write (bounded wait) before asserting on it.
+  for (let i = 0; i < 100 && !host.values.has(retainedKey); i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
   const stored = host.values.get(retainedKey) as { advice?: string; turnKey?: string } | undefined;
   assert(
     stored?.advice === "smoke advice" && stored.turnKey === TURN_TWO,
     `retained write mismatch: ${JSON.stringify(stored)}`,
   );
 
+  // A fresh accepted review supersedes the old one in the same dispatch, so
+  // the retained-guidance reinjection check needs a non-accepted active turn.
+  acceptTurn = false;
   const retainedDispatch = dispatch(NEXT_TURN, "retained read turn");
   await fire(host, "context", retainedDispatch);
   const retained = retainedDispatch.system.filter((part) =>

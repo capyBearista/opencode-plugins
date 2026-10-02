@@ -291,6 +291,23 @@ describe("review store", () => {
     store.start();
     expect(transport.queries).toHaveLength(3);
   });
+
+  test("a throwing listener does not stop notification of remaining listeners", async () => {
+    const transport = createFakeTransport();
+    const store = createReviewStore({ sessionID: "ses_1", transport });
+    let later = 0;
+    store.subscribe(() => {
+      throw new Error("listener exploded");
+    });
+    store.subscribe(() => {
+      later += 1;
+    });
+    store.start();
+    transport.queries[0]?.resolve(status("ses_1", COMPLETED));
+    await flush();
+    expect(later).toBe(1);
+    store.dispose();
+  });
 });
 
 describe("review store registry", () => {

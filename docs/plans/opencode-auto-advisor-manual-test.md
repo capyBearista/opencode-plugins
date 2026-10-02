@@ -1,6 +1,6 @@
 # Auto-Advisor focused manual test
 
-**Status: draft — automated gates and final code review must finish before use.**
+**Status: ready — automated gates and final code review passed; awaiting user manual testing.**
 
 This is a focused acceptance pass, not full dogfooding. Do not merge or publish
 as part of it. Use OpenCode **2.0.21** and the built workspace package **2.0.0**.
@@ -87,6 +87,12 @@ opencode --server "http://127.0.0.1:$PORT" "$DIR"
 Connect a provider through the test TUI's normal connection flow and choose a
 working Executor model. This isolated data directory does not inherit your
 normal provider credentials. Keep credentials out of the disposable task files.
+The Advisor cannot run on free Zen (`*-free`) models on 2.0.21 — the upstream
+free tier refuses non-interactive generation — so set `advisor.model` to a
+working non-free model or pick an Executor model the Advisor can inherit.
+If the TUI footer/panel never appears on a cold start, add the package to
+`$OPENCODE_CONFIG_DIR/cli.json` as `{"plugins":[...]}` (the companion loads
+reliably from `cli.json`) and restart.
 
 For a TUI-only check, `OPENCODE_CONFIG_DIR="$PROFILE/config" opencode --standalone
 "$DIR"` is supported, but its private endpoint/password are not exposed for this
@@ -102,13 +108,15 @@ before each check so old events are not mistaken for new activity.
 
 ```bash
 opencode api --server "http://127.0.0.1:$PORT" \
-  --param "location.directory=$DIR" rpc.call \
-  --data '{"rpcID":"experimental.auto-advisor","method":"telemetry.query","input":{"limit":20}}'
+  --param "location.directory=$DIR" \
+  --param "rpcID=experimental.auto-advisor" --param "method=telemetry.query" rpc.call \
+  --data '{"input":{"limit":20}}'
 
 SESSION_ID='<copy the test sessionID>'
 opencode api --server "http://127.0.0.1:$PORT" \
-  --param "location.directory=$DIR" rpc.call \
-  --data "{\"rpcID\":\"experimental.auto-advisor.review\",\"method\":\"status\",\"input\":{\"sessionID\":\"$SESSION_ID\"}}"
+  --param "location.directory=$DIR" \
+  --param "rpcID=experimental.auto-advisor.review" --param "method=status" rpc.call \
+  --data "{\"input\":{\"sessionID\":\"$SESSION_ID\"}}"
 ```
 
 `auto-advisor.json` is reread on the next context/tool call. For changes to
@@ -140,7 +148,7 @@ provider or visual case is not a pass.
 | 16 | Trigger normal compaction if practical and continue the same task. | Important review survives in context because the retained note lives outside the transcript; a newer successful review replaces it. There is no compaction receipt protocol. Do not deliberately break a real provider to force failure. |
 | 17 | Set `$OPENCODE_CONFIG_DIR/cli.json` to `{"plugins":["-capybearista.opencode-auto-advisor-tui"]}`, restart, and repeat explicit/active checks. Also use `opencode run --server "http://127.0.0.1:$PORT" --model provider/model 'Call advisor() to review this small plan before replying.'` from `$DIR`. | Core tool, routing, persistence, and telemetry work without the companion or in non-TUI use. Only visual surfaces disappear. |
 | 18 | If safe/available, restore the intended Jev chain `["jev-1.13-free","jev-1.13"]` and inspect free success or naturally occurring fallback/auth behavior. | Free success works; paid public-credential rejection stays terminal and may be cached. Do not consume quota deliberately, break credentials, or claim forced paths were exercised. Controlled native probes cover these classes automatically. |
-| 19 | Make retention storage unwritable for one `active` accepted review (e.g. revoke write permission on the plugin storage path mid-session, or as close an approximation as the host allows), then restore it. | Current advice still reaches the Executor in privileged system context despite the retention failure; only future retention is lost. Telemetry/debug records the miss. No silent fallback, no lost advice. |
+| 19 | Make retention storage unwritable for one `active` accepted review (e.g. revoke write permission on the plugin storage path mid-session, or as close an approximation as the host allows), then restore it. | Current advice reaches the Executor in privileged system context without delay despite the retention failure, and the review lifecycle completes normally. The next turn in the same running process receives the new review (it stays authoritative in memory); the old review never reappears. Only durability across a server/plugin restart may be lost — do not expect the routing telemetry event to report the asynchronous storage failure. No silent fallback, no lost advice. |
 
 Also check a narrow terminal and a long review: the panel should remain readable
 and scrollable without trapping input focus. Reconnect to the same host during a

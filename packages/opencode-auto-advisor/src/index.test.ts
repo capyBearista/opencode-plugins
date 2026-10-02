@@ -182,6 +182,7 @@ describe("@capybearista/opencode-auto-advisor", () => {
       tools: { advisor: { description: "advisor", input: { type: "object" } } },
     };
     await base.hookCallbacks.get("context")?.(dispatch);
+    await ticks();
 
     expect(dispatch.messages).toEqual([
       { id: "msg-user-1", role: "user", content: [{ type: "text", text: "hi" }] },
@@ -468,6 +469,7 @@ describe("plugin session deletion and retained review cleanup", () => {
   test("session deletion removes the retained review", async () => {
     const h = await compositionHarness();
     await h.fire("context", primaryDispatch());
+    await ticks();
     expect(storedReview(h.values)).toBe("advisor advice");
 
     h.push({ type: "session.deleted", data: { sessionID: "ses_1" } });
@@ -488,6 +490,7 @@ describe("plugin session deletion and retained review cleanup", () => {
     await ticks();
     gate.release();
     await pending;
+    await ticks();
 
     expect(storedReview(h.values)).toBeUndefined();
     await h.cleanup();

@@ -68,7 +68,7 @@ export function createReviewStore(options: ReviewStoreOptions): ReviewStore {
       try {
         listener();
       } catch {
-        return;
+        continue;
       }
     }
   };

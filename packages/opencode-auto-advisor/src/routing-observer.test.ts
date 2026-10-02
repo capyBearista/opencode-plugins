@@ -55,16 +55,50 @@ const PERSISTED_MESSAGES: readonly ContextMessage[] = [
 
 function memoryStorage() {
   const values = new Map<string, unknown>();
+  let failWrites = false;
   return {
     values,
     get: async (key: string) => values.get(key),
     set: async (key: string, value: unknown) => {
+      if (failWrites) throw new Error("storage write rejected");
       values.set(key, value);
     },
     remove: async (key: string) => {
       values.delete(key);
     },
+    failWrites: () => {
+      failWrites = true;
+    },
   };
+}
+
+const settle = async (): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+function deferredWriteStorage() {
+  const values = new Map<string, unknown>();
+  const pending: Array<{
+    readonly resolve: () => void;
+    readonly reject: (reason: unknown) => void;
+  }> = [];
+  const storage = {
+    get: async (key: string) => values.get(key),
+    set: (key: string, value: unknown) =>
+      new Promise<void>((resolve, reject) => {
+        pending.push({
+          resolve: () => {
+            values.set(key, value);
+            resolve();
+          },
+          reject,
+        });
+      }),
+    remove: async (key: string) => {
+      values.delete(key);
+    },
+  };
+  return { values, storage, pending };
 }
 
 function wiring(options: {
@@ -838,41 +872,25 @@ async function observerHarness(options: {
   };
 }
 
-function gatedRetained(inner: RetainedReviewStore) {
-  let writesThrow = false;
-  const retained: RetainedReviewStore = {
-    ...inner,
-    write: async (sessionID, review) => {
-      if (writesThrow) throw new Error("storage write rejected");
-      return inner.write(sessionID, review);
-    },
-  };
-  return {
-    retained,
-    failWrites: () => {
-      writesThrow = true;
-    },
-  };
-}
-
 describe("automatic advice acceptance and retention", () => {
-  test("a throwing storage write never rewrites accept and still delivers privileged advice", async () => {
-    const gate = gatedRetained(createRetainedReviewStore(memoryStorage()));
+  test("a rejected durable write keeps the fresh review in memory and still delivers privileged advice", async () => {
+    const memory = memoryStorage();
+    const retained = createRetainedReviewStore(memory);
     const harness = await observerHarness({
       answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
-      retained: gate.retained,
+      retained,
     });
-    gate.failWrites();
+    memory.failWrites();
     const value = dispatch();
 
     await fireHook(harness.context, value);
+    await settle();
 
     expect(harness.deliveries).toHaveLength(1);
     const system = (value as { system: Array<{ text?: string }> }).system;
     const delivered = system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX));
     expect(delivered).toHaveLength(1);
     expect(delivered[0]?.text).toContain(ADVICE);
-    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
     expect(harness.events[0]).toMatchObject({
       mode: "active",
       decision: "accept",
@@ -884,13 +902,62 @@ describe("automatic advice acceptance and retention", () => {
     expect(status.running).toEqual([]);
     expect(status.lastFinished?.outcome).toBe("completed");
     expect(status.latest?.advice).toBe(ADVICE);
+    expect(await harness.retained.read("ses_1" as never)).toEqual({
+      advice: ADVICE,
+      turnKey: "msg-user-1",
+    });
+    expect(memory.values.has(retainedReviewKey("ses_1" as never))).toBe(false);
   });
 
-  test("a successful review is retained and reinjected as historical guidance on later turns", async () => {
+  test("retention storage never blocks accepted delivery, lifecycle, or the hook", async () => {
+    const deferred = deferredWriteStorage();
+    const retained = createRetainedReviewStore(deferred.storage);
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on("unhandledRejection", onRejection);
+    try {
+      const harness = await observerHarness({
+        answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+        retained,
+      });
+      const value = dispatch();
+
+      await fireHook(harness.context, value);
+
+      const system = (value as { system: Array<{ text?: string }> }).system;
+      const delivered = system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX));
+      expect(delivered).toHaveLength(1);
+      expect(delivered[0]?.text).toContain(ADVICE);
+      const status = harness.lifecycle.status("ses_1");
+      expect(status.running).toEqual([]);
+      expect(status.lastFinished?.outcome).toBe("completed");
+      expect(status.latest?.advice).toBe(ADVICE);
+      expect(await harness.retained.read("ses_1" as never)).toEqual({
+        advice: ADVICE,
+        turnKey: "msg-user-1",
+      });
+
+      await settle();
+      expect(deferred.pending).toHaveLength(1);
+      deferred.pending[0]?.reject(new Error("storage write rejected"));
+      await settle();
+
+      expect(await harness.retained.read("ses_1" as never)).toEqual({
+        advice: ADVICE,
+        turnKey: "msg-user-1",
+      });
+      expect(rejections).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
+  });
+
+  test("fresh advice supersedes the retained review in the executor context while the advisor projection keeps it", async () => {
     let calls = 0;
     const harness = await observerHarness({
       answers: [
-        { advisorWouldHelp: 0.9, consequence: 4 },
         { advisorWouldHelp: 0.9, consequence: 4 },
         { advisorWouldHelp: 0.9, consequence: 4 },
       ],
@@ -904,6 +971,7 @@ describe("automatic advice acceptance and retention", () => {
     });
 
     await fireHook(harness.context, dispatch());
+    await settle();
     expect(await harness.retained.read("ses_1" as never)).toEqual({
       advice: "first review",
       turnKey: "msg-user-1",
@@ -917,50 +985,124 @@ describe("automatic advice acceptance and retention", () => {
     });
     await fireHook(harness.context, second);
 
-    expect(harness.retainedDeliveries).toHaveLength(1);
-    expect(harness.retainedDeliveries[0]?.review.advice).toBe("first review");
-    const retainedPart = (second as { system: Array<{ text?: string }> }).system.find((part) =>
-      (part.text ?? "").includes(RETAINED_REVIEW_HEADER),
-    );
-    expect(retainedPart?.text).toContain("first review");
-    expect(retainedPart?.text).toContain("msg-user-1");
+    expect(harness.consultations[1]?.transcript).toContain(RETAINED_REVIEW_HEADER);
+    expect(harness.consultations[1]?.transcript).toContain("first review");
+    expect(harness.retainedDeliveries).toHaveLength(0);
+    const system = (second as { system: Array<{ text?: string }> }).system;
+    expect(system.some((part) => (part.text ?? "").includes(RETAINED_REVIEW_HEADER))).toBe(false);
+    const delivered = system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX));
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.text).toContain("second review");
+    expect(delivered[0]?.text).not.toContain("first review");
     expect(await harness.retained.read("ses_1" as never)).toEqual({
       advice: "second review",
       turnKey: "msg-user-2",
     });
-    expect(
-      [...harness.storage.values.keys()].filter((key) => key.startsWith("auto-advisor:retained:")),
-    ).toEqual([retainedReviewKey("ses_1" as never)]);
   });
 
-  test("oversized advisor output is delivered in full, skips retention, and records a diagnostic", async () => {
-    const oversize = "x".repeat(RETAINED_REVIEW_MAX_CHARS + 1);
+  test("a failed durable replacement never resurrects the old review on later requests", async () => {
+    const memory = memoryStorage();
+    const retained = createRetainedReviewStore(memory);
+    retained.replace("ses_1" as never, { advice: "old review", turnKey: "msg-user-1" });
+    await settle();
+    memory.failWrites();
     const harness = await observerHarness({
-      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      answers: [
+        { advisorWouldHelp: 0.9, consequence: 4 },
+        { advisorWouldHelp: 0.1, consequence: 0 },
+      ],
+      retained,
       service: {
         consult: async (input) => {
           input.onStart?.();
-          return { advice: oversize };
+          return { advice: "new review" };
         },
       },
     });
-    const value = dispatch();
 
-    await fireHook(harness.context, value);
+    await fireHook(harness.context, dispatch());
+    await settle();
 
-    const system = (value as { system: Array<{ text?: string }> }).system;
+    expect(harness.deliveries[0]?.advice).toBe("new review");
+    expect(harness.lifecycle.status("ses_1").lastFinished?.outcome).toBe("completed");
+    expect(memory.values.get(retainedReviewKey("ses_1" as never))).toEqual({
+      advice: "old review",
+      turnKey: "msg-user-1",
+    });
+
+    await fireHook(
+      harness.context,
+      dispatch({
+        messages: [
+          { id: "msg-user-2", role: "user", content: [{ type: "text", text: "next turn" }] },
+        ],
+      }),
+    );
+
+    expect(harness.retainedDeliveries).toHaveLength(1);
+    expect(harness.retainedDeliveries[0]?.review.advice).toBe("new review");
+  });
+
+  test("an oversized review is delivered in full, tombstones the old review, and never persists truncated advice", async () => {
+    const oversize = "x".repeat(RETAINED_REVIEW_MAX_CHARS + 1);
+    let calls = 0;
+    const harness = await observerHarness({
+      answers: [
+        { advisorWouldHelp: 0.9, consequence: 4 },
+        { advisorWouldHelp: 0.9, consequence: 4 },
+        { advisorWouldHelp: 0.1, consequence: 0 },
+      ],
+      service: {
+        consult: async (input) => {
+          input.onStart?.();
+          calls += 1;
+          return { advice: calls === 1 ? "first review" : oversize };
+        },
+      },
+    });
+
+    await fireHook(harness.context, dispatch());
+    await settle();
+    expect(harness.storage.values.get(retainedReviewKey("ses_1" as never))).toEqual({
+      advice: "first review",
+      turnKey: "msg-user-1",
+    });
+
+    const second = dispatch({
+      messages: [
+        { id: "msg-user-2", role: "user", content: [{ type: "text", text: "second turn" }] },
+      ],
+    });
+    await fireHook(harness.context, second);
+
+    const system = (second as { system: Array<{ text?: string }> }).system;
     const delivered = system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX));
     expect(delivered).toHaveLength(1);
     expect(delivered[0]?.text).toContain(oversize);
     expect(delivered[0]?.text).toHaveLength(ADVISOR_DELIVERY_PREFIX.length + 1 + oversize.length);
-    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
-    expect(harness.storage.values.has(retainedReviewKey("ses_1" as never))).toBe(false);
-    expect(harness.events[0]).toMatchObject({
+    expect(system.some((part) => (part.text ?? "").includes(RETAINED_REVIEW_HEADER))).toBe(false);
+    expect(harness.events[1]).toMatchObject({
       decision: "accept",
       delivered: true,
       skipReason: RETAINED_REVIEW_OVERSIZE_SKIP_REASON,
       advisorOutcome: "completed",
     });
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
+    await settle();
+    expect(harness.storage.values.has(retainedReviewKey("ses_1" as never))).toBe(false);
+
+    const third = dispatch({
+      messages: [
+        { id: "msg-user-3", role: "user", content: [{ type: "text", text: "third turn" }] },
+      ],
+    });
+    await fireHook(harness.context, third);
+
+    expect(harness.retainedDeliveries).toHaveLength(0);
+    const thirdSystem = (third as { system: Array<{ text?: string }> }).system;
+    expect(thirdSystem.some((part) => (part.text ?? "").includes(RETAINED_REVIEW_HEADER))).toBe(
+      false,
+    );
   });
 
   test("a review that is exactly at the retention bound is still retained", async () => {
@@ -1116,38 +1258,24 @@ describe("operation lifetime guards", () => {
     expect(await inner.read("ses_1" as never)).toBeUndefined();
   });
 
-  test("forget during the retention write suppresses late publication", async () => {
-    const inner = createRetainedReviewStore(memoryStorage());
-    let release: () => void = () => undefined;
-    let markStarted: () => void = () => undefined;
-    const started = new Promise<void>((resolve) => {
-      markStarted = resolve;
-    });
-    const retained: RetainedReviewStore = {
-      ...inner,
-      write: async (sessionID, review) => {
-        markStarted();
-        await new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        return inner.write(sessionID, review);
-      },
-    };
+  test("forget after an accepted review drops the overlay and the durable entry", async () => {
+    const memory = memoryStorage();
+    const retained = createRetainedReviewStore(memory);
     const harness = await observerHarness({
       answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
       retained,
     });
-    const pending = fireHook(harness.context, dispatch());
-    await started;
+
+    await fireHook(harness.context, dispatch());
+    await settle();
+    expect(await harness.retained.read("ses_1" as never)).toBeDefined();
+    expect(memory.values.has(retainedReviewKey("ses_1" as never))).toBe(true);
 
     harness.registration.forget("ses_1" as never);
-    release();
-    await pending;
 
-    expect(harness.deliveries).toHaveLength(0);
-    expect(harness.retainedDeliveries).toHaveLength(0);
-    expect(harness.events).toHaveLength(0);
-    expect(harness.lifecycle.status("ses_1").latest).toBeUndefined();
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
+    await settle();
+    expect(memory.values.has(retainedReviewKey("ses_1" as never))).toBe(false);
   });
 
   test("dispose during an in-flight generation publishes nothing late", async () => {
@@ -1755,11 +1883,49 @@ describe("retention fail-open and advisor block exclusion", () => {
     expect(system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toHaveLength(1);
   });
 
+  test("a malformed durable review is treated as absent and never injected", async () => {
+    const memory = memoryStorage();
+    memory.values.set(retainedReviewKey("ses_1" as never), {
+      advice: "x".repeat(RETAINED_REVIEW_MAX_CHARS + 1),
+      turnKey: "msg-user-1",
+    });
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.1, consequence: 0 }],
+      retained: createRetainedReviewStore(memory),
+    });
+    const value = dispatch();
+
+    await fireHook(harness.context, value);
+
+    expect(harness.retainedDeliveries).toHaveLength(0);
+    expect(harness.consultations).toHaveLength(0);
+    const system = (value as { system: Array<{ text?: string }> }).system;
+    expect(system.some((part) => (part.text ?? "").includes(RETAINED_REVIEW_HEADER))).toBe(false);
+  });
+
+  test("observe mode never injects a retained review", async () => {
+    const memory = memoryStorage();
+    const retained = createRetainedReviewStore(memory);
+    retained.replace("ses_1" as never, { advice: "old review", turnKey: "msg-user-1" });
+    const harness = await observerHarness({
+      mode: "observe",
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      retained,
+    });
+    const value = dispatch();
+
+    await fireHook(harness.context, value);
+
+    expect(harness.retainedDeliveries).toHaveLength(0);
+    const system = (value as { system: Array<{ text?: string }> }).system;
+    expect(system.some((part) => (part.text ?? "").includes(RETAINED_REVIEW_HEADER))).toBe(false);
+  });
+
   test("current and retained advisor blocks stay out of the fingerprint and Jev projection", async () => {
     const harness = await observerHarness({
       answers: [
         { advisorWouldHelp: 0.9, consequence: 4 },
-        { advisorWouldHelp: 0.9, consequence: 4 },
+        { advisorWouldHelp: 0.1, consequence: 0 },
         { advisorWouldHelp: 0.9, consequence: 4 },
       ],
     });

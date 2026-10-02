@@ -176,7 +176,6 @@ export async function registerPlugin(
         snapshots.forget(sessionID);
         routing.forget(sessionID);
         lifecycle.forget(sessionID);
-        void retained?.remove(sessionID).catch(() => undefined);
       },
     });
   }
