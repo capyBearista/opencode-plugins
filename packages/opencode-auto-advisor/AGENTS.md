@@ -502,6 +502,8 @@ capture-normalized input and never builds or re-normalizes entries itself.
 
 - Distinct plugin ID: `capybearista.opencode-auto-advisor-tui`; disable only the
   companion with `"plugins": ["-capybearista.opencode-auto-advisor-tui"]` in `cli.json`.
+- On a cold start the companion loads reliably from `cli.json`; server-package
+  discovery from `opencode.json` alone may show only builtins with no failure logged.
 - Append supported `prompt.footer.status` and `session.composer.top` slots. Do not
   patch private TUI internals, invent a transcript row, or add a private spinner.
 - Reviewing status is scoped to actual automatic inference; success pulse lasts
@@ -540,6 +542,9 @@ capture-normalized input and never builds or re-normalizes entries itself.
   enter `system`, never create a conversation message. Structural smoke is not
   proof of real provider encoding: separately run exact-host 2.0.21 probes and
   assert advice occupies the actual privileged wire system prompt.
+- When product semantics change, update the smoke scenario to match (a retained
+  read needs a non-accepted turn; detached durable writes need a bounded settle
+  poll), or the seam check asserts stale behavior.
 - Live verification (2.0.21): a real `opencode run --standalone` loads the built
   package, uses a local OpenAI-compatible provider stand-in, and checks that the
   context hook sees the assembled request, the merged advisor prompt contains the
@@ -559,6 +564,10 @@ capture-normalized input and never builds or re-normalizes entries itself.
 - Private `OPENCODE_CONFIG_DIR` isolates config but not provider auth or the
   host data dir: live retention/telemetry land in the default database, so plan
   probe sessions and read-only verification accordingly.
+- Free Zen (`*-free`) models refuse non-interactive `ctx.generate.text` on 2.0.21
+  (upstream free-tier gate), so live Advisor probes need a non-free `advisor.model`.
+- 2.0.21 serves RPC at `POST /api/rpc/:rpcID/:method`: pass `rpcID`/`method` as
+  path params and `{"input": ...}` as the body, never all three in the body.
 - The plugin emits no logs by design, so live delivery is verified from outside:
   resolve the host DB with `opencode debug paths db` and read plugin storage
   read-only (`sqlite3 -readonly`, `kv` table, keys under
