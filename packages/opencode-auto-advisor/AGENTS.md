@@ -439,7 +439,9 @@ capture-normalized input and never builds or re-normalizes entries itself.
   properties instead of erroring), so every field `routing-observer.ts` can
   emit must exist as an optional schema property — verify with a
   maximal-event round-trip test through the host's real validation path, not
-  by reading the schema.
+  by reading the schema. Telemetry writes serialize through one process-wide
+  queue: a hung store stalls later events (sparse/lost telemetry) but never
+  the hook, which never awaits it.
 - Reentrancy: the only routing trigger is the primary `context` hook. Advisor
   consultation (`ctx.generate.text`) and Zen evaluation run on host paths that
   do not fire that hook, and own advice is excluded from material capture, so neither
@@ -473,10 +475,22 @@ capture-normalized input and never builds or re-normalizes entries itself.
   retained note lives outside the conversation transcript. Injection failures
   fail open with `delivered: false`; deletion/disposal must
   invalidate pending operations before any awaited cleanup to prevent late advice.
+- Retained hook-contract pins: `routing-observer.test.ts` and
+  `retained-review.test.ts` must change together on any retained-seam edit —
+  the `reads()==1` (exactly-once background hydration) and `reads()==0`
+  (`observe` never hydrates) counting assertions are the permanent guards.
+  Single-flight holds only because `state.hydration` is assigned synchronously
+  in the same tick as the `hydrate()` call, before any await gap. Absence is
+  cached for the session lifetime even for transient read failures or malformed
+  payloads (fail-open by design; session IDs are not reused), so a failed
+  hydration never retries.
 - Session cleanup: there is no session-close hook, so `index.ts` subscribes to
   `ctx.event.subscribe` (`session.deleted`) and clears snapshots, turn state,
   and live advice; setup cleanup aborts the subscription and disposes RPC,
-  routing, the Zen runtime, and the tool.
+  routing, the Zen runtime, and the tool. Session cleanup must use `forget`
+  (it deletes the overlay entry and blocks late-hydration resurrection);
+  `clear` only tombstones to hydrated-empty while keeping the entry for
+  absence caching, and has no production callers.
 - Known limits carried forward: both consultation paths use safe model-aware
   projection; token estimation is approximate, and `advisor.timeoutMs` is a soft
   deadline without provider cancellation. Shipping `active` as opt-in
