@@ -77,7 +77,7 @@ export function createRoutingDomain(
 
       let captured: Awaited<ReturnType<RoutingOpportunity["capture"]>>;
       try {
-        captured = await opportunity.capture();
+        captured = await opportunity.capture(mode);
       } catch (cause) {
         if (!isCurrent()) return invalidated({ policy });
         return { action: "fail", mode, policy, error: describe(cause) };

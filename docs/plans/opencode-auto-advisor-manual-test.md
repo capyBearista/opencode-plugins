@@ -1,6 +1,6 @@
 # Auto-Advisor focused manual test
 
-**Status: ready — automated gates and final code review passed; awaiting user manual testing.**
+**Status: ready — storage-critical-path remediation implemented, code-reviewed (0 critical/important), all automated gates green (package 495/0 + root fresh), narrow 2.0.21 host probes 4/4 PASS; awaiting user manual testing.**
 
 This is a focused acceptance pass, not full dogfooding. Do not merge or publish
 as part of it. Use OpenCode **2.0.21** and the built workspace package **2.0.0**.
@@ -90,9 +90,11 @@ normal provider credentials. Keep credentials out of the disposable task files.
 The Advisor cannot run on free Zen (`*-free`) models on 2.0.21 — the upstream
 free tier refuses non-interactive generation — so set `advisor.model` to a
 working non-free model or pick an Executor model the Advisor can inherit.
-If the TUI footer/panel never appears on a cold start, add the package to
-`$OPENCODE_CONFIG_DIR/cli.json` as `{"plugins":[...]}` (the companion loads
-reliably from `cli.json`) and restart.
+2.0.21 live-host observation/workaround: if the TUI footer/panel never appears
+on a cold start, add the package to `$OPENCODE_CONFIG_DIR/cli.json` as
+`{"plugins":[...]}` (on the observed 2.0.21 host the companion loads reliably
+from `cli.json`) and restart. This is a workaround for that host behavior, not
+a general OpenCode V2 rule.
 
 For a TUI-only check, `OPENCODE_CONFIG_DIR="$PROFILE/config" opencode --standalone
 "$DIR"` is supported, but its private endpoint/password are not exposed for this
@@ -144,7 +146,7 @@ provider or visual case is not a pass.
 | 12 | Remove `advisor.model` and review explicitly; then use a valid, different `provider/model` override. | Inheritance first, configured model second. Confirm the actual provider/model, not just stylistic differences in text. |
 | 13 | In `off`, temporarily set `advisor.timeoutMs` to `1` and call explicitly. Then test `active` on a new accepted opportunity. Restore `300000`. | Explicit timeout is clear. Automatic timeout clears running quietly and lets Executor continue; no new completed advice. Underlying generation may continue: avoid repeated calls while it finishes. |
 | 14 | In `active`, explicitly consult, then let that Executor turn continue without new material; inspect routing telemetry. Add a meaningful new user/tool result afterward. | Immediate same-state automatic duplicate is suppressed. New material can re-enable evaluation. Explicit review did not consume automatic quota. |
-| 15 | Complete an automatic review, then start another user turn in the same session and ask the Executor to apply the earlier constraint. | Retained advice remains available without multiplying on each continuation. The TUI shows the latest completed review only, not a separate history UI. |
+| 15 | Complete an automatic review, then start another user turn in the same session and ask the Executor to apply the earlier constraint. If you restart the server/plugin first, note the first `active` dispatch after startup may not yet carry the retained note (background hydration); the following dispatch should. | Retained advice remains available without multiplying on each continuation. The TUI shows the latest completed review only, not a separate history UI. |
 | 16 | Trigger normal compaction if practical and continue the same task. | Important review survives in context because the retained note lives outside the transcript; a newer successful review replaces it. There is no compaction receipt protocol. Do not deliberately break a real provider to force failure. |
 | 17 | Set `$OPENCODE_CONFIG_DIR/cli.json` to `{"plugins":["-capybearista.opencode-auto-advisor-tui"]}`, restart, and repeat explicit/active checks. Also use `opencode run --server "http://127.0.0.1:$PORT" --model provider/model 'Call advisor() to review this small plan before replying.'` from `$DIR`. | Core tool, routing, persistence, and telemetry work without the companion or in non-TUI use. Only visual surfaces disappear. |
 | 18 | If safe/available, restore the intended Jev chain `["jev-1.13-free","jev-1.13"]` and inspect free success or naturally occurring fallback/auth behavior. | Free success works; paid public-credential rejection stays terminal and may be cached. Do not consume quota deliberately, break credentials, or claim forced paths were exercised. Controlled native probes cover these classes automatically. |

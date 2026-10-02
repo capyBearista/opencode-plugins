@@ -114,8 +114,8 @@ export async function registerRoutingObserver(
           sessionID: captured.sessionID,
           ...(kind === "primary" ? { kind } : {}),
           isCurrent,
-          capture: async () => {
-            retained = await loadRetained(deps, captured.sessionID);
+          capture: async (mode) => {
+            if (mode === "active") retained = loadRetained(deps, captured.sessionID);
             const entry = retainedReviewEntry(retained);
             return {
               entries: captured.entries,
@@ -159,7 +159,7 @@ export async function registerRoutingObserver(
         const delivered = deliverAccepted(deps, dispatch, ownedDelivery, effective);
         finishLifecycle(deps, handle, effective, delivered);
         if (!isCurrent()) return;
-        await recordTelemetry(deps, captured, effective, delivered, Date.now() - started, {
+        recordTelemetry(deps, captured, effective, delivered, Date.now() - started, {
           invoked: handle !== undefined || decision.advisorInvocations === 1,
           latencyMs:
             handle !== undefined ? Date.now() - advisorStartedAt : decision.advisorLatencyMs,
@@ -188,13 +188,10 @@ export async function registerRoutingObserver(
   };
 }
 
-async function loadRetained(
-  deps: RoutingObserverDeps,
-  sessionID: SessionID,
-): Promise<RetainedReview | undefined> {
+function loadRetained(deps: RoutingObserverDeps, sessionID: SessionID): RetainedReview | undefined {
   if (deps.retained === undefined) return undefined;
   try {
-    return await deps.retained.read(sessionID);
+    return deps.retained.peek(sessionID);
   } catch {
     return undefined;
   }
@@ -328,14 +325,14 @@ function ownAppended(system: readonly object[], before: number, owned: WeakSet<o
   }
 }
 
-async function recordTelemetry(
+function recordTelemetry(
   deps: RoutingObserverDeps,
   captured: CapturedRequest,
   decision: RoutingDecision,
   delivered: boolean | undefined,
   latencyMs: number,
   advisor: { readonly invoked: boolean; readonly latencyMs?: number },
-): Promise<void> {
+): void {
   if (deps.telemetry === undefined || decision.mode === undefined) return;
   if (decision.mode === "off") return;
   const model = decision.failure?.model ?? metadataString(decision, "model");
@@ -380,7 +377,11 @@ async function recordTelemetry(
     ...(advisor.invoked ? { advisorTimedOut: decision.advisorTimedOut === true } : {}),
     ...(delivered !== undefined ? { delivered } : {}),
   };
-  await deps.telemetry.record(event);
+  try {
+    void Promise.resolve(deps.telemetry.record(event)).catch(() => undefined);
+  } catch {
+    return;
+  }
 }
 
 function metadataNumber(decision: RoutingDecision, key: string): number | undefined {

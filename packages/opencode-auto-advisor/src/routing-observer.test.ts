@@ -101,6 +101,44 @@ function deferredWriteStorage() {
   return { values, storage, pending };
 }
 
+function deferredReadStorage() {
+  const values = new Map<string, unknown>();
+  const readReleases: Array<() => void> = [];
+  let reads = 0;
+  let released = false;
+  let markStarted: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  return {
+    values,
+    started,
+    reads: () => reads,
+    releaseRead: () => {
+      released = true;
+      for (const release of readReleases.splice(0)) release();
+    },
+    storage: {
+      get: async (key: string) => {
+        reads += 1;
+        markStarted();
+        const captured = values.get(key);
+        if (released) return captured;
+        await new Promise<void>((resolve) => {
+          readReleases.push(resolve);
+        });
+        return captured;
+      },
+      set: async (key: string, value: unknown) => {
+        values.set(key, value);
+      },
+      remove: async (key: string) => {
+        values.delete(key);
+      },
+    },
+  };
+}
+
 function wiring(options: {
   readonly mode: RoutingMode;
   readonly answers?: readonly (RouterAssessment | Error)[];
@@ -1223,39 +1261,26 @@ describe("operation lifetime guards", () => {
     expect(harness.lifecycle.status("ses_1").running).toEqual([]);
   });
 
-  test("forget during the retained read prevents delivery and telemetry", async () => {
-    const inner = createRetainedReviewStore(memoryStorage());
-    let release: () => void = () => undefined;
-    let markStarted: () => void = () => undefined;
-    const started = new Promise<void>((resolve) => {
-      markStarted = resolve;
-    });
-    const retained: RetainedReviewStore = {
-      ...inner,
-      read: (sessionID) =>
-        new Promise<Awaited<ReturnType<RetainedReviewStore["read"]>>>((resolve) => {
-          markStarted();
-          release = () => {
-            void inner.read(sessionID).then(resolve);
-          };
-        }),
-    };
+  test("forget during the retained hydration prevents delivery and telemetry", async () => {
+    const blocked = deferredReadStorage();
+    const retained = createRetainedReviewStore(blocked.storage);
     const harness = await observerHarness({
       answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
       retained,
     });
     const pending = fireHook(harness.context, dispatch());
-    await started;
+    await blocked.started;
 
     harness.registration.forget("ses_1" as never);
-    release();
+    blocked.releaseRead();
     await pending;
 
     expect(harness.consultations).toHaveLength(0);
     expect(harness.deliveries).toHaveLength(0);
     expect(harness.retainedDeliveries).toHaveLength(0);
     expect(harness.events).toHaveLength(0);
-    expect(await inner.read("ses_1" as never)).toBeUndefined();
+    await settle();
+    expect(blocked.values.has(retainedReviewKey("ses_1" as never))).toBe(false);
   });
 
   test("forget after an accepted review drops the overlay and the durable entry", async () => {
@@ -1839,6 +1864,47 @@ describe("active delivery, telemetry, and retention", () => {
     expect(system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toHaveLength(1);
     expect((value as { messages: unknown[] }).messages).toHaveLength(1);
   });
+
+  test("a blocked telemetry write never delays the hook and its late rejection stays consumed", async () => {
+    const recordCalls: TelemetryEventInput[] = [];
+    let rejectWrite: (reason: unknown) => void = () => undefined;
+    const telemetry = {
+      record: (event: TelemetryEventInput) => {
+        recordCalls.push(event);
+        return new Promise<void>((_resolve, reject) => {
+          rejectWrite = reject;
+        });
+      },
+    };
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on("unhandledRejection", onRejection);
+    try {
+      const harness = await observerHarness({
+        answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+        telemetry,
+      });
+      const value = dispatch();
+
+      await fireHook(harness.context, value);
+
+      expect(harness.deliveries).toHaveLength(1);
+      expect(harness.lifecycle.status("ses_1").lastFinished?.outcome).toBe("completed");
+      expect(harness.lifecycle.status("ses_1").latest?.advice).toBe(ADVICE);
+      expect(recordCalls).toHaveLength(1);
+      const system = (value as { system: Array<{ text?: string }> }).system;
+      expect(system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toHaveLength(1);
+
+      rejectWrite(new Error("telemetry storage down"));
+      await settle();
+
+      expect(rejections).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
+  });
 });
 
 describe("retention fail-open and advisor block exclusion", () => {
@@ -1860,11 +1926,11 @@ describe("retention fail-open and advisor block exclusion", () => {
     expect((value as { messages: unknown[] }).messages).toHaveLength(1);
   });
 
-  test("a throwing retained read fails open and still delivers", async () => {
+  test("a throwing retained lookup fails open and still delivers", async () => {
     const inner = createRetainedReviewStore(memoryStorage());
     const retained: RetainedReviewStore = {
       ...inner,
-      read: async () => {
+      peek: () => {
         throw new Error("storage read rejected");
       },
     };
@@ -1879,6 +1945,27 @@ describe("retention fail-open and advisor block exclusion", () => {
     expect(harness.deliveries).toHaveLength(1);
     expect(harness.retainedDeliveries).toHaveLength(0);
     expect(harness.events[0]).toMatchObject({ decision: "accept", delivered: true });
+    const system = (value as { system: Array<{ text?: string }> }).system;
+    expect(system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toHaveLength(1);
+  });
+
+  test("a never-resolving retained hydration never blocks the hook, routing, or delivery", async () => {
+    const blocked = deferredReadStorage();
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      retained: createRetainedReviewStore(blocked.storage),
+    });
+    const value = dispatch();
+
+    await fireHook(harness.context, value);
+
+    expect(blocked.reads()).toBe(1);
+    expect(harness.evaluated).toHaveLength(1);
+    expect(harness.consultations).toHaveLength(1);
+    expect(harness.deliveries).toHaveLength(1);
+    expect(harness.retainedDeliveries).toHaveLength(0);
+    expect(harness.events).toHaveLength(1);
+    expect(harness.lifecycle.status("ses_1").lastFinished?.outcome).toBe("completed");
     const system = (value as { system: Array<{ text?: string }> }).system;
     expect(system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toHaveLength(1);
   });
@@ -1919,6 +2006,21 @@ describe("retention fail-open and advisor block exclusion", () => {
     expect(harness.retainedDeliveries).toHaveLength(0);
     const system = (value as { system: Array<{ text?: string }> }).system;
     expect(system.some((part) => (part.text ?? "").includes(RETAINED_REVIEW_HEADER))).toBe(false);
+  });
+
+  test("observe mode never hydrates the retained overlay for routing", async () => {
+    const blocked = deferredReadStorage();
+    const harness = await observerHarness({
+      mode: "observe",
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      retained: createRetainedReviewStore(blocked.storage),
+    });
+
+    await fireHook(harness.context, dispatch());
+
+    expect(blocked.reads()).toBe(0);
+    expect(harness.evaluated).toHaveLength(1);
+    expect(harness.events).toHaveLength(1);
   });
 
   test("current and retained advisor blocks stay out of the fingerprint and Jev projection", async () => {

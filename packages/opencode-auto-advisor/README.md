@@ -161,7 +161,11 @@ Automatic advice is delivered into privileged system context first; the latest
 successful automatic review is then superseded in memory immediately and
 persisted best-effort as one small bounded record per session
 (`auto-advisor:retained:<sessionID>`, internal 8192-char limit), not a history
-archive. The hook never waits for storage: a storage failure cannot delay or
+archive. The hook never waits for storage in either direction: telemetry
+persistence is fire-and-forget with failures consumed, and retained hydration
+runs once per session in the background while the hook uses only the
+synchronous cached state (a first request after process startup may miss
+historical advice; `observe` never hydrates). A storage failure cannot delay or
 suppress otherwise valid current advice, and the new review stays authoritative
 in-process (only restart durability may be lost). An oversized review is
 delivered in full but not retained, and still supersedes the previous retained

@@ -455,7 +455,12 @@ capture-normalized input and never builds or re-normalizes entries itself.
   Advice is delivered into privileged `event.system` first; the latest successful
   automatic review is then superseded in memory immediately and persisted
   best-effort asynchronously for future requests — the hook never awaits
-  storage. A storage failure never delays or suppresses otherwise valid current
+  storage in either direction. Telemetry persistence is fire-and-forget with
+  failures consumed; retained hydration runs once per session in the background
+  and the hook uses only the synchronous cached state (a first request after
+  process startup may miss historical advice; absence, failure, and malformed
+  reads are cached; `observe` never hydrates). A storage failure never delays or
+  suppresses otherwise valid current
   advice, and the new review stays authoritative in-process (only restart
   durability may be lost). An oversized review is delivered in full but not
   retained, and still supersedes the previous retained review. A dispatch with

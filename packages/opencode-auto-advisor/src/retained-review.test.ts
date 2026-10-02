@@ -65,6 +65,43 @@ function memoryStorage() {
   };
 }
 
+function blockedReadStorage() {
+  const values = new Map<string, unknown>();
+  const readReleases: Array<() => void> = [];
+  const removeReleases: Array<() => void> = [];
+  let released = false;
+  const storage: RetainedReviewStorage = {
+    get: async (key) => {
+      const captured = values.get(key);
+      if (released) return captured;
+      await new Promise<void>((resolve) => {
+        readReleases.push(resolve);
+      });
+      return captured;
+    },
+    set: async (key, entry) => {
+      values.set(key, entry);
+    },
+    remove: async (key) => {
+      await new Promise<void>((resolve) => {
+        removeReleases.push(resolve);
+      });
+      values.delete(key);
+    },
+  };
+  return {
+    storage,
+    values,
+    releaseRead: () => {
+      released = true;
+      for (const release of readReleases.splice(0)) release();
+    },
+    releaseRemove: () => {
+      for (const release of removeReleases.splice(0)) release();
+    },
+  };
+}
+
 describe("retained review store", () => {
   test("keeps the latest review in memory immediately and persists it under the plugin namespace", async () => {
     const memory = memoryStorage();
@@ -267,6 +304,86 @@ describe("retained review store", () => {
       stored: false,
       reason: "deleted",
     });
+  });
+});
+
+describe("retained review hydration", () => {
+  test("a cold hydration caches absence and later lookups never re-read storage", async () => {
+    let reads = 0;
+    const storage: RetainedReviewStorage = {
+      get: async () => {
+        reads += 1;
+        return undefined;
+      },
+      set: async () => undefined,
+      remove: async () => undefined,
+    };
+    const store = createRetainedReviewStore(storage);
+
+    expect(store.peek(SESSION)).toBeUndefined();
+    await settle();
+    expect(reads).toBe(1);
+
+    expect(store.peek(SESSION)).toBeUndefined();
+    expect(await store.read(SESSION)).toBeUndefined();
+    expect(reads).toBe(1);
+  });
+
+  test("a late hydration never overwrites a review replaced in memory", async () => {
+    const blocked = blockedReadStorage();
+    blocked.values.set(retainedReviewKey(SESSION), {
+      advice: "old durable review",
+      turnKey: "msg-1",
+    });
+    const store = createRetainedReviewStore(blocked.storage);
+
+    expect(store.peek(SESSION)).toBeUndefined();
+    store.replace(SESSION, { advice: "fresh review", turnKey: "msg-2" });
+    blocked.releaseRead();
+    await settle();
+
+    expect(store.peek(SESSION)).toEqual({ advice: "fresh review", turnKey: "msg-2" });
+    expect(await store.read(SESSION)).toEqual({ advice: "fresh review", turnKey: "msg-2" });
+  });
+
+  test("forget prevents a late hydration from resurrecting the review", async () => {
+    const blocked = blockedReadStorage();
+    blocked.values.set(retainedReviewKey(SESSION), {
+      advice: "old durable review",
+      turnKey: "msg-1",
+    });
+    const store = createRetainedReviewStore(blocked.storage);
+
+    expect(store.peek(SESSION)).toBeUndefined();
+    store.forget(SESSION);
+    blocked.releaseRead();
+    await settle();
+
+    expect(store.peek(SESSION)).toBeUndefined();
+    expect(blocked.values.has(retainedReviewKey(SESSION))).toBe(true);
+    blocked.releaseRemove();
+    await settle();
+    expect(blocked.values.has(retainedReviewKey(SESSION))).toBe(false);
+    expect(await store.read(SESSION)).toBeUndefined();
+  });
+
+  test("clear on an unknown session tombstones the durable review", async () => {
+    const blocked = blockedReadStorage();
+    blocked.values.set(retainedReviewKey(SESSION), {
+      advice: "old durable review",
+      turnKey: "msg-1",
+    });
+    const store = createRetainedReviewStore(blocked.storage);
+
+    store.clear(SESSION);
+    await settle();
+
+    expect(store.peek(SESSION)).toBeUndefined();
+    blocked.releaseRemove();
+    await settle();
+    expect(blocked.values.has(retainedReviewKey(SESSION))).toBe(false);
+    expect(store.peek(SESSION)).toBeUndefined();
+    expect(await store.read(SESSION)).toBeUndefined();
   });
 });
 

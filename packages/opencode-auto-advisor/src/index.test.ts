@@ -457,6 +457,9 @@ describe("plugin storage fail-open", () => {
     expect(delivered).toHaveLength(1);
     expect(delivered[0]?.text).toContain("advisor advice");
     expect(values.has(retainedReviewKey("ses_1" as never))).toBe(false);
+    // Telemetry is enqueued off the hook critical path, so settle the detached
+    // store queue before asserting on its durable event.
+    await ticks();
     const event = [...values.values()].find(
       (value) => (value as { decision?: string }).decision === "accept",
     );

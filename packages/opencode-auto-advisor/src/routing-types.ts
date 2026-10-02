@@ -37,7 +37,7 @@ export interface RoutingStateCapture {
 export interface RoutingOpportunity {
   readonly sessionID: SessionID;
   readonly kind?: DispatchKind;
-  readonly capture: () => Promise<RoutingStateCapture>;
+  readonly capture: (mode: RoutingMode) => Promise<RoutingStateCapture>;
   readonly onAdvisorStart?: () => void;
   readonly isCurrent?: () => boolean;
 }

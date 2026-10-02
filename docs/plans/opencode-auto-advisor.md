@@ -344,7 +344,7 @@ Automatic advice is plugin-owned state associated with the session and originati
 For v1:
 
 1. inject current advice into privileged `session.context.system` first, without duplication or advice-created messages; a dispatch with fresh advice carries fresh advice only, while the previous review feeds the new Advisor consultation as historical context;
-2. then supersede the latest successful review in memory immediately and persist it best-effort asynchronously as one bounded record per session (newer replaces older at once, never after the write; oversize delivered but not retained, and still supersedes the old review; a failed write keeps the new review authoritative in-process and only risks restart durability) — the hook never awaits storage;
+2. then supersede the latest successful review in memory immediately and persist it best-effort asynchronously as one bounded record per session (newer replaces older at once, never after the write; oversize delivered but not retained, and still supersedes the old review; a failed write keeps the new review authoritative in-process and only risks restart durability) — the hook never awaits storage in either direction (telemetry writes are fire-and-forget; retained reads hydrate once per session in the background and the hook uses only the synchronous cached state);
 3. never let a storage failure delay or suppress otherwise valid current advice;
 4. reinject the retained review on later eligible requests as clearly historical reviewer guidance;
 5. no compaction protocol: the retained note lives outside the transcript and survives OpenCode compaction naturally; deletion clears it and invalidates pending callbacks.

@@ -24,6 +24,7 @@ export type RetainedReviewWrite =
 
 export interface RetainedReviewStore {
   readonly read: (sessionID: SessionID) => Promise<RetainedReview | undefined>;
+  readonly peek: (sessionID: SessionID) => RetainedReview | undefined;
   readonly replace: (sessionID: SessionID, review: RetainedReview) => RetainedReviewWrite;
   readonly clear: (sessionID: SessionID) => void;
   readonly forget: (sessionID: SessionID) => void;
@@ -47,6 +48,8 @@ interface SessionState {
   review: RetainedReview | undefined;
   queue: Promise<void>;
   pendingDelete: boolean;
+  hydrated: boolean;
+  hydration: Promise<void> | undefined;
 }
 
 export function createRetainedReviewStore(storage: RetainedReviewStorage): RetainedReviewStore {
@@ -57,7 +60,8 @@ export function createRetainedReviewStore(storage: RetainedReviewStorage): Retai
   // only a best-effort backing. A storage failure may lose restart durability,
   // but it must never roll back the latest review or resurrect a superseded one.
   // Host storage is assumed to always settle: a hung store stalls only that
-  // session's durability queue, never the hook (the hook never awaits it).
+  // session's durability queue and background hydration, never the hook (the
+  // hook only peeks synchronously and never awaits storage).
   const enqueue = (state: SessionState, task: () => Promise<void>): void => {
     state.queue = state.queue.then(task, task).then(
       () => undefined,
@@ -72,9 +76,38 @@ export function createRetainedReviewStore(storage: RetainedReviewStorage): Retai
       review: undefined,
       queue: Promise.resolve(),
       pendingDelete: false,
+      hydrated: false,
+      hydration: undefined,
     };
     sessions.set(sessionID, created);
     return created;
+  };
+
+  // Exactly one background read per session state. A local replacement, clear,
+  // or forget makes the overlay authoritative and suppresses the late result;
+  // a failed or malformed read caches absence for this attempt.
+  const hydrate = (sessionID: SessionID, state: SessionState): Promise<void> => {
+    const pending = (async () => {
+      let parsed: RetainedReview | undefined;
+      try {
+        parsed = parseRetainedReview(await storage.get(retainedReviewKey(sessionID)));
+      } catch {
+        parsed = undefined;
+      }
+      if (disposed) return;
+      if (sessions.get(sessionID) !== state) return;
+      if (state.hydrated || state.pendingDelete) return;
+      state.review = parsed;
+      state.hydrated = true;
+    })().then(
+      () => undefined,
+      () => undefined,
+    );
+    state.hydration = pending;
+    void pending.then(() => {
+      if (state.hydration === pending) state.hydration = undefined;
+    });
+    return pending;
   };
 
   const writeDurable = async (sessionID: SessionID, review: RetainedReview): Promise<void> => {
@@ -100,23 +133,24 @@ export function createRetainedReviewStore(storage: RetainedReviewStorage): Retai
     read: async (sessionID) => {
       if (disposed) return undefined;
       const state = sessions.get(sessionID);
-      if (state !== undefined) return state.review;
-      let parsed: RetainedReview | undefined;
-      try {
-        parsed = parseRetainedReview(await storage.get(retainedReviewKey(sessionID)));
-      } catch {
+      if (state?.hydrated) return state.review;
+      if (state?.pendingDelete) return undefined;
+      const target = state ?? stateFor(sessionID);
+      await (state?.hydration ?? hydrate(sessionID, target));
+      return sessions.get(sessionID)?.review;
+    },
+
+    peek: (sessionID) => {
+      if (disposed) return undefined;
+      const state = sessions.get(sessionID);
+      if (state === undefined) {
+        void hydrate(sessionID, stateFor(sessionID));
         return undefined;
       }
-      const raced = sessions.get(sessionID);
-      if (raced !== undefined) return raced.review;
-      if (parsed !== undefined) {
-        sessions.set(sessionID, {
-          review: parsed,
-          queue: Promise.resolve(),
-          pendingDelete: false,
-        });
-      }
-      return parsed;
+      if (state.hydrated) return state.review;
+      if (state.pendingDelete) return undefined;
+      if (state.hydration === undefined) void hydrate(sessionID, state);
+      return undefined;
     },
 
     replace: (sessionID, review) => {
@@ -124,6 +158,7 @@ export function createRetainedReviewStore(storage: RetainedReviewStorage): Retai
       if (review.advice.trim().length === 0) return { stored: false, reason: "empty" };
       const state = stateFor(sessionID);
       state.pendingDelete = false;
+      state.hydrated = true;
       if (review.advice.length > RETAINED_REVIEW_MAX_CHARS) {
         state.review = undefined;
         enqueue(state, () => removeDurable(sessionID));
@@ -137,9 +172,11 @@ export function createRetainedReviewStore(storage: RetainedReviewStorage): Retai
 
     clear: (sessionID) => {
       if (disposed) return;
-      const state = sessions.get(sessionID);
-      if (state === undefined) return;
+      // Tombstone even unknown sessions: otherwise a later peek would hydrate
+      // the surviving durable entry and resurrect what was cleared.
+      const state = stateFor(sessionID);
       state.review = undefined;
+      state.hydrated = true;
       enqueue(state, () => removeDurable(sessionID));
     },
 
