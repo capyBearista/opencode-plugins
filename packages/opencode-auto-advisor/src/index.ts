@@ -1,13 +1,5 @@
 import { Plugin } from "@opencode/plugin";
 import type { Context as PluginContext } from "@opencode/plugin/promise/plugin";
-import {
-  type AdviceCompactionRegistration,
-  readCompactionEndedEvent,
-  readCompactionFailedEvent,
-  registerAdviceCompaction,
-} from "./advice-compaction.js";
-import { retainedReviewEntry } from "./advice-delivery.js";
-import { type AdviceHistory, type AdviceRecord, createAdviceHistory } from "./advice-history.js";
 import { buildAdvisorProjection } from "./advisor-projection.js";
 import { ADVISOR_TOOL_DESCRIPTION } from "./advisor-prompts.js";
 import {
@@ -25,6 +17,12 @@ import type { SessionID } from "./messages.js";
 import { computeInputBudget, createModelLimitResolver, type ModelCatalog } from "./model-limits.js";
 import { createOperationLifetime } from "./operation-lifetime.js";
 import { turnKeyForHistory } from "./request.js";
+import {
+  createRetainedReviewStore,
+  type RetainedReview,
+  type RetainedReviewStore,
+  retainedReviewEntry,
+} from "./retained-review.js";
 import { createReviewLifecycle } from "./review-lifecycle.js";
 import { registerReviewRpc } from "./review-rpc.js";
 import { registerRoutingObserver } from "./routing-observer.js";
@@ -70,7 +68,7 @@ export async function registerPlugin(
   const service = buildAdvisorService(context, { loadConfig: load });
   const snapshots = createSnapshotStore();
   const telemetry = context.storage ? createTelemetryStore(context.storage) : undefined;
-  const history = context.storage ? createAdviceHistory(context.storage) : undefined;
+  const retained = context.storage ? createRetainedReviewStore(context.storage) : undefined;
   const lifecycle = createReviewLifecycle();
   const zen = createZenEvaluation({ connection: context.integration?.connection });
   const router = options.router ?? createZenRouter({ loadConfig: load, evaluation: zen });
@@ -122,13 +120,9 @@ export async function registerPlugin(
           const inputBudget = limits === undefined ? undefined : computeInputBudget(limits);
           if (inputBudget === undefined)
             throw new Error(`advisor model limits are unavailable for ${refKey(advisorModel)}`);
-          const retained = await explicitRetainedReviews(
-            history,
-            compaction,
-            toolContext.sessionID,
-          );
+          const retainedReview = await loadRetainedReview(retained, toolContext.sessionID);
           if (!isCurrent()) throw new AdvisorInvalidatedError();
-          const entry = retainedReviewEntry(retained);
+          const entry = retainedReviewEntry(retainedReview);
           const projection = buildAdvisorProjection(
             entry ? [...merged.entries, entry] : merged.entries,
             { inputBudget },
@@ -165,15 +159,10 @@ export async function registerPlugin(
     snapshots,
     resolveLimits,
     ...(telemetry ? { telemetry } : {}),
-    ...(history ? { history } : {}),
+    ...(retained ? { retained } : {}),
     lifecycle,
-    absorbed: (sessionID) => compaction?.absorbed(sessionID) ?? new Set(),
     operations,
   });
-
-  const compaction: AdviceCompactionRegistration | undefined = history
-    ? await registerAdviceCompaction(context.session, { history, eligibility })
-    : undefined;
 
   const rpc =
     context.rpc && telemetry ? await registerTelemetryRpc(context.rpc, telemetry) : undefined;
@@ -186,12 +175,9 @@ export async function registerPlugin(
         operations.forget(sessionID);
         snapshots.forget(sessionID);
         routing.forget(sessionID);
-        compaction?.forget(sessionID);
         lifecycle.forget(sessionID);
-        void history?.forget(sessionID).catch(() => undefined);
+        void retained?.remove(sessionID).catch(() => undefined);
       },
-      compactionEnded: (sessionID, text) => compaction?.ended(sessionID, text),
-      compactionFailed: (sessionID) => compaction?.failed(sessionID),
     });
   }
 
@@ -199,34 +185,27 @@ export async function registerPlugin(
     if (disposed) return;
     disposed = true;
     operations.dispose();
-    compaction?.invalidate();
     controller.abort();
     await routing.dispose();
     await reviewRpc?.dispose();
     await rpc?.dispose();
     await zen.dispose();
-    await compaction?.dispose();
     await registration.dispose();
-    history?.dispose();
+    retained?.dispose();
     lifecycle.dispose();
   };
 }
 
-async function explicitRetainedReviews(
-  history: AdviceHistory | undefined,
-  compaction: AdviceCompactionRegistration | undefined,
+async function loadRetainedReview(
+  store: RetainedReviewStore | undefined,
   sessionID: SessionID,
-): Promise<readonly AdviceRecord[]> {
-  if (history === undefined) return [];
-  let records: readonly AdviceRecord[];
+): Promise<RetainedReview | undefined> {
+  if (store === undefined) return undefined;
   try {
-    records = await history.get(sessionID);
+    return await store.read(sessionID);
   } catch {
-    return [];
+    return undefined;
   }
-  const absorbed = compaction?.absorbed(sessionID);
-  if (absorbed === undefined || absorbed.size === 0) return records;
-  return records.filter((record) => !absorbed.has(record.id));
 }
 
 function hostModelCatalog(context: AdvisorContext): ModelCatalog | undefined {
@@ -238,8 +217,6 @@ function hostModelCatalog(context: AdvisorContext): ModelCatalog | undefined {
 
 interface EventHandlers {
   readonly deleted: (sessionID: SessionID) => void;
-  readonly compactionEnded: (sessionID: SessionID, text: string) => void;
-  readonly compactionFailed: (sessionID: SessionID) => void;
 }
 
 function watchEvents(
@@ -250,17 +227,7 @@ function watchEvents(
   void (async () => {
     for await (const payload of event.subscribe({ signal })) {
       const deleted = readDeletedSessionID(payload);
-      if (deleted !== undefined) {
-        handlers.deleted(deleted);
-        continue;
-      }
-      const ended = readCompactionEndedEvent(payload);
-      if (ended !== undefined) {
-        handlers.compactionEnded(ended.sessionID, ended.text);
-        continue;
-      }
-      const failed = readCompactionFailedEvent(payload);
-      if (failed !== undefined) handlers.compactionFailed(failed);
+      if (deleted !== undefined) handlers.deleted(deleted);
     }
   })().catch(() => undefined);
 }

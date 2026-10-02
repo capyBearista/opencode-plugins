@@ -2,11 +2,9 @@ import type { Context as PluginContext } from "@opencode/plugin/promise/plugin";
 import {
   type AdviceDeliveryInput,
   deliverAdvice,
-  deliverRetainedReviews,
+  deliverRetainedReview,
   type RetainedReviewDeliveryInput,
-  retainedReviewEntry,
 } from "./advice-delivery.js";
-import type { AdviceHistory, AdviceRecord, AdviceReservation } from "./advice-history.js";
 import type { AdvisorProjectionBuilder } from "./advisor-projection.js";
 import { EXECUTOR_ADVISOR_GUIDANCE } from "./advisor-prompts.js";
 import type { AdvisorService } from "./advisor-service.js";
@@ -17,17 +15,18 @@ import type { AssembledRequest, SessionID } from "./messages.js";
 import type { ModelLimitResolver } from "./model-limits.js";
 import { createOperationLifetime, type OperationLifetime } from "./operation-lifetime.js";
 import { type CapturedRequest, captureAssembledRequest } from "./request.js";
-import type { ReviewHandle, ReviewLifecycle } from "./review-lifecycle.js";
 import {
-  ADVISOR_HISTORY_CAPACITY_SKIP_REASON,
-  ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON,
-  createRoutingDomain,
-} from "./routing.js";
-import type { AdvisorRouter, AutomaticPreparation, RoutingDecision } from "./routing-types.js";
+  RETAINED_REVIEW_OVERSIZE_SKIP_REASON,
+  type RetainedReview,
+  type RetainedReviewStore,
+  type RetainedReviewWrite,
+  retainedReviewEntry,
+} from "./retained-review.js";
+import type { ReviewHandle, ReviewLifecycle } from "./review-lifecycle.js";
+import { createRoutingDomain } from "./routing.js";
+import type { AdvisorRouter, RoutingDecision } from "./routing-types.js";
 import type { SnapshotStore } from "./snapshot-store.js";
 import type { TelemetryEventInput, TelemetrySink } from "./telemetry-types.js";
-
-export const ADVISOR_PERSISTENCE_ERROR_CLASS = "PersistenceError";
 
 type ObserverContext = Pick<PluginContext, "session"> & Partial<Pick<PluginContext, "agent">>;
 
@@ -41,9 +40,8 @@ export interface RoutingObserverDeps {
   readonly telemetry?: TelemetrySink;
   readonly deliver?: (input: AdviceDeliveryInput) => void;
   readonly deliverRetained?: (input: RetainedReviewDeliveryInput) => void;
-  readonly history?: AdviceHistory;
+  readonly retained?: RetainedReviewStore;
   readonly lifecycle?: ReviewLifecycle;
-  readonly absorbed?: (sessionID: SessionID) => ReadonlySet<string>;
   readonly operations?: OperationLifetime;
 }
 
@@ -107,8 +105,7 @@ export async function registerRoutingObserver(
       });
       injectGuidance(dispatch, ownedGuidance);
 
-      let grant: AdviceReservation | undefined;
-      let retained: readonly AdviceRecord[] = [];
+      let retained: RetainedReview | undefined;
       let handle: ReviewHandle | undefined;
       let advisorStartedAt = 0;
       try {
@@ -119,7 +116,7 @@ export async function registerRoutingObserver(
           isCurrent,
           capture: async () => {
             retained = await loadRetained(deps, captured.sessionID);
-            const entry = retainedReviewEntry(visibleRetained(deps, captured.sessionID, retained));
+            const entry = retainedReviewEntry(retained);
             return {
               entries: captured.entries,
               lastUserMessageID: captured.turnKey,
@@ -127,10 +124,6 @@ export async function registerRoutingObserver(
               ...(entry ? { advisorEntries: [entry] } : {}),
             };
           },
-          prepareAutomatic: async () =>
-            prepareAutomatic(deps, captured.sessionID, (reservation) => {
-              grant = reservation;
-            }),
           onAdvisorStart: () => {
             if (!isCurrent()) return;
             try {
@@ -147,24 +140,25 @@ export async function registerRoutingObserver(
           decision.action === "accept" &&
           decision.mode === "active" &&
           decision.advice !== undefined;
-        const persisted = accepted
-          ? await commitAdvice(deps, grant, captured, decision)
-          : undefined;
-        if (!isCurrent()) return;
-        const persistenceFailed = accepted && persisted === undefined;
         if (decision.mode === "active") {
-          injectRetained(
-            deps,
-            dispatch,
-            ownedDelivery,
-            retainedInjected,
-            visibleRetained(deps, captured.sessionID, retained),
-          );
+          injectRetained(deps, dispatch, ownedDelivery, retainedInjected, retained);
         }
-        const effective = persistenceFailed ? persistenceFailure(decision) : decision;
-        const delivered = persistenceFailed
-          ? false
-          : deliverAccepted(deps, dispatch, ownedDelivery, decision);
+        let effective = decision;
+        if (accepted && decision.advice !== undefined) {
+          const retention = await retainAdvice(
+            deps,
+            captured.sessionID,
+            captured.turnKey,
+            decision.advice,
+          );
+          if (!isCurrent()) return;
+          if (retention?.stored === false && retention.reason === "oversize") {
+            // Advice is still delivered in full; skipReason is the debug
+            // diagnostic that records the retention skip on an accepted event.
+            effective = { ...decision, skipReason: RETAINED_REVIEW_OVERSIZE_SKIP_REASON };
+          }
+        }
+        const delivered = deliverAccepted(deps, dispatch, ownedDelivery, effective);
         finishLifecycle(deps, handle, effective, delivered);
         if (!isCurrent()) return;
         await recordTelemetry(deps, captured, effective, delivered, Date.now() - started, {
@@ -174,8 +168,6 @@ export async function registerRoutingObserver(
         });
       } catch {
         return;
-      } finally {
-        if (grant) deps.history?.release(grant);
       }
     } finally {
       token.release();
@@ -197,76 +189,30 @@ export async function registerRoutingObserver(
   };
 }
 
-async function prepareAutomatic(
-  deps: RoutingObserverDeps,
-  sessionID: SessionID,
-  hold: (reservation: AdviceReservation) => void,
-): Promise<AutomaticPreparation> {
-  if (deps.history === undefined) {
-    return { ready: false, skipReason: ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON };
-  }
-  try {
-    const reservation = await deps.history.reserve(sessionID);
-    if (reservation === undefined) {
-      return { ready: false, skipReason: ADVISOR_HISTORY_CAPACITY_SKIP_REASON };
-    }
-    hold(reservation);
-    return { ready: true };
-  } catch {
-    return { ready: false, skipReason: ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON };
-  }
-}
-
 async function loadRetained(
   deps: RoutingObserverDeps,
   sessionID: SessionID,
-): Promise<readonly AdviceRecord[]> {
-  if (deps.history === undefined) return [];
+): Promise<RetainedReview | undefined> {
+  if (deps.retained === undefined) return undefined;
   try {
-    return await deps.history.get(sessionID);
+    return await deps.retained.read(sessionID);
   } catch {
-    return [];
+    return undefined;
   }
 }
 
-function visibleRetained(
+async function retainAdvice(
   deps: RoutingObserverDeps,
   sessionID: SessionID,
-  records: readonly AdviceRecord[],
-): readonly AdviceRecord[] {
-  const absorbed = deps.absorbed?.(sessionID);
-  if (absorbed === undefined || absorbed.size === 0) return records;
-  return records.filter((record) => !absorbed.has(record.id));
-}
-
-async function commitAdvice(
-  deps: RoutingObserverDeps,
-  grant: AdviceReservation | undefined,
-  captured: CapturedRequest,
-  decision: RoutingDecision,
-): Promise<AdviceRecord | undefined> {
-  if (grant === undefined || deps.history === undefined || decision.advice === undefined) {
-    return undefined;
-  }
+  turnKey: string,
+  advice: string,
+): Promise<RetainedReviewWrite | undefined> {
+  if (deps.retained === undefined) return undefined;
   try {
-    return await deps.history.commit(grant, {
-      turnKey: captured.turnKey,
-      materialFingerprint: decision.fingerprint ?? "",
-      advice: decision.advice,
-    });
+    return await deps.retained.write(sessionID, { advice, turnKey });
   } catch {
     return undefined;
   }
-}
-
-function persistenceFailure(decision: RoutingDecision): RoutingDecision {
-  return {
-    ...decision,
-    action: "fail",
-    error: "automatic advice persistence failed",
-    failure: { errorClass: ADVISOR_PERSISTENCE_ERROR_CLASS, disposition: "terminal" },
-    advisorOutcome: "failed",
-  };
 }
 
 function injectRetained(
@@ -274,15 +220,15 @@ function injectRetained(
   dispatch: AssembledRequest,
   owned: WeakSet<object>,
   injected: WeakSet<object>,
-  records: readonly AdviceRecord[],
+  review: RetainedReview | undefined,
 ): void {
-  if (records.length === 0) return;
+  if (review === undefined) return;
   if (injected.has(dispatch)) return;
   const system = dispatch.system;
   if (!Array.isArray(system)) return;
   const before = system.length;
   try {
-    (deps.deliverRetained ?? deliverRetainedReviews)({ system, records });
+    (deps.deliverRetained ?? deliverRetainedReview)({ system, review });
   } catch {
     return;
   }

@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ADVISOR_DELIVERY_PREFIX } from "./advice-delivery.js";
-import { ADVICE_HISTORY_STORAGE_KEY } from "./advice-history.js";
 import { defaultConfig } from "./config.js";
 import plugin, { ADVISOR_TOOL_DESCRIPTION, ADVISOR_TOOL_NAME, registerPlugin } from "./index.js";
+import { retainedReviewKey } from "./retained-review.js";
 
 type AddedTool = {
   name: string;
@@ -195,13 +195,14 @@ describe("@capybearista/opencode-auto-advisor", () => {
     );
     expect(delivered).toHaveLength(1);
     expect(delivered[0]?.text).toContain("advice");
-    expect(base.hooks).toEqual(["context", "compaction"]);
+    expect(base.hooks).toEqual(["context"]);
     expect(rpcIDs).toEqual(["experimental.auto-advisor", "experimental.auto-advisor.review"]);
     expect(values.has("head")).toBe(true);
     const stored = [...values.values()].find(
       (value) => (value as { decision?: string }).decision === "accept",
     );
     expect(stored).toMatchObject({ mode: "active", delivered: true });
+    expect(values.get(retainedReviewKey("ses_1" as never))).toMatchObject({ advice: "advice" });
     expect(signals).toHaveLength(1);
 
     await cleanup?.();
@@ -210,7 +211,6 @@ describe("@capybearista/opencode-auto-advisor", () => {
       "hook:context",
       "rpc:experimental.auto-advisor.review",
       "rpc:experimental.auto-advisor",
-      "hook:compaction",
       `tool:${ADVISOR_TOOL_NAME}`,
     ]);
   });
@@ -290,18 +290,13 @@ const ticks = async (count = 3): Promise<void> => {
   }
 };
 
-function pluginStorage(holdHistoryRead?: Gate) {
+function pluginStorage(writeGate?: { hold: () => Promise<void> }) {
   const values = new Map<string, unknown>();
   return {
     values,
-    get: async (key: string) => {
-      if (holdHistoryRead && key === ADVICE_HISTORY_STORAGE_KEY) {
-        holdHistoryRead.markStarted();
-        await holdHistoryRead.promise;
-      }
-      return values.get(key);
-    },
+    get: async (key: string) => values.get(key),
     set: async (key: string, value: unknown) => {
+      if (key === retainedReviewKey("ses_1" as never)) await writeGate?.hold();
       values.set(key, value);
     },
     remove: async (key: string) => {
@@ -311,52 +306,40 @@ function pluginStorage(holdHistoryRead?: Gate) {
   };
 }
 
-function seedRetained(values: Map<string, unknown>): void {
-  values.set(ADVICE_HISTORY_STORAGE_KEY, {
-    version: 1,
-    nextSequence: 2,
-    sessions: [
-      {
-        sessionID: "ses_1",
-        records: [
-          {
-            id: "adv_seed_1",
-            sequence: 1,
-            turnKey: "turn-1",
-            materialFingerprint: "f".repeat(64),
-            advice: "seeded review",
-          },
-        ],
-      },
-    ],
-  });
+function storedReview(values: Map<string, unknown>): string | undefined {
+  const value = values.get(retainedReviewKey("ses_1" as never)) as
+    | { readonly advice?: string }
+    | undefined;
+  return value?.advice;
 }
 
-function storedAdvice(values: Map<string, unknown>): readonly string[] {
-  const value = values.get(ADVICE_HISTORY_STORAGE_KEY) as
-    | {
-        readonly sessions: readonly {
-          readonly sessionID: string;
-          readonly records: readonly { readonly advice: string }[];
-        }[];
-      }
-    | undefined;
-  return (
-    value?.sessions
-      .find((entry) => entry.sessionID === "ses_1")
-      ?.records.map((record) => record.advice) ?? []
-  );
+function retainedWriteGate() {
+  let release: (() => void) | undefined;
+  let markStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  return {
+    started,
+    hold: async () => {
+      markStarted?.();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    },
+    release: () => release?.(),
+  };
 }
 
 async function compositionHarness(
   options: {
     readonly sessionGet?: () => Promise<{ readonly parentID?: string } | undefined>;
     readonly holdContextDisposer?: Gate;
-    readonly holdHistoryRead?: Gate;
+    readonly writeGate?: { hold: () => Promise<void> };
   } = {},
 ) {
   const base = createTestContext();
-  const storage = pluginStorage(options.holdHistoryRead);
+  const storage = pluginStorage(options.writeGate);
   const pushes: unknown[] = [];
   let wake: (() => void) | undefined;
   let closed = false;
@@ -427,118 +410,116 @@ async function compositionHarness(
   };
 }
 
-describe("plugin cleanup composition barrier", () => {
-  test("cleanup invalidates a pending compaction eligibility before earlier disposer awaits", async () => {
-    const eligibility = gated();
-    const disposer = gated();
-    const h = await compositionHarness({
-      sessionGet: async () => {
-        eligibility.markStarted();
-        await eligibility.promise;
-        return { parentID: undefined, permissions: [] };
+function primaryDispatch() {
+  return {
+    sessionID: "ses_1",
+    agent: "build",
+    model: { providerID: "opencode", id: "jev-1.13" },
+    system: [] as Array<{ type: string; text: string }>,
+    messages: [{ id: "msg-user-1", role: "user", content: [{ type: "text", text: "hi" }] }],
+    options: {},
+    tools: { advisor: { description: "advisor", input: { type: "object" } } },
+  };
+}
+
+describe("plugin storage fail-open", () => {
+  test("a throwing ctx.storage write never rewrites accept and still delivers", async () => {
+    const base = createTestContext();
+    const values = new Map<string, unknown>();
+    const ctx = {
+      ...base.ctx,
+      storage: {
+        get: async (key: string) => values.get(key),
+        set: async (key: string, value: unknown) => {
+          if (key.startsWith("auto-advisor:retained:")) throw new Error("storage write rejected");
+          values.set(key, value);
+        },
+        remove: async (key: string) => {
+          values.delete(key);
+        },
+        scan: async () => ({ entries: [] }),
       },
-      holdContextDisposer: disposer,
-    });
-    seedRetained(h.values);
-
-    const event = {
-      sessionID: "ses_1",
-      agent: "build",
-      system: [{ type: "text", text: "native system" }],
-      messages: [],
-      options: {},
-      result: { summary: "native summary", metadata: { source: "compactor" } },
+      generate: { text: async () => ({ text: "advisor advice" }) },
     };
-    const firing = h.fire("compaction", event);
-    await eligibility.started;
-
-    const cleaning = h.cleanup();
-    await disposer.started;
-    eligibility.release();
-    await firing;
-
-    expect(event.system).toEqual([{ type: "text", text: "native system" }]);
-    expect(event.result).toEqual({ summary: "native summary", metadata: { source: "compactor" } });
-    expect(storedAdvice(h.values)).toEqual(["seeded review"]);
-
-    disposer.release();
-    await cleaning;
-    await h.cleanup();
-    expect(h.base.disposers.filter((entry) => entry === "hook:compaction")).toHaveLength(1);
-    expect(h.signals[0]?.aborted).toBe(true);
-  });
-
-  test("cleanup invalidates a pending compaction history read before earlier disposer awaits", async () => {
-    const read = gated();
-    const disposer = gated();
-    const h = await compositionHarness({
-      holdContextDisposer: disposer,
-      holdHistoryRead: read,
+    await registerPlugin(ctx as never, {
+      loadConfig: async () => ({
+        ...defaultConfig(),
+        routing: { ...defaultConfig().routing, mode: "active" },
+      }),
+      router: { evaluate: async () => ({ advisorWouldHelp: 0.9, consequence: 4 }) },
     });
-    seedRetained(h.values);
 
-    const event = {
-      sessionID: "ses_1",
-      agent: "build",
-      system: [] as Array<{ type: string; text: string }>,
-      messages: [],
-      options: {},
-      result: { summary: "native summary" },
-    };
-    const firing = h.fire("compaction", event);
-    await read.started;
+    const dispatch = primaryDispatch();
+    await base.hookCallbacks.get("context")?.(dispatch);
 
-    const cleaning = h.cleanup();
-    await disposer.started;
-    read.release();
-    await firing;
-
-    expect(event.system).toHaveLength(0);
-    expect(event.result).toEqual({ summary: "native summary" });
-    expect(storedAdvice(h.values)).toEqual(["seeded review"]);
-
-    disposer.release();
-    await cleaning;
-    await h.cleanup();
-    expect(h.base.disposers.filter((entry) => entry === "hook:compaction")).toHaveLength(1);
-  });
-
-  test("compaction.failed does not cancel an unrelated context review", async () => {
-    const eligibility = gated();
-    const h = await compositionHarness({
-      sessionGet: async () => {
-        eligibility.markStarted();
-        await eligibility.promise;
-        return { parentID: undefined, permissions: [] };
-      },
-    });
-    const dispatch = {
-      sessionID: "ses_1",
-      agent: "build",
-      model: { providerID: "opencode", id: "jev-1.13" },
-      system: [],
-      messages: [{ id: "msg-user-1", role: "user", content: [{ type: "text", text: "hi" }] }],
-      options: {},
-      tools: { advisor: { description: "advisor", input: { type: "object" } } },
-    };
-    const pending = h.fire("context", dispatch);
-    await eligibility.started;
-
-    h.push({ type: "session.compaction.failed", data: { sessionID: "ses_1" } });
-    await ticks();
-
-    eligibility.release();
-    await pending;
-
-    expect(dispatch.messages).toHaveLength(1);
-    expect(dispatch.messages.some((message) => message.role === "system")).toBe(false);
-    expect(dispatch.system).toHaveLength(2);
-    expect(dispatch.system[0]?.text).toContain("advisor()");
-    const delivered = dispatch.system.filter((part) =>
-      part.text?.includes(ADVISOR_DELIVERY_PREFIX),
-    );
+    const delivered = dispatch.system.filter((part) => part.text.includes(ADVISOR_DELIVERY_PREFIX));
     expect(delivered).toHaveLength(1);
     expect(delivered[0]?.text).toContain("advisor advice");
+    expect(values.has(retainedReviewKey("ses_1" as never))).toBe(false);
+    const event = [...values.values()].find(
+      (value) => (value as { decision?: string }).decision === "accept",
+    );
+    expect(event).toMatchObject({ decision: "accept", delivered: true });
+    expect(dispatch.messages).toHaveLength(1);
+  });
+});
+
+describe("plugin session deletion and retained review cleanup", () => {
+  test("session deletion removes the retained review", async () => {
+    const h = await compositionHarness();
+    await h.fire("context", primaryDispatch());
+    expect(storedReview(h.values)).toBe("advisor advice");
+
+    h.push({ type: "session.deleted", data: { sessionID: "ses_1" } });
+    await ticks();
+
+    expect(storedReview(h.values)).toBeUndefined();
     await h.cleanup();
+  });
+
+  test("an in-flight retention write after session deletion does not persist", async () => {
+    const gate = retainedWriteGate();
+    const h = await compositionHarness({ writeGate: gate });
+    const dispatch = primaryDispatch();
+    const pending = h.fire("context", dispatch);
+    await gate.started;
+
+    h.push({ type: "session.deleted", data: { sessionID: "ses_1" } });
+    await ticks();
+    gate.release();
+    await pending;
+
+    expect(storedReview(h.values)).toBeUndefined();
+    await h.cleanup();
+  });
+
+  test("cleanup invalidates a pending context review before earlier disposer awaits", async () => {
+    const eligibility = gated();
+    const disposer = gated();
+    const h = await compositionHarness({
+      sessionGet: async () => {
+        eligibility.markStarted();
+        await eligibility.promise;
+        return { parentID: undefined, permissions: [] };
+      },
+      holdContextDisposer: disposer,
+    });
+    const dispatch = primaryDispatch();
+    const firing = h.fire("context", dispatch);
+    await eligibility.started;
+
+    const cleaning = h.cleanup();
+    await disposer.started;
+    eligibility.release();
+    await firing;
+
+    expect(dispatch.system).toEqual([]);
+    expect(dispatch.messages).toHaveLength(1);
+
+    disposer.release();
+    await cleaning;
+    await h.cleanup();
+    expect(h.base.disposers.filter((entry) => entry === "hook:context")).toHaveLength(1);
+    expect(h.signals[0]?.aborted).toBe(true);
   });
 });

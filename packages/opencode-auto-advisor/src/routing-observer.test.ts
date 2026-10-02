@@ -3,10 +3,9 @@ import {
   ADVISOR_DELIVERY_PREFIX,
   type AdviceDeliveryInput,
   deliverAdvice,
-  deliverRetainedReviews,
+  deliverRetainedReview,
   type RetainedReviewDeliveryInput,
 } from "./advice-delivery.js";
-import { type AdviceHistory, createAdviceHistory } from "./advice-history.js";
 import {
   ADVISOR_OMISSION_MARKER,
   type AdvisorProjectionBuilder,
@@ -21,18 +20,22 @@ import {
 } from "./advisor-service.js";
 import { type AdvisorConfig, defaultConfig, type RoutingMode } from "./config.js";
 import type { ContextMessage } from "./context.js";
+import { routingFingerprint } from "./fingerprint.js";
 import { ADVISOR_TOOL_NAME, registerPlugin } from "./index.js";
 import { createTestContext } from "./index.test.js";
 import type { ModelLimitResolver } from "./model-limits.js";
 import { createOperationLifetime, type OperationLifetime } from "./operation-lifetime.js";
-import type { PermissionRule } from "./permission-match.js";
+import {
+  createRetainedReviewStore,
+  RETAINED_REVIEW_HEADER,
+  RETAINED_REVIEW_MAX_CHARS,
+  RETAINED_REVIEW_OVERSIZE_SKIP_REASON,
+  type RetainedReviewStore,
+  retainedReviewKey,
+} from "./retained-review.js";
 import { createReviewLifecycle, type ReviewLifecycle } from "./review-lifecycle.js";
 import { RouterError } from "./router.js";
-import {
-  ADVISOR_HISTORY_CAPACITY_SKIP_REASON,
-  ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON,
-  ADVISOR_LIMITS_SKIP_REASON,
-} from "./routing.js";
+import { ADVISOR_LIMITS_SKIP_REASON } from "./routing.js";
 import { registerRoutingObserver } from "./routing-observer.js";
 import type { AdvisorRouter, RouterAssessment, RoutingState } from "./routing-types.js";
 import { createSnapshotStore, type RequestSnapshot } from "./snapshot-store.js";
@@ -58,6 +61,9 @@ function memoryStorage() {
     set: async (key: string, value: unknown) => {
       values.set(key, value);
     },
+    remove: async (key: string) => {
+      values.delete(key);
+    },
   };
 }
 
@@ -67,14 +73,7 @@ function wiring(options: {
   readonly messages?: readonly ContextMessage[];
   readonly sessionGet?: (input: {
     readonly sessionID: string;
-  }) => Promise<
-    { readonly parentID?: string; readonly permissions?: readonly PermissionRule[] } | undefined
-  >;
-  readonly agentGet?: (input: {
-    readonly agentID: string;
-  }) => Promise<
-    { readonly data?: { readonly permissions?: readonly PermissionRule[] } } | undefined
-  >;
+  }) => Promise<{ readonly parentID?: string } | undefined>;
 }) {
   const base = createTestContext();
   const prompts: Array<{ prompt: string; model?: unknown }> = [];
@@ -101,7 +100,6 @@ function wiring(options: {
         return options.messages ?? PERSISTED_MESSAGES;
       },
     },
-    ...(options.agentGet ? { agent: { get: options.agentGet } } : {}),
     storage,
     generate: {
       text: async (input: { prompt: string; model?: unknown }) => {
@@ -158,24 +156,19 @@ function fireHook(context: ReturnType<typeof createTestContext>, input: unknown)
 }
 
 describe("routing observer wiring", () => {
-  test("registers the context and compaction hooks and disposes them with the tool", async () => {
+  test("registers the context hook and disposes it with the tool", async () => {
     const context = wiring({ mode: "off" });
     const cleanup = await registerPlugin(context.ctx as never, {
       loadConfig: context.loadConfig,
       router: context.router,
     });
 
-    expect(context.hooks).toEqual(["context", "compaction"]);
+    expect(context.hooks).toEqual(["context"]);
     expect(context.hookCallbacks.get("context")).toBeFunction();
-    expect(context.hookCallbacks.get("compaction")).toBeFunction();
 
     await cleanup?.();
     await cleanup?.();
-    expect(context.disposers).toEqual([
-      "hook:context",
-      "hook:compaction",
-      `tool:${ADVISOR_TOOL_NAME}`,
-    ]);
+    expect(context.disposers).toEqual(["hook:context", `tool:${ADVISOR_TOOL_NAME}`]);
   });
 
   test("off mode performs zero evaluations and zero session reads while exposing guidance", async () => {
@@ -568,50 +561,6 @@ describe("eligibility, guidance, and explicit review dedup", () => {
     expect((value as { system: unknown[] }).system).toHaveLength(1);
   });
 
-  test("skips a session whose configured permissions deny the advisor", async () => {
-    const context = wiring({
-      mode: "observe",
-      agentGet: async () => ({
-        data: { permissions: [{ action: "advisor", resource: "*", effect: "deny" }] },
-      }),
-    });
-    await registerPlugin(context.ctx as never, {
-      loadConfig: context.loadConfig,
-      router: context.router,
-    });
-    const value = dispatch({ kind: "primary" });
-
-    await fireHook(context, value);
-
-    expect(context.evaluated).toHaveLength(0);
-    expect(context.configLoads()).toBe(0);
-    expect(Object.hasOwn((value as { tools: object }).tools, ADVISOR_TOOL_NAME)).toBe(false);
-  });
-
-  test("skips the advertised-tool trap where a scoped allow follows a broad deny", async () => {
-    const context = wiring({
-      mode: "observe",
-      agentGet: async () => ({
-        data: {
-          permissions: [
-            { action: "advisor", resource: "*", effect: "deny" },
-            { action: "advisor", resource: "src/*", effect: "allow" },
-          ],
-        },
-      }),
-    });
-    await registerPlugin(context.ctx as never, {
-      loadConfig: context.loadConfig,
-      router: context.router,
-    });
-    const value = dispatch({ kind: "primary" });
-
-    await fireHook(context, value);
-
-    expect(context.evaluated).toHaveLength(0);
-    expect(Object.hasOwn((value as { tools: object }).tools, ADVISOR_TOOL_NAME)).toBe(false);
-  });
-
   test("fails open quietly when the session lookup fails and hides the unverifiable tool", async () => {
     const context = wiring({
       mode: "observe",
@@ -655,29 +604,6 @@ describe("eligibility, guidance, and explicit review dedup", () => {
     expect(context.prompts).toHaveLength(0);
   });
 
-  test("configured denial blocks explicit consults before reading history or generating", async () => {
-    const context = wiring({
-      mode: "off",
-      agentGet: async () => ({
-        data: { permissions: [{ action: "advisor", resource: "*", effect: "deny" }] },
-      }),
-    });
-    await registerPlugin(context.ctx as never, {
-      loadConfig: context.loadConfig,
-      router: context.router,
-    });
-    const tool = context.added[0];
-
-    const result = await tool?.execute(
-      {},
-      { sessionID: "ses_1", messageID: "msg-assistant-1", agent: "build" },
-    );
-
-    expect(result?.content).toContain("Auto Advisor consultation failed");
-    expect(context.contextReads).toHaveLength(0);
-    expect(context.prompts).toHaveLength(0);
-  });
-
   test("a successful explicit consult suppresses an equivalent automatic opportunity", async () => {
     const context = wiring({ mode: "observe" });
     await registerPlugin(context.ctx as never, {
@@ -715,6 +641,46 @@ describe("eligibility, guidance, and explicit review dedup", () => {
 
     expect(context.evaluated).toHaveLength(1);
     expect(context.prompts).toHaveLength(1);
+  });
+
+  test("explicit consults include the retained review while automatic suppression stays on raw state", async () => {
+    const context = wiring({ mode: "active" });
+    await registerPlugin(context.ctx as never, {
+      loadConfig: context.loadConfig,
+      router: context.router,
+    });
+    const tool = context.added[0];
+
+    await fireHook(context, dispatch({ kind: "primary" }));
+    expect(context.prompts).toHaveLength(1);
+
+    const result = await tool?.execute(
+      {},
+      { sessionID: "ses_1", messageID: "msg-assistant-1", agent: "build" },
+    );
+    expect(result?.content).toBe("advisor advice");
+    const prompt = context.prompts.at(-1)?.prompt ?? "";
+    expect(prompt).toContain(RETAINED_REVIEW_HEADER);
+    expect(prompt).toContain("advisor advice");
+
+    const equivalent = dispatch({
+      kind: "primary",
+      messages: [
+        {
+          id: "msg-user-1",
+          role: "user",
+          content: [{ type: "text", text: "hook-only user message" }],
+        },
+        {
+          id: "msg-assistant-1",
+          role: "assistant",
+          content: [{ type: "text", text: "persisted-only assistant message" }],
+        },
+      ],
+    });
+    await fireHook(context, equivalent);
+
+    expect(context.evaluated).toHaveLength(1);
   });
 
   test("a failed explicit consult does not suppress an equivalent automatic opportunity", async () => {
@@ -773,10 +739,9 @@ async function observerHarness(options: {
   readonly project?: AdvisorProjectionBuilder;
   readonly loadConfig?: () => Promise<AdvisorConfig>;
   readonly telemetry?: { readonly record: (event: TelemetryEventInput) => Promise<void> };
-  readonly history?: AdviceHistory;
-  readonly omitHistory?: boolean;
+  readonly retained?: RetainedReviewStore;
+  readonly omitRetained?: boolean;
   readonly lifecycle?: ReviewLifecycle;
-  readonly absorbed?: (sessionID: never) => ReadonlySet<string>;
   readonly sessionGet?: (input: {
     readonly sessionID: string;
   }) => Promise<{ readonly parentID?: string } | undefined>;
@@ -789,7 +754,7 @@ async function observerHarness(options: {
   const retainedDeliveries: RetainedReviewDeliveryInput[] = [];
   const events: TelemetryEventInput[] = [];
   const storage = memoryStorage();
-  const history = options.history ?? createAdviceHistory(storage);
+  const retained = options.retained ?? createRetainedReviewStore(storage);
   const lifecycle = options.lifecycle ?? createReviewLifecycle();
   const snapshots = createSnapshotStore();
   const router: AdvisorRouter = options.router ?? {
@@ -843,9 +808,8 @@ async function observerHarness(options: {
           events.push(event);
         },
       },
-      ...(options.omitHistory ? {} : { history }),
+      ...(options.omitRetained ? {} : { retained }),
       lifecycle,
-      ...(options.absorbed ? { absorbed: options.absorbed } : {}),
       ...(options.operations ? { operations: options.operations } : {}),
       deliver: (input) => {
         deliveries.push(input);
@@ -855,7 +819,7 @@ async function observerHarness(options: {
       deliverRetained: (input) => {
         retainedDeliveries.push(input);
         if (options.deliverRetained) options.deliverRetained(input);
-        else deliverRetainedReviews(input);
+        else deliverRetainedReview(input);
       },
     },
   );
@@ -868,99 +832,83 @@ async function observerHarness(options: {
     deliveries,
     retainedDeliveries,
     events,
-    history,
+    retained,
     storage,
     lifecycle,
   };
 }
 
-function gatedHistory(inner: AdviceHistory) {
-  let commitsThrow = false;
-  let commitsMiss = false;
-  const history: AdviceHistory = {
+function gatedRetained(inner: RetainedReviewStore) {
+  let writesThrow = false;
+  const retained: RetainedReviewStore = {
     ...inner,
-    commit: async (grant, input) => {
-      if (commitsThrow) throw new Error("storage write rejected");
-      if (commitsMiss) return undefined;
-      return inner.commit(grant, input);
+    write: async (sessionID, review) => {
+      if (writesThrow) throw new Error("storage write rejected");
+      return inner.write(sessionID, review);
     },
   };
   return {
-    history,
-    failCommits: () => {
-      commitsThrow = true;
-    },
-    missCommits: () => {
-      commitsMiss = true;
+    retained,
+    failWrites: () => {
+      writesThrow = true;
     },
   };
 }
 
-describe("automatic advice persistence acceptance", () => {
-  test("a rejected persistence write fails open without delivering or publishing new advice", async () => {
-    const gate = gatedHistory(createAdviceHistory(memoryStorage()));
+describe("automatic advice acceptance and retention", () => {
+  test("a throwing storage write never rewrites accept and still delivers privileged advice", async () => {
+    const gate = gatedRetained(createRetainedReviewStore(memoryStorage()));
     const harness = await observerHarness({
-      answers: [
-        { advisorWouldHelp: 0.9, consequence: 4 },
-        { advisorWouldHelp: 0.9, consequence: 4 },
-      ],
-      history: gate.history,
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      retained: gate.retained,
     });
+    gate.failWrites();
+    const value = dispatch();
 
-    await fireHook(harness.context, dispatch());
-    expect(harness.lifecycle.status("ses_1").latest?.advice).toBe(ADVICE);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(1);
-
-    gate.failCommits();
-    const second = dispatch({
-      messages: [
-        { id: "msg-user-2", role: "user", content: [{ type: "text", text: "second turn" }] },
-      ],
-    });
-    await fireHook(harness.context, second);
+    await fireHook(harness.context, value);
 
     expect(harness.deliveries).toHaveLength(1);
-    expect(harness.retainedDeliveries).toHaveLength(1);
-    const system = (second as { system: Array<{ text?: string }> }).system;
-    expect(system.some((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toBe(false);
-    expect(system.some((part) => part.text?.includes("[Auto Advisor retained reviews]"))).toBe(
-      true,
-    );
-    const messages = (second as { messages: Array<{ role: string; content: unknown }> }).messages;
-    expect(
-      messages.some((message) => JSON.stringify(message.content).includes(ADVISOR_DELIVERY_PREFIX)),
-    ).toBe(false);
-    expect(
-      messages.some((message) => JSON.stringify(message.content).includes("second turn")),
-    ).toBe(true);
-    const status = harness.lifecycle.status("ses_1");
-    expect(status.running).toEqual([]);
-    expect(status.lastFinished?.outcome).toBe("failed");
-    expect(status.latest?.advice).toBe(ADVICE);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(1);
-    expect(harness.events.at(-1)).toMatchObject({
+    const system = (value as { system: Array<{ text?: string }> }).system;
+    const delivered = system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX));
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.text).toContain(ADVICE);
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
+    expect(harness.events[0]).toMatchObject({
       mode: "active",
-      decision: "fail",
-      delivered: false,
-      advisorOutcome: "failed",
+      decision: "accept",
+      delivered: true,
+      advisorOutcome: "completed",
       advisorInvocations: 1,
-      errorClass: "PersistenceError",
-      failureDisposition: "terminal",
     });
+    const status = harness.lifecycle.status("ses_1");
+    expect(status.running).toEqual([]);
+    expect(status.lastFinished?.outcome).toBe("completed");
+    expect(status.latest?.advice).toBe(ADVICE);
   });
 
-  test("an undefined commit fails open and keeps the consumed inference quota", async () => {
-    const gate = gatedHistory(createAdviceHistory(memoryStorage()));
+  test("a successful review is retained and reinjected as historical guidance on later turns", async () => {
+    let calls = 0;
     const harness = await observerHarness({
       answers: [
         { advisorWouldHelp: 0.9, consequence: 4 },
         { advisorWouldHelp: 0.9, consequence: 4 },
+        { advisorWouldHelp: 0.9, consequence: 4 },
       ],
-      history: gate.history,
+      service: {
+        consult: async (input) => {
+          input.onStart?.();
+          calls += 1;
+          return { advice: calls === 1 ? "first review" : "second review" };
+        },
+      },
     });
 
     await fireHook(harness.context, dispatch());
-    gate.missCommits();
+    expect(await harness.retained.read("ses_1" as never)).toEqual({
+      advice: "first review",
+      turnKey: "msg-user-1",
+    });
+    expect(harness.storage.values.has(retainedReviewKey("ses_1" as never))).toBe(true);
 
     const second = dispatch({
       messages: [
@@ -969,72 +917,68 @@ describe("automatic advice persistence acceptance", () => {
     });
     await fireHook(harness.context, second);
 
-    expect(harness.deliveries).toHaveLength(1);
-    expect(harness.events.at(-1)).toMatchObject({
-      decision: "fail",
-      delivered: false,
-      advisorOutcome: "failed",
-      advisorInvocations: 1,
+    expect(harness.retainedDeliveries).toHaveLength(1);
+    expect(harness.retainedDeliveries[0]?.review.advice).toBe("first review");
+    const retainedPart = (second as { system: Array<{ text?: string }> }).system.find((part) =>
+      (part.text ?? "").includes(RETAINED_REVIEW_HEADER),
+    );
+    expect(retainedPart?.text).toContain("first review");
+    expect(retainedPart?.text).toContain("msg-user-1");
+    expect(await harness.retained.read("ses_1" as never)).toEqual({
+      advice: "second review",
+      turnKey: "msg-user-2",
     });
-    expect(typeof harness.events.at(-1)?.advisorLatencyMs).toBe("number");
-    const status = harness.lifecycle.status("ses_1");
-    expect(status.running).toEqual([]);
-    expect(status.lastFinished?.outcome).toBe("failed");
-    expect(status.latest?.advice).toBe(ADVICE);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(1);
-
-    const continuation = dispatch({
-      messages: [
-        { id: "msg-user-2", role: "user", content: [{ type: "text", text: "second turn" }] },
-        { id: "msg-tool", role: "tool", content: [{ type: "text", text: "tool output" }] },
-      ],
-    });
-    await fireHook(harness.context, continuation);
-
-    expect(harness.evaluated).toHaveLength(2);
-    expect(harness.events.at(-1)).toMatchObject({ decision: "deny", advisorInvocations: 0 });
+    expect(
+      [...harness.storage.values.keys()].filter((key) => key.startsWith("auto-advisor:retained:")),
+    ).toEqual([retainedReviewKey("ses_1" as never)]);
   });
 
-  test("a committed record precedes delivery and later-turn retention", async () => {
-    const storage = memoryStorage();
-    const history = createAdviceHistory(storage);
-    const order: string[] = [];
-    const ordered: AdviceHistory = {
-      ...history,
-      commit: async (grant, input) => {
-        const record = await history.commit(grant, input);
-        order.push(record === undefined ? "commit-miss" : "commit");
-        return record;
-      },
-    };
+  test("oversized advisor output is delivered in full, skips retention, and records a diagnostic", async () => {
+    const oversize = "x".repeat(RETAINED_REVIEW_MAX_CHARS + 1);
     const harness = await observerHarness({
-      answers: [
-        { advisorWouldHelp: 0.9, consequence: 4 },
-        { advisorWouldHelp: 0.1, consequence: 0 },
-      ],
-      history: ordered,
-      deliver: (input) => {
-        order.push("deliver");
-        deliverAdvice(input);
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      service: {
+        consult: async (input) => {
+          input.onStart?.();
+          return { advice: oversize };
+        },
+      },
+    });
+    const value = dispatch();
+
+    await fireHook(harness.context, value);
+
+    const system = (value as { system: Array<{ text?: string }> }).system;
+    const delivered = system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX));
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.text).toContain(oversize);
+    expect(delivered[0]?.text).toHaveLength(ADVISOR_DELIVERY_PREFIX.length + 1 + oversize.length);
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
+    expect(harness.storage.values.has(retainedReviewKey("ses_1" as never))).toBe(false);
+    expect(harness.events[0]).toMatchObject({
+      decision: "accept",
+      delivered: true,
+      skipReason: RETAINED_REVIEW_OVERSIZE_SKIP_REASON,
+      advisorOutcome: "completed",
+    });
+  });
+
+  test("a review that is exactly at the retention bound is still retained", async () => {
+    const atBound = "y".repeat(RETAINED_REVIEW_MAX_CHARS);
+    const harness = await observerHarness({
+      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
+      service: {
+        consult: async (input) => {
+          input.onStart?.();
+          return { advice: atBound };
+        },
       },
     });
 
     await fireHook(harness.context, dispatch());
-    expect(order).toEqual(["commit", "deliver"]);
-    expect((await harness.history.get("ses_1" as never))[0]?.advice).toBe(ADVICE);
 
-    await fireHook(
-      harness.context,
-      dispatch({
-        messages: [
-          { id: "msg-user-2", role: "user", content: [{ type: "text", text: "next turn" }] },
-        ],
-      }),
-    );
-
-    expect(harness.deliveries).toHaveLength(1);
-    expect(harness.retainedDeliveries).toHaveLength(1);
-    expect(harness.retainedDeliveries[0]?.records[0]?.advice).toBe(ADVICE);
+    expect((await harness.retained.read("ses_1" as never))?.advice).toBe(atBound);
+    expect(harness.events[0]?.skipReason).toBeUndefined();
   });
 });
 
@@ -1068,7 +1012,7 @@ describe("operation lifetime guards", () => {
     expect(harness.deliveries).toHaveLength(0);
     expect(harness.retainedDeliveries).toHaveLength(0);
     expect(harness.events).toHaveLength(0);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(0);
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
     expect(harness.lifecycle.status("ses_1").running).toEqual([]);
     const system = (value as { system: Array<{ text?: string }> }).system;
     expect(system.filter((part) => part.text === EXECUTOR_ADVISOR_GUIDANCE)).toHaveLength(0);
@@ -1101,7 +1045,7 @@ describe("operation lifetime guards", () => {
     expect(harness.consultations).toHaveLength(0);
     expect(harness.deliveries).toHaveLength(0);
     expect(harness.events).toHaveLength(0);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(0);
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
     const status = harness.lifecycle.status("ses_1");
     expect(status.running).toEqual([]);
     expect(status.latest).toBeUndefined();
@@ -1133,30 +1077,30 @@ describe("operation lifetime guards", () => {
     expect(harness.consultations).toHaveLength(0);
     expect(harness.deliveries).toHaveLength(0);
     expect(harness.events).toHaveLength(0);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(0);
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
     expect(harness.lifecycle.status("ses_1").running).toEqual([]);
   });
 
   test("forget during the retained read prevents delivery and telemetry", async () => {
-    const inner = createAdviceHistory(memoryStorage());
+    const inner = createRetainedReviewStore(memoryStorage());
     let release: () => void = () => undefined;
     let markStarted: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
       markStarted = resolve;
     });
-    const history: AdviceHistory = {
+    const retained: RetainedReviewStore = {
       ...inner,
-      get: (sessionID) =>
-        new Promise<Awaited<ReturnType<AdviceHistory["get"]>>>((resolve) => {
+      read: (sessionID) =>
+        new Promise<Awaited<ReturnType<RetainedReviewStore["read"]>>>((resolve) => {
           markStarted();
           release = () => {
-            void inner.get(sessionID).then(resolve);
+            void inner.read(sessionID).then(resolve);
           };
         }),
     };
     const harness = await observerHarness({
       answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
-      history,
+      retained,
     });
     const pending = fireHook(harness.context, dispatch());
     await started;
@@ -1169,65 +1113,29 @@ describe("operation lifetime guards", () => {
     expect(harness.deliveries).toHaveLength(0);
     expect(harness.retainedDeliveries).toHaveLength(0);
     expect(harness.events).toHaveLength(0);
-    expect(await inner.get("ses_1" as never)).toHaveLength(0);
+    expect(await inner.read("ses_1" as never)).toBeUndefined();
   });
 
-  test("forget during the reservation skips before Jev and releases the grant", async () => {
-    const inner = createAdviceHistory(memoryStorage(), {
-      limits: { maxAdviceChars: 1000, maxSessionChars: 1000 },
-    });
+  test("forget during the retention write suppresses late publication", async () => {
+    const inner = createRetainedReviewStore(memoryStorage());
     let release: () => void = () => undefined;
     let markStarted: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
       markStarted = resolve;
     });
-    const history: AdviceHistory = {
+    const retained: RetainedReviewStore = {
       ...inner,
-      reserve: (sessionID) =>
-        new Promise<Awaited<ReturnType<AdviceHistory["reserve"]>>>((resolve) => {
-          markStarted();
-          release = () => {
-            void inner.reserve(sessionID).then(resolve);
-          };
-        }),
-    };
-    const harness = await observerHarness({
-      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
-      history,
-    });
-    const pending = fireHook(harness.context, dispatch());
-    await started;
-
-    harness.registration.forget("ses_1" as never);
-    release();
-    await pending;
-
-    expect(harness.evaluated).toHaveLength(0);
-    expect(harness.consultations).toHaveLength(0);
-    expect(harness.events).toHaveLength(0);
-    expect(await inner.reserve("ses_1" as never)).toBeDefined();
-  });
-
-  test("forget during commit suppresses late publication", async () => {
-    const inner = createAdviceHistory(memoryStorage());
-    let release: () => void = () => undefined;
-    let markStarted: () => void = () => undefined;
-    const started = new Promise<void>((resolve) => {
-      markStarted = resolve;
-    });
-    const history: AdviceHistory = {
-      ...inner,
-      commit: async (grant, input) => {
+      write: async (sessionID, review) => {
         markStarted();
         await new Promise<void>((resolve) => {
           release = resolve;
         });
-        return inner.commit(grant, input);
+        return inner.write(sessionID, review);
       },
     };
     const harness = await observerHarness({
       answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
-      history,
+      retained,
     });
     const pending = fireHook(harness.context, dispatch());
     await started;
@@ -1243,7 +1151,6 @@ describe("operation lifetime guards", () => {
   });
 
   test("dispose during an in-flight generation publishes nothing late", async () => {
-    const inner = createAdviceHistory(memoryStorage());
     let release: (value: { readonly text: string }) => void = () => undefined;
     let markStarted: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
@@ -1261,7 +1168,6 @@ describe("operation lifetime guards", () => {
     const harness = await observerHarness({
       answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
       service,
-      history: inner,
     });
     const pending = fireHook(harness.context, dispatch());
     await started;
@@ -1272,7 +1178,7 @@ describe("operation lifetime guards", () => {
 
     expect(harness.deliveries).toHaveLength(0);
     expect(harness.events).toHaveLength(0);
-    expect(await inner.get("ses_1" as never)).toHaveLength(0);
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
     expect(harness.lifecycle.status("ses_1").latest).toBeUndefined();
   });
 
@@ -1362,7 +1268,7 @@ describe("operation lifetime guards", () => {
     expect(harness.evaluated).toHaveLength(1);
     expect(harness.consultations).toHaveLength(1);
     expect(harness.deliveries).toHaveLength(1);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(1);
+    expect(await harness.retained.read("ses_1" as never)).toBeDefined();
     expect(harness.events).toHaveLength(1);
     const system = (value as { system: Array<{ text?: string }> }).system;
     expect(system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toHaveLength(1);
@@ -1391,9 +1297,8 @@ describe("active delivery, telemetry, and retention", () => {
     const system = (value as { system: Array<{ text?: string }> }).system;
     expect(system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toHaveLength(1);
     expect((value as { messages: unknown[] }).messages).toHaveLength(1);
-    const records = await harness.history.get("ses_1" as never);
-    expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ turnKey: "msg-user-1", advice: ADVICE });
+    const records = await harness.retained.read("ses_1" as never);
+    expect(records).toMatchObject({ turnKey: "msg-user-1", advice: ADVICE });
     expect(harness.events).toHaveLength(1);
     expect(harness.events[0]).toMatchObject({
       sessionID: "ses_1",
@@ -1430,7 +1335,7 @@ describe("active delivery, telemetry, and retention", () => {
 
     expect(harness.deliveries).toHaveLength(1);
     expect(harness.events[0]?.delivered).toBe(false);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(1);
+    expect(await harness.retained.read("ses_1" as never)).toBeDefined();
     expect(harness.lifecycle.status("ses_1").running).toEqual([]);
     expect(harness.lifecycle.status("ses_1").lastFinished?.outcome).toBe("failed");
     expect(harness.lifecycle.status("ses_1").latest).toBeUndefined();
@@ -1479,7 +1384,7 @@ describe("active delivery, telemetry, and retention", () => {
 
     expect(harness.evaluated).toHaveLength(1);
     expect(harness.events.at(-1)).toMatchObject({ decision: "accept", delivered: false });
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(1);
+    expect(await harness.retained.read("ses_1" as never)).toBeDefined();
     expect((value as { system: unknown[] }).system).toHaveLength(1);
     expect((value as { messages: unknown[] }).messages).toHaveLength(1);
   });
@@ -1508,7 +1413,7 @@ describe("active delivery, telemetry, and retention", () => {
     expect(harness.evaluated).toHaveLength(1);
     expect(harness.deliveries).toHaveLength(1);
     expect(harness.retainedDeliveries).toHaveLength(1);
-    expect(harness.retainedDeliveries[0]?.records[0]?.advice).toBe(ADVICE);
+    expect(harness.retainedDeliveries[0]?.review.advice).toBe(ADVICE);
     expect(harness.events.at(-1)).toMatchObject({ decision: "deny", mode: "active" });
     const system = (continuation as { system: Array<{ text?: string }> }).system;
     const retained = system.filter((part) =>
@@ -1529,7 +1434,7 @@ describe("active delivery, telemetry, and retention", () => {
     });
 
     await fireHook(harness.context, dispatch());
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(1);
+    expect(await harness.retained.read("ses_1" as never)).toBeDefined();
 
     await fireHook(
       harness.context,
@@ -1541,7 +1446,7 @@ describe("active delivery, telemetry, and retention", () => {
     );
 
     expect(harness.deliveries).toHaveLength(1);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(1);
+    expect(await harness.retained.read("ses_1" as never)).toBeDefined();
     expect(harness.retainedDeliveries).toHaveLength(1);
     expect(harness.events.at(-1)?.decision).toBe("reject");
   });
@@ -1556,7 +1461,7 @@ describe("active delivery, telemetry, and retention", () => {
 
     expect(harness.deliveries).toHaveLength(0);
     expect(harness.retainedDeliveries).toHaveLength(0);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(0);
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
     expect(harness.events[0]).toMatchObject({ mode: "observe", decision: "accept" });
     expect(harness.events[0]?.delivered).toBeUndefined();
     expect(harness.events[0]?.advisorInvocations).toBeUndefined();
@@ -1709,7 +1614,7 @@ describe("active delivery, telemetry, and retention", () => {
       consequence: 4,
     });
     expect(harness.events[0]?.errorClass).toBeUndefined();
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(0);
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
     const messages = (value as { messages: Array<{ role: string }> }).messages;
     expect(messages).toHaveLength(1);
   });
@@ -1801,95 +1706,92 @@ describe("active delivery, telemetry, and retention", () => {
     await fireHook(harness.context, value);
 
     expect(harness.deliveries).toHaveLength(1);
-    expect((await harness.history.get("ses_1" as never))[0]?.advice).toBe(ADVICE);
+    expect((await harness.retained.read("ses_1" as never))?.advice).toBe(ADVICE);
     const system = (value as { system: Array<{ text?: string }> }).system;
     expect(system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toHaveLength(1);
     expect((value as { messages: unknown[] }).messages).toHaveLength(1);
   });
 });
 
-describe("retention capacity and absorbed filtering", () => {
-  test("excludes already-absorbed records from reinjection and advisor evidence", async () => {
-    const absorbed = new Set<string>();
-    const transcripts: string[] = [];
+describe("retention fail-open and advisor block exclusion", () => {
+  test("missing retained storage still routes, delivers, and records the accept", async () => {
     const harness = await observerHarness({
       answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
-      absorbed: () => absorbed,
-      service: {
-        consult: async (input) => {
-          transcripts.push(input.transcript);
-          return { advice: ADVICE };
-        },
-      },
+      omitRetained: true,
     });
-    const grant = await harness.history.reserve("ses_1" as never);
-    if (!grant) throw new Error("reservation failed");
-    const record = await harness.history.commit(grant, {
-      turnKey: "turn-old",
-      materialFingerprint: "f".repeat(64),
-      advice: "absorbed advice",
-    });
-    if (!record) throw new Error("commit failed");
-    absorbed.add(record.id);
-
     const value = dispatch();
+
     await fireHook(harness.context, value);
 
+    expect(harness.evaluated).toHaveLength(1);
+    expect(harness.deliveries).toHaveLength(1);
     expect(harness.retainedDeliveries).toHaveLength(0);
-    expect(transcripts).toHaveLength(1);
-    expect(transcripts[0]).not.toContain("absorbed advice");
+    expect(harness.events[0]).toMatchObject({ decision: "accept", delivered: true });
     const system = (value as { system: Array<{ text?: string }> }).system;
     expect(system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toHaveLength(1);
-    expect(
-      system.some((part) => (part.text ?? "").includes("[Auto Advisor retained reviews]")),
-    ).toBe(false);
     expect((value as { messages: unknown[] }).messages).toHaveLength(1);
   });
 
-  test("false capacity skips with the capacity reason and zero invocations", async () => {
-    const history = createAdviceHistory(memoryStorage(), { limits: { maxRecordsPerSession: 1 } });
-    const grant = await history.reserve("ses_1" as never);
-    if (!grant) throw new Error("reservation failed");
-    await history.commit(grant, {
-      turnKey: "turn-old",
-      materialFingerprint: "f".repeat(64),
-      advice: "held review",
-    });
+  test("a throwing retained read fails open and still delivers", async () => {
+    const inner = createRetainedReviewStore(memoryStorage());
+    const retained: RetainedReviewStore = {
+      ...inner,
+      read: async () => {
+        throw new Error("storage read rejected");
+      },
+    };
     const harness = await observerHarness({
       answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
-      history,
-    });
-
-    await fireHook(harness.context, dispatch());
-
-    expect(harness.evaluated).toHaveLength(0);
-    expect(harness.deliveries).toHaveLength(0);
-    expect(harness.retainedDeliveries).toHaveLength(1);
-    expect(harness.events[0]).toMatchObject({
-      mode: "active",
-      decision: "skip",
-      skipReason: ADVISOR_HISTORY_CAPACITY_SKIP_REASON,
-      advisorInvocations: 0,
-    });
-  });
-
-  test("missing history skips automatic quietly with the unavailable reason", async () => {
-    const harness = await observerHarness({
-      answers: [{ advisorWouldHelp: 0.9, consequence: 4 }],
-      omitHistory: true,
+      retained,
     });
     const value = dispatch();
 
     await fireHook(harness.context, value);
 
-    expect(harness.evaluated).toHaveLength(0);
-    expect(harness.deliveries).toHaveLength(0);
+    expect(harness.deliveries).toHaveLength(1);
     expect(harness.retainedDeliveries).toHaveLength(0);
-    expect(harness.events[0]).toMatchObject({
-      decision: "skip",
-      skipReason: ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON,
+    expect(harness.events[0]).toMatchObject({ decision: "accept", delivered: true });
+    const system = (value as { system: Array<{ text?: string }> }).system;
+    expect(system.filter((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toHaveLength(1);
+  });
+
+  test("current and retained advisor blocks stay out of the fingerprint and Jev projection", async () => {
+    const harness = await observerHarness({
+      answers: [
+        { advisorWouldHelp: 0.9, consequence: 4 },
+        { advisorWouldHelp: 0.9, consequence: 4 },
+        { advisorWouldHelp: 0.9, consequence: 4 },
+      ],
     });
-    expect((value as { messages: unknown[] }).messages).toHaveLength(1);
+    const value = dispatch();
+    const messages = (value as { messages: Array<unknown> }).messages;
+
+    await fireHook(harness.context, value);
+    expect(harness.evaluated).toHaveLength(1);
+    expect(harness.storage.values.has(retainedReviewKey("ses_1" as never))).toBe(true);
+
+    messages.push({ id: "msg-user-2", role: "user", content: [{ type: "text", text: "turn 2" }] });
+    await fireHook(harness.context, value);
+    expect(harness.evaluated).toHaveLength(2);
+
+    messages.push({ id: "msg-user-3", role: "user", content: [{ type: "text", text: "turn 3" }] });
+    await fireHook(harness.context, value);
+    expect(harness.evaluated).toHaveLength(3);
+
+    const system = (value as { system: Array<{ text?: string }> }).system;
+    expect(system.some((part) => part.text?.includes(ADVISOR_DELIVERY_PREFIX))).toBe(true);
+    expect(system.some((part) => part.text?.includes(RETAINED_REVIEW_HEADER))).toBe(true);
+    for (const state of harness.evaluated) {
+      const serialized = JSON.stringify(state.entries);
+      expect(serialized).not.toContain(ADVISOR_DELIVERY_PREFIX);
+      expect(serialized).not.toContain(RETAINED_REVIEW_HEADER);
+    }
+    expect(new Set(harness.events.map((event) => event.fingerprint)).size).toBe(3);
+    for (const [index, event] of harness.events.entries()) {
+      const state = harness.evaluated[index];
+      expect(state).toBeDefined();
+      expect(event.fingerprint).toBe(routingFingerprint(state?.entries ?? []));
+    }
   });
 
   test("timeout finishes the lifecycle without publishing advice", async () => {
@@ -1915,10 +1817,10 @@ describe("retention capacity and absorbed filtering", () => {
     expect(status.running).toEqual([]);
     expect(status.lastFinished?.outcome).toBe("timeout");
     expect(status.latest).toBeUndefined();
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(0);
+    expect(await harness.retained.read("ses_1" as never)).toBeUndefined();
   });
 
-  test("failed and timed-out reviews keep the previous latest advice", async () => {
+  test("failed and timed-out reviews keep the previous retained review", async () => {
     let calls = 0;
     const harness = await observerHarness({
       answers: [
@@ -1937,6 +1839,7 @@ describe("retention capacity and absorbed filtering", () => {
 
     await fireHook(harness.context, dispatch());
     expect(harness.lifecycle.status("ses_1").latest?.advice).toBe(ADVICE);
+    expect((await harness.retained.read("ses_1" as never))?.advice).toBe(ADVICE);
 
     await fireHook(
       harness.context,
@@ -1950,6 +1853,6 @@ describe("retention capacity and absorbed filtering", () => {
     const status = harness.lifecycle.status("ses_1");
     expect(status.lastFinished?.outcome).toBe("timeout");
     expect(status.latest?.advice).toBe(ADVICE);
-    expect(await harness.history.get("ses_1" as never)).toHaveLength(1);
+    expect((await harness.retained.read("ses_1" as never))?.advice).toBe(ADVICE);
   });
 });

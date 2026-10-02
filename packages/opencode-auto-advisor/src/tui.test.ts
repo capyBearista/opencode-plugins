@@ -18,20 +18,24 @@ const { TUI_PLUGIN_ID, createReviewTransport, resolveDirectory } = tuiModule;
 type SlotClaim = Parameters<Plugin.Context["ui"]["slot"]>[0];
 
 function flush(): Promise<void> {
-  return Promise.resolve().then(() => Promise.resolve());
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function fakeStatus(sessionID: string, revision = 1): ReviewStatus {
   return { sessionID, epoch: "epoch-test", revision, running: [] };
 }
 
+interface FakeQuery {
+  readonly directory: string;
+  readonly input: { readonly sessionID: string };
+  readonly resolve: (value: ReviewStatus) => void;
+  readonly reject: (reason?: unknown) => void;
+}
+
 interface FakeClient {
-  readonly rpcCalls: Array<{ directory: string; input: { sessionID: string } }>;
+  readonly queries: FakeQuery[];
   readonly eventHandlers: Map<string, Array<(envelope: unknown) => void>>;
-  queryDeferred:
-    | { resolve: (value: ReviewStatus) => void; reject: (reason?: unknown) => void }
-    | undefined;
-  queryPromise: Promise<ReviewStatus> | undefined;
+  readonly unsubscribes: string[];
   readonly rpc: (def: unknown) => {
     status: (
       input: { sessionID: string },
@@ -39,28 +43,23 @@ interface FakeClient {
     ) => Promise<ReviewStatus>;
     events: { on: (name: string, handler: (envelope: unknown) => void) => () => void };
   };
-  readonly unsubscribes: Array<string>;
 }
 
 function createFakeClient(): FakeClient {
   const eventHandlers = new Map<string, Array<(envelope: unknown) => void>>();
   const client: FakeClient = {
-    rpcCalls: [],
+    queries: [],
     eventHandlers,
-    queryDeferred: undefined,
-    queryPromise: undefined,
     unsubscribes: [],
     rpc: (_def) => ({
       status: (input, opts) => {
-        client.rpcCalls.push({ directory: opts.location.directory, input });
         let resolve!: (value: ReviewStatus) => void;
         let reject!: (reason?: unknown) => void;
         const promise = new Promise<ReviewStatus>((innerResolve, innerReject) => {
           resolve = innerResolve;
           reject = innerReject;
         });
-        client.queryDeferred = { resolve, reject };
-        client.queryPromise = promise;
+        client.queries.push({ directory: opts.location.directory, input, resolve, reject });
         return promise;
       },
       events: {
@@ -86,6 +85,7 @@ function createFakeContext(
 ) {
   const claims: Array<SlotClaim> = [];
   const unregisters: Array<string> = [];
+  const connected: Array<() => void> = [];
   const context = {
     location: directory === undefined ? undefined : { directory },
     data: {
@@ -97,7 +97,10 @@ function createFakeContext(
         },
       },
       location: { default: () => ({ directory: "/work/default" }) },
-      on: (_type: string, _handler: () => void) => () => undefined,
+      on: (type: string, handler: () => void) => {
+        if (type === "server.connected") connected.push(handler);
+        return () => undefined;
+      },
     },
     client,
     theme: { text: { muted: "#888888", base: "#ffffff" } },
@@ -111,7 +114,17 @@ function createFakeContext(
       },
     },
   };
-  return { context: context as unknown as Plugin.Context, claims, unregisters };
+  return { context: context as unknown as Plugin.Context, claims, unregisters, connected };
+}
+
+function claimFor(claims: Array<SlotClaim>, path: string): { render: (input: unknown) => unknown } {
+  const claim = claims.find((entry) => "append" in entry && entry.append === path);
+  if (!claim) throw new Error(`missing slot claim ${path}`);
+  return claim as unknown as { render: (input: unknown) => unknown };
+}
+
+function emit(client: FakeClient, name: string, envelope: unknown): void {
+  for (const handler of client.eventHandlers.get(name) ?? []) handler(envelope);
 }
 
 describe("auto-advisor tui slots and setup", () => {
@@ -144,19 +157,12 @@ describe("auto-advisor tui slots and setup", () => {
     const client = createFakeClient();
     const { context, claims } = createFakeContext(client, undefined);
     const cleanup = await plugin.setup(context);
-    const footer = claims.find(
-      (claim) => "append" in claim && claim.append === "prompt.footer.status",
-    );
-    expect(footer).toBeDefined();
+    const footer = claimFor(claims, "prompt.footer.status");
     await createRoot(async (dispose) => {
       try {
-        (footer as { render: (input: unknown) => unknown }).render({
-          sessionID: undefined,
-          mode: "normal",
-          showDetails: false,
-        });
+        footer.render({ sessionID: undefined, mode: "normal", showDetails: false });
         await flush();
-        expect(client.rpcCalls).toHaveLength(0);
+        expect(client.queries).toHaveLength(0);
       } finally {
         dispose();
       }
@@ -166,25 +172,22 @@ describe("auto-advisor tui slots and setup", () => {
 
   test("composer render queries status for its session and cleans up subscriptions", async () => {
     const client = createFakeClient();
-    const { context, claims } = createFakeContext(client, "ses_1", "/work/main");
+    const { context, claims, connected } = createFakeContext(client, "ses_1", "/work/main");
     const cleanup = await plugin.setup(context);
-    const composer = claims.find(
-      (claim) => "append" in claim && claim.append === "session.composer.top",
-    );
-    expect(composer).toBeDefined();
+    const composer = claimFor(claims, "session.composer.top");
     await createRoot(async (dispose) => {
       try {
-        (composer as { render: (input: unknown) => unknown }).render({ sessionID: "ses_1" });
+        composer.render({ sessionID: "ses_1" });
         await flush();
-        expect(client.rpcCalls).toHaveLength(1);
-        expect(client.rpcCalls[0]).toMatchObject({
+        expect(client.queries).toHaveLength(1);
+        expect(client.queries[0]).toMatchObject({
           directory: "/work/main",
           input: { sessionID: "ses_1" },
         });
         expect(client.eventHandlers.get("review.started")).toHaveLength(1);
         expect(client.eventHandlers.get("review.finished")).toHaveLength(1);
-        client.queryDeferred?.resolve(fakeStatus("ses_1", 1));
-        await client.queryPromise?.catch(() => undefined);
+        expect(connected).toHaveLength(1);
+        client.queries[0]?.resolve(fakeStatus("ses_1"));
         await flush();
       } finally {
         dispose();
@@ -194,23 +197,69 @@ describe("auto-advisor tui slots and setup", () => {
     cleanup?.();
   });
 
+  test("footer and composer share one store and one status query per session", async () => {
+    const client = createFakeClient();
+    const { context, claims, connected } = createFakeContext(client, "ses_1", "/work/main");
+    const cleanup = await plugin.setup(context);
+    const footer = claimFor(claims, "prompt.footer.status");
+    const composer = claimFor(claims, "session.composer.top");
+    const footerRoot = createRoot((dispose) => {
+      footer.render({ sessionID: "ses_1" });
+      return dispose;
+    });
+    const composerRoot = createRoot((dispose) => {
+      composer.render({ sessionID: "ses_1" });
+      return dispose;
+    });
+    await flush();
+    expect(client.queries).toHaveLength(1);
+    expect(client.eventHandlers.get("review.started")).toHaveLength(1);
+    expect(client.eventHandlers.get("review.finished")).toHaveLength(1);
+    expect(connected).toHaveLength(1);
+    client.queries[0]?.resolve(fakeStatus("ses_1"));
+    await flush();
+    emit(client, "review.finished", {
+      location: { directory: "/work/main" },
+      data: fakeStatus("ses_1", 2),
+    });
+    expect(client.queries).toHaveLength(2);
+    composerRoot();
+    await flush();
+    emit(client, "review.started", {
+      location: { directory: "/work/main" },
+      data: fakeStatus("ses_1", 3),
+    });
+    expect(client.queries).toHaveLength(3);
+    footerRoot();
+    await flush();
+    emit(client, "review.started", {
+      location: { directory: "/work/main" },
+      data: fakeStatus("ses_1", 4),
+    });
+    expect(client.queries).toHaveLength(3);
+    cleanup?.();
+  });
+
   test("composer ignores events from other locations and sessions", async () => {
     const client = createFakeClient();
     const { context, claims } = createFakeContext(client, "ses_1", "/work/main");
     const cleanup = await plugin.setup(context);
-    const composer = claims.find(
-      (claim) => "append" in claim && claim.append === "session.composer.top",
-    );
+    const composer = claimFor(claims, "session.composer.top");
     await createRoot(async (dispose) => {
       try {
-        (composer as { render: (input: unknown) => unknown }).render({ sessionID: "ses_1" });
+        composer.render({ sessionID: "ses_1" });
         await flush();
-        for (const handler of client.eventHandlers.get("review.started") ?? []) {
-          handler({ location: { directory: "/work/other" }, data: fakeStatus("ses_1", 5) });
-          handler({ location: { directory: "/work/main" }, data: fakeStatus("ses_other", 6) });
-        }
+        expect(client.queries).toHaveLength(1);
+        emit(client, "review.started", {
+          location: { directory: "/work/other" },
+          data: fakeStatus("ses_1", 5),
+        });
+        emit(client, "review.started", {
+          location: { directory: "/work/main" },
+          data: fakeStatus("ses_other", 6),
+        });
         await flush();
-        expect(client.rpcCalls).toHaveLength(1);
+        expect(client.queries).toHaveLength(1);
       } finally {
         dispose();
       }
@@ -228,14 +277,10 @@ describe("auto-advisor tui slots and setup", () => {
     };
     const { context, claims } = createFakeContext(broken as unknown as FakeClient, "ses_1");
     const cleanup = await plugin.setup(context);
-    const composer = claims.find(
-      (claim) => "append" in claim && claim.append === "session.composer.top",
-    );
+    const composer = claimFor(claims, "session.composer.top");
     await createRoot(async (dispose) => {
       try {
-        expect(() =>
-          (composer as { render: (input: unknown) => unknown }).render({ sessionID: "ses_1" }),
-        ).not.toThrow();
+        expect(() => composer.render({ sessionID: "ses_1" })).not.toThrow();
         await flush();
       } finally {
         dispose();
@@ -275,17 +320,20 @@ describe("auto-advisor tui transport and contract seams", () => {
       { sessionID: "ses_1" },
       { signal: new AbortController().signal },
     );
-    expect(client.rpcCalls[0]).toMatchObject({
+    expect(client.queries[0]).toMatchObject({
       directory: "/work/main",
       input: { sessionID: "ses_1" },
     });
-    client.queryDeferred?.resolve(fakeStatus("ses_1", 2));
+    client.queries[0]?.resolve(fakeStatus("ses_1", 2));
     await expect(pending).resolves.toMatchObject({ sessionID: "ses_1", revision: 2 });
   });
 
-  test("tui imports the contract descriptor but never the server entry or review rpc", async () => {
+  test("tui imports the shared store and contract but never the server entry", async () => {
     const source = await Bun.file(join(import.meta.dir, "tui.ts")).text();
     expect(source).toContain("./review-contract.js");
+    expect(source).toContain("./tui-controller.js");
+    expect(source).toContain("createReviewStoreRegistry");
+    expect(source).not.toContain("createReviewController");
     expect(source).not.toContain("./index.js");
     expect(source).not.toContain("./review-rpc.js");
     expect(source).not.toContain("Spinner");
@@ -562,16 +610,13 @@ describe("session-scoped location resolution", () => {
       ses_1: { directory: "/work/B" },
     });
     const cleanup = await plugin.setup(context);
-    const composer = claims.find(
-      (claim) => "append" in claim && claim.append === "session.composer.top",
-    );
-    expect(composer).toBeDefined();
+    const composer = claimFor(claims, "session.composer.top");
     await createRoot(async (dispose) => {
       try {
-        (composer as { render: (input: unknown) => unknown }).render({ sessionID: "ses_1" });
+        composer.render({ sessionID: "ses_1" });
         await flush();
-        expect(client.rpcCalls).toHaveLength(1);
-        expect(client.rpcCalls[0]).toMatchObject({
+        expect(client.queries).toHaveLength(1);
+        expect(client.queries[0]).toMatchObject({
           directory: "/work/B",
           input: { sessionID: "ses_1" },
         });

@@ -343,13 +343,11 @@ Automatic advice is plugin-owned state associated with the session and originati
 
 For v1:
 
-1. commit successful reviews to bounded plugin-owned session/turn history before delivery;
-2. inject current and relevant retained advice into privileged `session.context.system`, without duplication or advice-created messages;
-3. preserve retained advice across later turns;
-4. supply captured records to compaction as privileged system context;
-5. retire only captured records proven absorbed by exact ID and advice text in a successful result;
-6. preserve records after failed/unproven compaction; deletion cleans them up and invalidates pending callbacks;
-7. bound capacity without silently evicting unabsorbed advice to start another paid review.
+1. inject current advice into privileged `session.context.system` first, without duplication or advice-created messages;
+2. then retain the latest successful review best-effort as one bounded record per session (newer replaces older; oversize delivered but not retained);
+3. never let a storage failure suppress otherwise valid current advice;
+4. reinject the retained review on later eligible requests as clearly historical reviewer guidance;
+5. no compaction protocol: the retained note lives outside the transcript and survives OpenCode compaction naturally; deletion clears it and invalidates pending callbacks.
 
 Do not use `session.synthetic` and do not fabricate an Executor `advisor()` call.
 Do not fall back to chronological `Message.system`: 2.0.21 may lower it to user
@@ -448,7 +446,7 @@ Expose read-only plugin RPC(s) for telemetry scan/export so evaluation tooling c
 - true cancellation until the host exposes a supported signal;
 - hidden reasoning except as future opt-in work;
 - smarter tool-output compression/summarization;
-- semantic Advisor-aware compaction beyond bounded exact-proof retention;
+- semantic Advisor-aware compaction or multi-record retention history;
 - Decisions API or alternate routing backends;
 - full Advisor benchmarks.
 

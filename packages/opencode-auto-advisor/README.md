@@ -157,16 +157,16 @@ on the public bearer marks that Jev model ineligible for the current session;
 the configured model list is unchanged. These Jev rules do not provide an
 alternate Advisor model.
 
-Successful automatic reviews are committed before delivery to bounded
-plugin-owned per-session history, not a general conversation database. Later
-explicit consultations and active-mode requests can include retained reviews.
-Before compaction, the plugin supplies them as privileged system context. It
-retires only captured records whose IDs and exact advice text are found in a
-successful compaction result; failed or unverified compactions leave them
-available. Automatic review needs host storage and available history capacity;
-when either is unavailable, the plugin skips the review rather than deliver an
-unretained result or discard older records. Session deletion clears its retained
-history.
+Automatic advice is injected into privileged system context first; the latest
+successful automatic review is then retained best-effort as one small bounded
+record per session (`auto-advisor:retained:<sessionID>`, internal 8192-char
+limit), not a history archive. A storage failure never suppresses otherwise
+valid current advice, and an oversized review is delivered in full but not
+retained. A newer successful review replaces the old one. The retained review
+is reinjected on later eligible requests as clearly historical reviewer
+guidance and may inform later Advisor consultations, while staying out of
+routing fingerprints and Jev input. It survives conversation compaction
+because it lives outside the transcript. Session deletion clears it.
 
 When storage and RPC are available, `experimental.auto-advisor` exposes only
 read-only methods:
@@ -174,8 +174,8 @@ read-only methods:
 returns `{ events, next? }`, and the event lookup returns one event or `null`.
 Telemetry records routing and delivery metadata, model/latency/outcome details,
 and context-fit counts. It does not store the captured transcript or Advisor
-response. Successful advice is kept separately in bounded plugin-owned history
-for continuity. The optional TUI uses the distinct
+response. The latest successful advice is kept separately as one bounded
+retained review for continuity. The optional TUI uses the distinct
 `experimental.auto-advisor.review` RPC, with `status({ sessionID })` and
 `review.started` / `review.finished` lifecycle events; this surface contains only
 status and final advice, not Advisor confidence.
@@ -277,10 +277,10 @@ provides isolated setup, inspection commands, and all 18 acceptance scenarios.
    a lower-authority system-update tail, user message, or fake tool result. Check
    that a failed review leaves the Executor moving and does not switch Advisor
    models.
-4. Verify accepted advice remains available on a later turn and through
-   compaction; only exact advice proven absorbed by successful compaction should
-   retire. Check the TUI's reviewing/success status and final-advice panel, plus
-   narrow-width and long-advice rendering.
+4. Verify the latest accepted advice remains available on a later turn and through
+   OpenCode conversation compaction (the retained note lives outside the
+   transcript; a newer review replaces it). Check the TUI's reviewing/success
+   status and final-advice panel, plus narrow-width and long-advice rendering.
 
 Final automated gates and manual wire/UI checks are still pending. The first
 publication must wait for those checks and merge. A release check can report

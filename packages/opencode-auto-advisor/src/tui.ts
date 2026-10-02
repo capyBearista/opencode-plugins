@@ -5,12 +5,17 @@ import { createElement, insert, spread } from "@opentui/solid";
 import { createComponent, createEffect, createSignal, onCleanup } from "solid-js";
 import { REVIEW_RPC, type ReviewStatus } from "./review-contract.js";
 import {
-  createReviewController,
+  createReviewStore,
+  createReviewStoreRegistry,
   FINISHED_LABEL,
+  IDLE_REVIEW_STATE,
   isLocalReviewEnvelope,
   REVIEWING_LABEL,
-  type ReviewController,
+  type ReviewStore,
+  type ReviewStoreHandle,
+  type ReviewStoreRegistry,
   type ReviewTransport,
+  type ReviewViewState,
 } from "./tui-controller.js";
 
 type TuiContext = Plugin.Context;
@@ -114,18 +119,13 @@ export function createReviewTransport(
           ) {
             return;
           }
-          handler(data);
+          handler();
         });
       } catch {
         return () => undefined;
       }
     },
   };
-}
-
-interface SessionBinding {
-  readonly controller: ReviewController;
-  readonly offConnected: (() => void) | undefined;
 }
 
 export interface BindingKey {
@@ -207,108 +207,120 @@ export function createBindingScope(options: BindingScopeOptions): BindingScope {
   };
 }
 
-function bindSession(
-  context: TuiContext,
-  sessionID: string,
-  directory: string,
-  onState: (state: { reviewing: boolean; finished: boolean; advice?: string }) => void,
-): SessionBinding | undefined {
-  if (directory.length === 0) return undefined;
+function createStore(context: TuiContext, key: BindingKey): ReviewStore | undefined {
   let transport: ReviewTransport;
   try {
-    transport = createReviewTransport(context.client, sessionID, directory);
+    transport = createReviewTransport(context.client, key.sessionID, key.directory);
   } catch {
     return undefined;
   }
-  const controller = createReviewController({ sessionID, transport });
-  try {
-    controller.subscribe(() => {
-      try {
-        const state = controller.getState();
-        onState({ reviewing: state.reviewing, finished: state.finished, advice: state.advice });
-      } catch {
-        return;
-      }
-    });
-  } catch {
-    return undefined;
-  }
-  try {
-    controller.start();
-  } catch {
-    return undefined;
-  }
-  let offConnected: (() => void) | undefined;
-  try {
-    offConnected = context.data.on("server.connected", () => {
-      try {
-        controller.reconnect();
-      } catch {
-        return;
-      }
-    });
-  } catch {
-    offConnected = undefined;
-  }
-  return { controller, offConnected };
+  return createReviewStore({
+    sessionID: key.sessionID,
+    transport,
+    onConnected: (listener) => context.data.on("server.connected", listener),
+  });
 }
 
-function disposeBinding(binding: SessionBinding | undefined): void {
-  if (!binding) return;
-  try {
-    binding.offConnected?.();
-  } catch {
-    undefined;
-  }
-  try {
-    binding.controller.dispose();
-  } catch {
-    undefined;
-  }
+interface ReviewBindingOptions {
+  readonly registry: ReviewStoreRegistry;
+  readonly getSessionID: () => string | undefined;
+  readonly getDirectory: () => string;
 }
 
-function FooterStatus(props: { context: TuiContext; input: FooterInput }): JSX.Element {
-  const [reviewing, setReviewing] = createSignal(false);
-  const [finished, setFinished] = createSignal(false);
+interface ReviewBinding {
+  readonly state: () => ReviewViewState;
+  readonly sync: () => void;
+  readonly dispose: () => void;
+}
+
+function createReviewBinding(options: ReviewBindingOptions): ReviewBinding {
+  const [state, setState] = createSignal<ReviewViewState>(IDLE_REVIEW_STATE);
+  let release: (() => void) | undefined;
+  let unsubscribe: (() => void) | undefined;
+
+  const teardown = (): void => {
+    const off = unsubscribe;
+    unsubscribe = undefined;
+    try {
+      off?.();
+    } catch {
+      undefined;
+    }
+    const free = release;
+    release = undefined;
+    try {
+      free?.();
+    } catch {
+      undefined;
+    }
+  };
+
   const scope = createBindingScope({
-    getSessionID: () => props.input.sessionID,
-    getDirectory: () => resolveDirectory(props.context, props.input.sessionID),
+    getSessionID: options.getSessionID,
+    getDirectory: options.getDirectory,
     clear: () => {
-      setReviewing(false);
-      setFinished(false);
+      setState(IDLE_REVIEW_STATE);
     },
     bind: (key) => {
-      const binding = bindSession(props.context, key.sessionID, key.directory, (state) => {
-        setReviewing(state.reviewing);
-        setFinished(state.finished);
-      });
-      if (!binding) return undefined;
-      return {
-        dispose: () => disposeBinding(binding),
-      };
+      let handle: ReviewStoreHandle | undefined;
+      try {
+        handle = options.registry.acquire(key);
+        if (!handle) return undefined;
+        const store = handle.store;
+        unsubscribe = store.subscribe(() => setState(store.getState()));
+        release = handle.release;
+        setState(store.getState());
+      } catch {
+        handle?.release();
+        unsubscribe = undefined;
+        release = undefined;
+        return undefined;
+      }
+      return { dispose: teardown };
     },
   });
 
-  scope.sync();
+  return {
+    state,
+    sync: scope.sync,
+    dispose: () => {
+      scope.dispose();
+      teardown();
+    },
+  };
+}
+
+function FooterStatus(props: {
+  context: TuiContext;
+  registry: ReviewStoreRegistry;
+  input: FooterInput;
+}): JSX.Element {
+  const binding = createReviewBinding({
+    registry: props.registry,
+    getSessionID: () => props.input.sessionID,
+    getDirectory: () => resolveDirectory(props.context, props.input.sessionID),
+  });
+
+  binding.sync();
 
   createEffect(() => {
-    scope.sync();
+    binding.sync();
   });
 
   onCleanup(() => {
-    scope.dispose();
+    binding.dispose();
   });
 
   return boxNode("box", { flexDirection: "row", gap: 1, flexShrink: 0 }, [
     () =>
-      reviewing()
+      binding.state().running
         ? textNode(
             { fg: () => mutedTone(props.context), wrapMode: "none", truncate: true },
             () => REVIEWING_LABEL,
           )
         : null,
     () =>
-      !reviewing() && finished()
+      !binding.state().running && binding.state().finished
         ? textNode(
             { fg: () => mutedTone(props.context), wrapMode: "none", truncate: true },
             () => FINISHED_LABEL,
@@ -317,38 +329,30 @@ function FooterStatus(props: { context: TuiContext; input: FooterInput }): JSX.E
   ]);
 }
 
-function ComposerAdvice(props: { context: TuiContext; input: ComposerInput }): JSX.Element {
-  const [advice, setAdvice] = createSignal<string | undefined>(undefined);
-  const scope = createBindingScope({
+function ComposerAdvice(props: {
+  context: TuiContext;
+  registry: ReviewStoreRegistry;
+  input: ComposerInput;
+}): JSX.Element {
+  const binding = createReviewBinding({
+    registry: props.registry,
     getSessionID: () => props.input.sessionID,
     getDirectory: () => resolveDirectory(props.context, props.input.sessionID),
-    clear: () => {
-      setAdvice(undefined);
-    },
-    bind: (key) => {
-      const binding = bindSession(props.context, key.sessionID, key.directory, (state) => {
-        setAdvice(state.advice);
-      });
-      if (!binding) return undefined;
-      return {
-        dispose: () => disposeBinding(binding),
-      };
-    },
   });
 
-  scope.sync();
+  binding.sync();
 
   createEffect(() => {
-    scope.sync();
+    binding.sync();
   });
 
   onCleanup(() => {
-    scope.dispose();
+    binding.dispose();
   });
 
   return boxNode("box", { flexDirection: "column", flexGrow: 1, flexShrink: 1, minWidth: 0 }, [
     () => {
-      const text = advice();
+      const text = binding.state().advice;
       if (!text || text.trim().length === 0) return null;
       return boxNode(
         "box",
@@ -393,13 +397,14 @@ function ComposerAdvice(props: { context: TuiContext; input: ComposerInput }): J
 const plugin = Plugin.define({
   id: TUI_PLUGIN_ID,
   setup(context) {
+    const registry = createReviewStoreRegistry((key) => createStore(context, key));
     const unregisterFooter = context.ui.slot({
       append: "prompt.footer.status",
-      render: (input) => createComponent(FooterStatus, { context, input }),
+      render: (input) => createComponent(FooterStatus, { context, registry, input }),
     });
     const unregisterComposer = context.ui.slot({
       append: "session.composer.top",
-      render: (input) => createComponent(ComposerAdvice, { context, input }),
+      render: (input) => createComponent(ComposerAdvice, { context, registry, input }),
     });
     let disposed = false;
     return () => {
@@ -415,6 +420,7 @@ const plugin = Plugin.define({
       } catch {
         undefined;
       }
+      registry.dispose();
     };
   },
 });

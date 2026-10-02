@@ -96,11 +96,10 @@ src/
 ├── digest.ts           # SHA-256 helper
 ├── media.ts            # Media placeholders; raw bytes never leave this module
 ├── advisor-service.ts  # Fresh/stateless consultation service
-├── advice-delivery.ts  # Privileged system advice injection + retained-review framing
-├── advice-history.ts   # Bounded persisted automatic-review records
-├── advice-compaction.ts # Privileged compaction context + exact absorption proof
+├── advice-delivery.ts  # Privileged system advice injection + single retained-review framing
+├── retained-review.ts  # One bounded latest automatic review per session (best-effort, never gates delivery)
 ├── operation-lifetime.ts # Pending-operation invalidation on deletion/disposal
-├── eligibility.ts      # Root-session and native advisor permission eligibility
+├── eligibility.ts      # Root-session eligibility (native permission enforced by host tool filtering)
 ├── advisor-prompts.ts  # Executor/tool/independent-reviewer prompt layers
 ├── review-contract.ts  # Import-free JSON lifecycle RPC contract
 ├── review-lifecycle.ts # Bounded session status, start/finish, final advice only
@@ -150,7 +149,8 @@ src/
 - `serializeAdvisorContext` and `stableStringify` are pure, deterministic
   (sorted keys) exports, so all three serializers share one canonical entry form
   that fingerprints build on, and the routing and Advisor projections derive
-  from. Automatic advice is persisted separately as bounded plugin-owned history.
+  from. Automatic advice is retained separately as one bounded latest review per
+  session (best-effort plugin state, never gating delivery).
   Own injected system parts must be excluded by identity from canonical capture,
   fingerprints, snapshots, and routing projections; do not filter arbitrary
   user evidence merely because its text resembles an Advisor marker.
@@ -452,13 +452,16 @@ capture-normalized input and never builds or re-normalizes entries itself.
   fabricated tool call (`session.synthetic()` lowers to a user-role message, so it
   cannot carry privileged reviewer authority). Changing the leading prompt may
   affect prefix caching.
-  Advice is committed to bounded plugin-owned history before delivery. Relevant
-  retained records are reinjected into later eligible system contexts without
-  duplication, and supplied to compaction as privileged system context. Retire
-  only captured records whose IDs and exact text are proven absorbed by a
-  successful compaction; failed or unproven compactions preserve them. Do not
-  silently evict unabsorbed records to make room for another paid consultation.
-  Injection failures fail open with `delivered: false`; deletion/disposal must
+  Advice is injected into privileged `event.system` first; the latest successful
+  automatic review is then retained best-effort for future requests. A storage
+  failure never suppresses otherwise valid current advice — only future
+  retention is lost. An oversized review is delivered in full but not retained.
+  The retained review is reinjected into later eligible system contexts as
+  clearly historical reviewer guidance (and as evidence in later Advisor
+  consultations), never touching fingerprints or Jev input. A newer successful
+  review replaces the old one; there is no compaction protocol because the
+  retained note lives outside the conversation transcript. Injection failures
+  fail open with `delivered: false`; deletion/disposal must
   invalidate pending operations before any awaited cleanup to prevent late advice.
 - Session cleanup: there is no session-close hook, so `index.ts` subscribes to
   `ctx.event.subscribe` (`session.deleted`) and clears snapshots, turn state,
@@ -525,11 +528,10 @@ capture-normalized input and never builds or re-normalizes entries itself.
   directory and pass an explicit `path`; the real OpenCode config directory is
   never read or written.
 - Runtime smoke: `bun run smoke` loads the **built** package-root `server.js`
-  (never a stale `dist/*` entry) under private config roots. M1–M8 cover tool and
-  hook/RPC registration, root/native-permission eligibility, explicit shared
-  projection/errors/timeout, modes and awaited privileged-system delivery,
-  explicit→automatic deduplication, retention/compaction/storage/deletion,
-  lifecycle reconstruction, and idempotent server-only cleanup. Advice must
+  (never a stale `dist/*` entry) under private config roots. The smoke is a
+  linear seam check only: entries load, tool schema, hook registration, one
+  explicit consult, one automatic delivery to privileged system, retained
+  write/read, RPC registration, idempotent cleanup. Advice must
   enter `system`, never create a conversation message. Structural smoke is not
   proof of real provider encoding: separately run exact-host 2.0.21 probes and
   assert advice occupies the actual privileged wire system prompt.
@@ -549,6 +551,17 @@ capture-normalized input and never builds or re-normalizes entries itself.
 - Run live probes against one explicit loopback host: a managed `api`/TUI start
   with no explicit host silently targets the normal service and ignores a fresh
   profile.
+- Private `OPENCODE_CONFIG_DIR` isolates config but not provider auth or the
+  host data dir: live retention/telemetry land in the default database, so plan
+  probe sessions and read-only verification accordingly.
+- The plugin emits no logs by design, so live delivery is verified from outside:
+  resolve the host DB with `opencode debug paths db` and read plugin storage
+  read-only (`sqlite3 -readonly`, `kv` table, keys under
+  `plugin:<utf16-hex(pluginID)>:` — event keys carry no literal plugin name, so
+  match the hex prefix, not the text).
+- Denial-behavior tests live in `routing-observer.test.ts` and
+  `advisor-tool.test.ts`, not `eligibility.test.ts`: eligibility contract changes
+  must update those files in the same pass.
 - Zen is bundled into `dist/index.js` (there is no standalone
   `dist/zen-evaluation.js`), so endpoint instrumentation must patch the bundled
   base-URL literal in a private copy of the bundle.

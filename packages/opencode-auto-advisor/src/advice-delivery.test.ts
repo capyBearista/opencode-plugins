@@ -3,18 +3,13 @@ import {
   ADVISOR_DELIVERY_PREFIX,
   advisorAdviceText,
   deliverAdvice,
-  deliverRetainedReviews,
-  retainedReviewEntry,
+  deliverRetainedReview,
 } from "./advice-delivery.js";
-import type { AdviceRecord } from "./advice-history.js";
 import type { AssembledSystemPart } from "./messages.js";
+import { RETAINED_REVIEW_HEADER } from "./retained-review.js";
 
 function priorSystem(): AssembledSystemPart[] {
   return [{ type: "text", text: "hook-only system mutation" }];
-}
-
-function record(id: string, advice: string, turnKey = "turn-1"): AdviceRecord {
-  return { id, sequence: 1, turnKey, materialFingerprint: "f".repeat(64), advice };
 }
 
 describe("advice delivery", () => {
@@ -39,39 +34,28 @@ describe("advice delivery", () => {
 });
 
 describe("retained review delivery", () => {
-  test("builds one reviewer-framed system entry for retained records", () => {
-    const entry = retainedReviewEntry([record("adv_1", "recheck the migration")]);
-
-    expect(entry?.role).toBe("system");
-    expect(entry?.text).toContain("[Auto Advisor retained reviews]");
-    expect(entry?.text).toContain("recheck the migration");
-    expect(entry?.text).toContain("adv_1");
-  });
-
-  test("omits the entry when there is nothing retained", () => {
-    expect(retainedReviewEntry([])).toBeUndefined();
-  });
-
-  test("appends exactly one retained system part", () => {
+  test("appends one reviewer-framed system part for the retained review", () => {
     const system = priorSystem();
 
-    const delivered = deliverRetainedReviews({
+    deliverRetainedReview({
       system,
-      records: [record("adv_1", "first"), record("adv_2", "second")],
+      review: { advice: "recheck the migration", turnKey: "msg-1" },
     });
 
-    expect(delivered).toBe(true);
     expect(system).toHaveLength(2);
     const text = system[1]?.text ?? "";
-    expect(text).toContain("[Auto Advisor retained reviews]");
-    expect(text).toContain("first");
-    expect(text).toContain("second");
+    expect(text).toStartWith(RETAINED_REVIEW_HEADER);
+    expect(text).toContain("recheck the migration");
+    expect(text).toContain("msg-1");
   });
 
-  test("does not append when there are no retained records", () => {
+  test("propagates an immutable system failure instead of claiming delivery", () => {
     const system = priorSystem();
+    Object.freeze(system);
 
-    expect(deliverRetainedReviews({ system, records: [] })).toBe(false);
+    expect(() =>
+      deliverRetainedReview({ system, review: { advice: "recheck", turnKey: "msg-1" } }),
+    ).toThrow();
     expect(system).toHaveLength(1);
   });
 });

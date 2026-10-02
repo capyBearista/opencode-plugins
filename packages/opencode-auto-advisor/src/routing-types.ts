@@ -34,16 +34,10 @@ export interface RoutingStateCapture {
   readonly advisorEntries?: CanonicalState;
 }
 
-export interface AutomaticPreparation {
-  readonly ready: boolean;
-  readonly skipReason?: string;
-}
-
 export interface RoutingOpportunity {
   readonly sessionID: SessionID;
   readonly kind?: DispatchKind;
   readonly capture: () => Promise<RoutingStateCapture>;
-  readonly prepareAutomatic?: () => Promise<AutomaticPreparation>;
   readonly onAdvisorStart?: () => void;
   readonly isCurrent?: () => boolean;
 }

@@ -17,7 +17,6 @@ import { computeInputBudget, type ModelLimitResolver, type ModelLimits } from ".
 import { normalizeAssessment, RouterError } from "./router.js";
 import type {
   AdvisorRouter,
-  AutomaticPreparation,
   DispatchKind,
   NormalizedAssessment,
   RoutingDecision,
@@ -30,8 +29,6 @@ import { createTurnStore } from "./turn-store.js";
 
 export const ADVISOR_LIMITS_SKIP_REASON = "advisor-model-limits-unavailable";
 export const ADVISOR_PROJECTION_SKIP_REASON = "advisor-projection-unusable";
-export const ADVISOR_HISTORY_CAPACITY_SKIP_REASON = "advisor-history-capacity";
-export const ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON = "advisor-history-unavailable";
 export const ADVISOR_OPERATION_INVALIDATED_SKIP_REASON = "advisor-operation-invalidated";
 export const ADVISOR_CONSULT_ERROR_CLASS = "ConsultationError";
 
@@ -94,33 +91,6 @@ export function createRoutingDomain(
 
       if (mode === "active" && turn.consumed >= config.routing.maxConsultationsPerTurn) {
         return { action: "deny", mode, fingerprint, policy };
-      }
-
-      if (mode === "active" && opportunity.prepareAutomatic) {
-        let preparation: AutomaticPreparation;
-        try {
-          preparation = await opportunity.prepareAutomatic();
-        } catch (cause) {
-          if (!isCurrent()) return invalidated({ fingerprint, policy });
-          return {
-            action: "skip",
-            mode,
-            fingerprint,
-            policy,
-            skipReason: ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON,
-            error: describe(cause),
-          };
-        }
-        if (!isCurrent()) return invalidated({ fingerprint, policy });
-        if (!preparation.ready) {
-          return {
-            action: "skip",
-            mode,
-            fingerprint,
-            policy,
-            skipReason: preparation.skipReason ?? ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON,
-          };
-        }
       }
 
       let assessment: NormalizedAssessment;

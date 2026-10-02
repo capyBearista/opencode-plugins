@@ -1,8 +1,6 @@
 import { SystemPart } from "@opencode/ai";
-import type { AdviceRecord } from "./advice-history.js";
-import { formatRetainedReviews } from "./advice-history-format.js";
 import type { AssembledSystemPart } from "./messages.js";
-import type { SerializedEntry } from "./serialize.js";
+import { formatRetainedReview, type RetainedReview } from "./retained-review.js";
 
 export const ADVISOR_DELIVERY_PREFIX = "[Auto Advisor automatic advice]";
 
@@ -21,17 +19,9 @@ export function deliverAdvice(input: AdviceDeliveryInput): void {
 
 export interface RetainedReviewDeliveryInput {
   readonly system: AssembledSystemPart[];
-  readonly records: readonly AdviceRecord[];
+  readonly review: RetainedReview;
 }
 
-export function retainedReviewEntry(records: readonly AdviceRecord[]): SerializedEntry | undefined {
-  const text = formatRetainedReviews(records);
-  return text.length > 0 ? { role: "system", text } : undefined;
-}
-
-export function deliverRetainedReviews(input: RetainedReviewDeliveryInput): boolean {
-  const text = formatRetainedReviews(input.records);
-  if (text.length === 0) return false;
-  input.system.push(SystemPart.make(text));
-  return true;
+export function deliverRetainedReview(input: RetainedReviewDeliveryInput): void {
+  input.system.push(SystemPart.make(formatRetainedReview(input.review)));
 }

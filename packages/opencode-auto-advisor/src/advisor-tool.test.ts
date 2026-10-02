@@ -166,26 +166,6 @@ describe("advisor tool wiring", () => {
     expect(context.prompts).toHaveLength(0);
   });
 
-  test("configured advisor denial fails before reading history or generating", async () => {
-    const context = contextWith([ADVISOR_MESSAGE]);
-    const ctx = {
-      ...context.ctx,
-      agent: {
-        get: async () => ({
-          data: { permissions: [{ action: "advisor", resource: "*", effect: "deny" }] },
-        }),
-      },
-    };
-    await registerPlugin(ctx as never, { loadConfig: configWithoutFile });
-
-    const result = await context.added[0]?.execute({}, TOOL_CONTEXT);
-
-    expect(result?.content).toContain("Auto Advisor consultation failed");
-    expect(result?.content).toContain("permission");
-    expect(context.contextReads).toHaveLength(0);
-    expect(context.prompts).toHaveLength(0);
-  });
-
   test("a missing executor model without an override returns a clear tool error", async () => {
     const context = contextWith([
       { id: "msg-current", time: { created: 3 }, type: "user", text: "hi" } as ContextMessage,

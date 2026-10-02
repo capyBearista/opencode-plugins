@@ -13,8 +13,6 @@ import type { ModelLimitResolver, ModelLimits } from "./model-limits.js";
 import { RouterError } from "./router.js";
 import {
   ADVISOR_CONSULT_ERROR_CLASS,
-  ADVISOR_HISTORY_CAPACITY_SKIP_REASON,
-  ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON,
   ADVISOR_LIMITS_SKIP_REASON,
   ADVISOR_OPERATION_INVALIDATED_SKIP_REASON,
   ADVISOR_PROJECTION_SKIP_REASON,
@@ -24,7 +22,6 @@ import {
 } from "./routing.js";
 import type {
   AdvisorRouter,
-  AutomaticPreparation,
   DispatchKind,
   RouterAssessment,
   RoutingOpportunity,
@@ -81,24 +78,15 @@ function opportunity(
   options: {
     readonly kind?: DispatchKind;
     readonly sessionID?: SessionID;
-    readonly prepareAutomatic?: () => Promise<AutomaticPreparation>;
     readonly onAdvisorStart?: () => void;
     readonly isCurrent?: () => boolean;
   } = {},
 ) {
-  const counts = { captures: 0, preparations: 0 };
+  const counts = { captures: 0 };
   const value: RoutingOpportunity = {
     sessionID: options.sessionID ?? ("ses_1" as SessionID),
     ...(options.kind ? { kind: options.kind } : {}),
     ...(options.isCurrent ? { isCurrent: options.isCurrent } : {}),
-    ...(options.prepareAutomatic
-      ? {
-          prepareAutomatic: async () => {
-            counts.preparations += 1;
-            return options.prepareAutomatic?.() ?? { ready: true };
-          },
-        }
-      : {}),
     ...(options.onAdvisorStart ? { onAdvisorStart: options.onAdvisorStart } : {}),
     capture: async () => {
       counts.captures += 1;
@@ -1110,149 +1098,7 @@ describe("model-aware budget", () => {
   });
 });
 
-describe("automatic preparation and review evidence", () => {
-  test("prepares after the unchanged-state check and before evaluation", async () => {
-    const order: string[] = [];
-    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
-    const routing = domain({
-      config: configWith({ mode: "active" }),
-      router: router.router,
-    });
-
-    await routing.observe(
-      opportunity(stateWith([USER("hi")]), {
-        prepareAutomatic: async () => {
-          order.push("prepare");
-          return { ready: true };
-        },
-      }).value,
-    );
-    order.push("evaluate");
-
-    expect(order).toEqual(["prepare", "evaluate"]);
-  });
-
-  test("never prepares in observe mode", async () => {
-    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
-    const { value, counts } = opportunity(stateWith([USER("hi")]), {
-      prepareAutomatic: async () => ({ ready: true }),
-    });
-
-    const decision = await domain({
-      config: configWith({ mode: "observe" }),
-      router: router.router,
-    }).observe(value);
-
-    expect(decision.action).toBe("accept");
-    expect(counts.preparations).toBe(0);
-    expect(router.calls).toHaveLength(1);
-  });
-
-  test("a not-ready preparation skips before evaluation with its reason", async () => {
-    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
-    const decision = await domain({
-      config: configWith({ mode: "active" }),
-      router: router.router,
-    }).observe(
-      opportunity(stateWith([USER("hi")]), {
-        prepareAutomatic: async () => ({
-          ready: false,
-          skipReason: ADVISOR_HISTORY_CAPACITY_SKIP_REASON,
-        }),
-      }).value,
-    );
-
-    expect(decision).toMatchObject({
-      action: "skip",
-      mode: "active",
-      skipReason: ADVISOR_HISTORY_CAPACITY_SKIP_REASON,
-    });
-    expect(router.calls).toHaveLength(0);
-  });
-
-  test("a throwing preparation skips as unavailable without evaluating", async () => {
-    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
-    const decision = await domain({
-      config: configWith({ mode: "active" }),
-      router: router.router,
-    }).observe(
-      opportunity(stateWith([USER("hi")]), {
-        prepareAutomatic: async () => {
-          throw new Error("storage down");
-        },
-      }).value,
-    );
-
-    expect(decision).toMatchObject({
-      action: "skip",
-      skipReason: ADVISOR_HISTORY_UNAVAILABLE_SKIP_REASON,
-    });
-    expect(decision.error).toContain("storage down");
-    expect(router.calls).toHaveLength(0);
-  });
-
-  test("budget-denied and suppressed states never prepare", async () => {
-    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
-    const first = opportunity(stateWith([USER("hi")]), {
-      prepareAutomatic: async () => ({ ready: true }),
-    });
-    const repeated = opportunity(stateWith([USER("hi")]), {
-      prepareAutomatic: async () => ({ ready: true }),
-    });
-    const changed = opportunity(stateWith([USER("hi"), ASSISTANT(false, [RESULT("done")])]), {
-      prepareAutomatic: async () => ({ ready: true }),
-    });
-    const routing = domain({
-      config: configWith({ mode: "active" }),
-      router: router.router,
-    });
-
-    const accepted = await routing.observe(first.value);
-    const suppressed = await routing.observe(repeated.value);
-    const denied = await routing.observe(changed.value);
-
-    expect(accepted.action).toBe("accept");
-    expect(suppressed.action).toBe("suppress");
-    expect(denied.action).toBe("deny");
-    expect(first.counts.preparations).toBe(1);
-    expect(repeated.counts.preparations).toBe(0);
-    expect(changed.counts.preparations).toBe(0);
-  });
-
-  test("a preparation skip does not consume the consultation budget", async () => {
-    const router = scripted([
-      { advisorWouldHelp: 0.9, consequence: 4 },
-      { advisorWouldHelp: 0.9, consequence: 4 },
-    ]);
-    const advisor = countingService();
-    let ready = false;
-    const routing = domain({
-      config: configWith({ mode: "active" }),
-      router: router.router,
-      service: advisor.service,
-    });
-
-    const skipped = await routing.observe(
-      opportunity(stateWith([USER("hi")]), {
-        prepareAutomatic: async () =>
-          ready
-            ? { ready: true }
-            : { ready: false, skipReason: ADVISOR_HISTORY_CAPACITY_SKIP_REASON },
-      }).value,
-    );
-    expect(skipped.action).toBe("skip");
-
-    ready = true;
-    const accepted = await routing.observe(
-      opportunity(stateWith([USER("hi"), ASSISTANT(false, [RESULT("done")])]), {
-        prepareAutomatic: async () => ({ ready: true }),
-      }).value,
-    );
-
-    expect(accepted.action).toBe("accept");
-    expect(advisor.calls).toHaveLength(1);
-  });
-
+describe("review evidence and consultation outcomes", () => {
   test("advisor entries reach only the projection, not the fingerprint or Jev", async () => {
     const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
     const advisor = countingService();
@@ -1396,33 +1242,6 @@ describe("operation invalidation", () => {
     const retried = await routing.observe(opportunity(stateWith([USER("hi")])).value);
     expect(retried.action).toBe("accept");
     expect(router.calls).toHaveLength(1);
-  });
-
-  test("invalidation during automatic preparation skips before Jev", async () => {
-    let current = true;
-    const router = scripted([{ advisorWouldHelp: 0.9, consequence: 4 }]);
-    const advisor = countingService();
-
-    const decision = await domain({
-      config: configWith({ mode: "active" }),
-      router: router.router,
-      service: advisor.service,
-    }).observe(
-      opportunity(stateWith([USER("hi")]), {
-        isCurrent: () => current,
-        prepareAutomatic: async () => {
-          current = false;
-          return { ready: true };
-        },
-      }).value,
-    );
-
-    expect(decision).toMatchObject({
-      action: "skip",
-      skipReason: ADVISOR_OPERATION_INVALIDATED_SKIP_REASON,
-    });
-    expect(router.calls).toHaveLength(0);
-    expect(advisor.calls).toHaveLength(0);
   });
 
   test("invalidation during Jev evaluation prevents any Advisor start", async () => {

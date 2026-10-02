@@ -5,54 +5,42 @@ export const REVIEWING_LABEL = "Auto-Advisor reviewing";
 export const FINISHED_LABEL = "✓ Auto-Advisor finished";
 
 export interface ReviewViewState {
-  readonly reviewing: boolean;
+  readonly running: boolean;
   readonly finished: boolean;
   readonly advice: string | undefined;
-  readonly adviceId: string | undefined;
 }
+
+export const IDLE_REVIEW_STATE: ReviewViewState = {
+  running: false,
+  finished: false,
+  advice: undefined,
+};
 
 export interface ReviewTransport {
   readonly query: (
     input: { readonly sessionID: string },
     opts: { readonly signal: AbortSignal },
   ) => Promise<ReviewStatus>;
-  readonly subscribe: (
-    name: ReviewEventName,
-    handler: (snapshot: ReviewStatus) => void,
-  ) => () => void;
+  readonly subscribe: (name: ReviewEventName, handler: () => void) => () => void;
 }
 
-export interface ReviewControllerOptions {
+export interface ReviewStoreOptions {
   readonly sessionID: string;
   readonly transport: ReviewTransport;
+  readonly onConnected?: (listener: () => void) => () => void;
   readonly successVisibleMs?: number;
   readonly setTimeoutFn?: (callback: () => void, ms: number) => unknown;
   readonly clearTimeoutFn?: (id: unknown) => void;
 }
 
-export interface ReviewController {
+export interface ReviewStore {
   readonly getState: () => ReviewViewState;
   readonly subscribe: (listener: () => void) => () => void;
   readonly start: () => void;
-  readonly refresh: () => void;
-  readonly reconnect: () => void;
   readonly dispose: () => void;
 }
 
-interface ReviewEnvelope {
-  readonly location: { readonly directory: string };
-  readonly data: { readonly sessionID: string };
-}
-
-export function isLocalReviewEnvelope(
-  envelope: ReviewEnvelope,
-  sessionID: string,
-  directory: string,
-): boolean {
-  return envelope.data.sessionID === sessionID && envelope.location.directory === directory;
-}
-
-export function createReviewController(options: ReviewControllerOptions): ReviewController {
+export function createReviewStore(options: ReviewStoreOptions): ReviewStore {
   const sessionID = options.sessionID;
   const transport = options.transport;
   const visibleMs = options.successVisibleMs ?? REVIEW_SUCCESS_VISIBLE_MS;
@@ -60,26 +48,18 @@ export function createReviewController(options: ReviewControllerOptions): Review
   const clearTimeoutFn =
     options.clearTimeoutFn ?? ((id) => clearTimeout(id as ReturnType<typeof setTimeout>));
 
-  let establishedEpoch: string | undefined;
-  let establishedOwnership = 0;
-  let revision = -1;
-  let reviewing = false;
+  let running = false;
   let finished = false;
   let advice: string | undefined;
   let adviceId: string | undefined;
-  let pulseId: string | undefined;
-  let confirmEpoch: string | undefined;
-  let confirmOwnership = 0;
-  let hintEpoch: string | undefined;
-  let hintRevision = -1;
+  let pulsedId: string | undefined;
+  let pulseTimer: unknown;
+  let queryAbort: AbortController | undefined;
+  let offConnected: (() => void) | undefined;
+  let unsubs: Array<() => void> = [];
+  let querySeq = 0;
   let disposed = false;
   let started = false;
-  let transportGen = 0;
-  let ownershipSeq = 0;
-  let activeOwnership = 0;
-  let queryAbort: AbortController | undefined;
-  let pulseTimer: unknown;
-  let unsubs: Array<() => void> = [];
   const listeners = new Set<() => void>();
 
   const notify = (): void => {
@@ -94,14 +74,13 @@ export function createReviewController(options: ReviewControllerOptions): Review
   };
 
   const clearPulse = (): void => {
-    if (pulseTimer !== undefined) {
-      try {
-        clearTimeoutFn(pulseTimer);
-      } catch {
-        undefined;
-      }
-      pulseTimer = undefined;
+    if (pulseTimer === undefined) return;
+    try {
+      clearTimeoutFn(pulseTimer);
+    } catch {
+      undefined;
     }
+    pulseTimer = undefined;
   };
 
   const restartPulse = (): void => {
@@ -118,119 +97,34 @@ export function createReviewController(options: ReviewControllerOptions): Review
     }
   };
 
-  const reconcileLatest = (snapshot: ReviewStatus): void => {
-    const latest = snapshot.latest;
-    if (!latest) return;
-    if (typeof latest.advice !== "string" || latest.advice.trim().length === 0) return;
-    if (adviceId === latest.id) return;
-    advice = latest.advice;
-    adviceId = latest.id;
-  };
-
-  const hasUsableLatest = (snapshot: ReviewStatus): boolean => {
-    const latest = snapshot.latest;
-    return !!latest && typeof latest.advice === "string" && latest.advice.trim().length > 0;
-  };
-
-  const showIndicators = (snapshot: ReviewStatus): void => {
-    if (snapshot.running.length > 0) {
-      reviewing = true;
+  const apply = (status: ReviewStatus): void => {
+    if (disposed) return;
+    if (status.sessionID !== sessionID) return;
+    running = status.running.length > 0;
+    const latest = status.latest;
+    if (latest === undefined) {
+      advice = undefined;
+      adviceId = undefined;
+    } else if (latest.advice.trim().length > 0 && latest.id !== adviceId) {
+      advice = latest.advice;
+      adviceId = latest.id;
+    }
+    const usableLatest = latest !== undefined && latest.advice.trim().length > 0;
+    const last = status.lastFinished;
+    if (running) {
       finished = false;
       clearPulse();
-      return;
-    }
-    reviewing = false;
-    const last = snapshot.lastFinished;
-    if (last?.outcome === "completed" && hasUsableLatest(snapshot)) {
-      if (last.id !== pulseId) {
-        pulseId = last.id;
+    } else if (last?.outcome === "completed" && usableLatest) {
+      if (last.id !== pulsedId) {
+        pulsedId = last.id;
         finished = true;
         restartPulse();
       }
-      return;
+    } else {
+      finished = false;
+      clearPulse();
     }
-    finished = false;
-    clearPulse();
-  };
-
-  const nextOwnership = (): number => {
-    ownershipSeq += 1;
-    return ownershipSeq;
-  };
-
-  const applyEvent = (snapshot: ReviewStatus, gen: number): void => {
-    if (disposed) return;
-    if (gen !== transportGen) return;
-    if (snapshot.sessionID !== sessionID) return;
-    if (establishedEpoch === undefined) {
-      establishedEpoch = snapshot.epoch;
-      establishedOwnership = activeOwnership;
-      revision = snapshot.revision;
-      reconcileLatest(snapshot);
-      showIndicators(snapshot);
-      notify();
-      return;
-    }
-    if (snapshot.epoch !== establishedEpoch) {
-      if (confirmEpoch !== snapshot.epoch) {
-        issueQuery(snapshot.epoch);
-        hintEpoch = snapshot.epoch;
-        hintRevision = snapshot.revision;
-      } else if (hintEpoch !== snapshot.epoch || snapshot.revision > hintRevision) {
-        hintEpoch = snapshot.epoch;
-        hintRevision = snapshot.revision;
-      }
-      return;
-    }
-    if (snapshot.revision <= revision) return;
-    revision = snapshot.revision;
-    reconcileLatest(snapshot);
-    showIndicators(snapshot);
     notify();
-  };
-
-  const applyQuery = (snapshot: ReviewStatus, gen: number, ownership: number): void => {
-    if (disposed) return;
-    if (gen !== transportGen) return;
-    if (ownership !== activeOwnership) return;
-    if (snapshot.sessionID !== sessionID) return;
-    if (establishedEpoch === undefined) {
-      establishedEpoch = snapshot.epoch;
-      establishedOwnership = ownership;
-      revision = snapshot.revision;
-      reconcileLatest(snapshot);
-      showIndicators(snapshot);
-      notify();
-      return;
-    }
-    if (snapshot.epoch !== establishedEpoch) {
-      if (ownership <= establishedOwnership) return;
-      establishedEpoch = snapshot.epoch;
-      establishedOwnership = ownership;
-      revision = snapshot.revision;
-      advice = undefined;
-      adviceId = undefined;
-      pulseId = undefined;
-      reconcileLatest(snapshot);
-      showIndicators(snapshot);
-      notify();
-      return;
-    }
-    if (snapshot.revision <= revision) return;
-    revision = snapshot.revision;
-    reconcileLatest(snapshot);
-    showIndicators(snapshot);
-    notify();
-  };
-
-  const subscribeBoth = (gen: number): void => {
-    for (const name of ["review.started", "review.finished"] as const) {
-      try {
-        unsubs.push(transport.subscribe(name, (snapshot) => applyEvent(snapshot, gen)));
-      } catch {
-        unsubs.push(() => undefined);
-      }
-    }
   };
 
   const unsubscribeAll = (): void => {
@@ -245,18 +139,10 @@ export function createReviewController(options: ReviewControllerOptions): Review
     }
   };
 
-  const issueQuery = (confirmation?: string): void => {
-    const gen = transportGen;
-    activeOwnership = nextOwnership();
-    const ownership = activeOwnership;
-    if (confirmation !== undefined) {
-      confirmEpoch = confirmation;
-      confirmOwnership = ownership;
-    } else {
-      confirmEpoch = undefined;
-      hintEpoch = undefined;
-      hintRevision = -1;
-    }
+  const sync = (): void => {
+    if (disposed || !started) return;
+    querySeq += 1;
+    const seq = querySeq;
     try {
       queryAbort?.abort();
     } catch {
@@ -268,49 +154,35 @@ export function createReviewController(options: ReviewControllerOptions): Review
     try {
       result = transport.query({ sessionID }, { signal: controller.signal });
     } catch {
-      if (ownership === confirmOwnership) {
-        confirmEpoch = undefined;
-        hintEpoch = undefined;
-        hintRevision = -1;
-      }
       return;
     }
     void Promise.resolve(result).then(
-      (snapshot) => {
-        const wasConfirming = ownership === confirmOwnership;
-        const savedHintEpoch = hintEpoch;
-        const savedHintRevision = hintRevision;
-        if (wasConfirming) {
-          confirmEpoch = undefined;
-          hintEpoch = undefined;
-          hintRevision = -1;
-        }
-        try {
-          applyQuery(snapshot, gen, ownership);
-        } catch {
-          return;
-        }
-        if (!wasConfirming) return;
-        if (disposed) return;
-        if (gen !== transportGen) return;
-        if (snapshot.sessionID !== sessionID) return;
-        if (savedHintEpoch === undefined) return;
-        if (savedHintEpoch !== snapshot.epoch) return;
-        if (savedHintRevision <= snapshot.revision) return;
-        issueQuery(savedHintEpoch);
+      (status) => {
+        if (seq === querySeq) apply(status);
       },
-      () => {
-        if (ownership === confirmOwnership) {
-          confirmEpoch = undefined;
-          hintEpoch = undefined;
-          hintRevision = -1;
-        }
-      },
+      () => undefined,
     );
   };
 
+  const subscribeEvents = (): void => {
+    for (const name of ["review.started", "review.finished"] as const) {
+      try {
+        unsubs.push(transport.subscribe(name, sync));
+      } catch {
+        unsubs.push(() => undefined);
+      }
+    }
+  };
+
+  const reconnect = (): void => {
+    if (disposed || !started) return;
+    unsubscribeAll();
+    subscribeEvents();
+    sync();
+  };
+
   return {
-    getState: () => ({ reviewing, finished, advice, adviceId }),
+    getState: () => ({ running, finished, advice }),
     subscribe: (listener) => {
       if (disposed) return () => undefined;
       listeners.add(listener);
@@ -321,20 +193,15 @@ export function createReviewController(options: ReviewControllerOptions): Review
     start: () => {
       if (disposed || started) return;
       started = true;
-      subscribeBoth(transportGen);
-      issueQuery();
-    },
-    refresh: () => {
-      if (disposed || !started) return;
-      issueQuery();
-    },
-    reconnect: () => {
-      if (disposed || !started) return;
-      transportGen += 1;
-      const gen = transportGen;
-      unsubscribeAll();
-      subscribeBoth(gen);
-      issueQuery();
+      subscribeEvents();
+      if (options.onConnected) {
+        try {
+          offConnected = options.onConnected(reconnect);
+        } catch {
+          offConnected = undefined;
+        }
+      }
+      sync();
     },
     dispose: () => {
       if (disposed) return;
@@ -345,9 +212,103 @@ export function createReviewController(options: ReviewControllerOptions): Review
         undefined;
       }
       queryAbort = undefined;
+      try {
+        offConnected?.();
+      } catch {
+        undefined;
+      }
+      offConnected = undefined;
       unsubscribeAll();
       clearPulse();
       listeners.clear();
     },
   };
+}
+
+export interface ReviewStoreKey {
+  readonly sessionID: string;
+  readonly directory: string;
+}
+
+export interface ReviewStoreHandle {
+  readonly store: ReviewStore;
+  readonly release: () => void;
+}
+
+export interface ReviewStoreRegistry {
+  readonly acquire: (key: ReviewStoreKey) => ReviewStoreHandle | undefined;
+  readonly dispose: () => void;
+}
+
+export function createReviewStoreRegistry(
+  create: (key: ReviewStoreKey) => ReviewStore | undefined,
+): ReviewStoreRegistry {
+  interface Entry {
+    readonly store: ReviewStore;
+    refs: number;
+  }
+  const entries = new Map<string, Entry>();
+  let disposed = false;
+
+  const handleFor = (id: string, entry: Entry): ReviewStoreHandle => {
+    let released = false;
+    return {
+      store: entry.store,
+      release: () => {
+        if (released) return;
+        released = true;
+        entry.refs -= 1;
+        if (entry.refs > 0) return;
+        if (entries.get(id) === entry) entries.delete(id);
+        if (disposed) return;
+        entry.store.dispose();
+      },
+    };
+  };
+
+  return {
+    acquire: (key) => {
+      if (disposed) return undefined;
+      const id = `${key.directory}\u0000${key.sessionID}`;
+      const existing = entries.get(id);
+      if (existing) {
+        existing.refs += 1;
+        return handleFor(id, existing);
+      }
+      let store: ReviewStore | undefined;
+      try {
+        store = create(key);
+      } catch {
+        store = undefined;
+      }
+      if (store === undefined) return undefined;
+      const entry: Entry = { store, refs: 1 };
+      entries.set(id, entry);
+      try {
+        store.start();
+      } catch {
+        entries.delete(id);
+        store.dispose();
+        return undefined;
+      }
+      return handleFor(id, entry);
+    },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      for (const entry of entries.values()) entry.store.dispose();
+      entries.clear();
+    },
+  };
+}
+
+export function isLocalReviewEnvelope(
+  envelope: {
+    readonly location: { readonly directory: string };
+    readonly data: { readonly sessionID: string };
+  },
+  sessionID: string,
+  directory: string,
+): boolean {
+  return envelope.data.sessionID === sessionID && envelope.location.directory === directory;
 }
