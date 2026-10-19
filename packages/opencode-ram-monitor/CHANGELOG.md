@@ -1,5 +1,11 @@
 # @capybearista/opencode-ram-monitor
 
+## 2.0.1
+
+### Patch Changes
+
+- 7bdc13d: Support OpenTUI 0.6 SyntaxStyle owner (renderer.nativeScene), backward-compatible with 0.5.
+
 ## 2.0.0
 
 ### Major Changes
