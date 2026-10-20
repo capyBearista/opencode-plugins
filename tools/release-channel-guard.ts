@@ -44,6 +44,10 @@ const APPROVED_POLICY: Record<string, PolicyEntry> = {
     releaseClass: "v2",
     channel: "latest",
   },
+  "@capybearista/opencode-auto-advisor": {
+    releaseClass: "v2",
+    channel: "latest",
+  },
 };
 
 type ReleaseClass = "v1" | "v2";
@@ -265,7 +269,7 @@ function validatePolicy(policy: ReleasePolicy) {
       .some((name, index) => name !== approvedNames[index])
   ) {
     throw new ReleaseGuardError(
-      "release channel policy must contain exactly six approved packages",
+      "release channel policy must contain exactly seven approved packages",
     );
   }
   for (const [name, rawEntry] of entries) {
@@ -333,7 +337,7 @@ async function readWorkspace(cwd: string, policy: ReleasePolicy): Promise<Worksp
     actual.some((name, index) => name !== [...expected].sort()[index])
   ) {
     throw new ReleaseGuardError(
-      "workspace policy mismatch: expected exactly the six approved packages",
+      "workspace policy mismatch: expected exactly the seven approved packages",
     );
   }
 

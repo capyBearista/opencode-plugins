@@ -69,7 +69,7 @@ bun --filter @capybearista/opencode-agent-prompt-inheritance test
 - `src/prompt-capture.ts` — opt-in debug capture behind `OPENCODE_AGENT_PROMPT_INHERITANCE_CAPTURE_FILE`
 
 ### Gotchas
-- This package depends on `experimental.chat.system.transform`; re-check `docs/opencode-system-prompt-guide.md` before changing hook assumptions.
+- This package depends on `experimental.chat.system.transform`; re-check `../../docs/opencode-system-prompt-guide.md` before changing hook assumptions.
 - Session lookup failures intentionally fail open. Preserve that behavior unless you are explicitly hardening the plugin.
 - Build output includes prompt assets copied into `dist/prompt/`; artifact regressions are as important as TypeScript regressions.
 - `console.warn` is intentional here for fail-open debugging in transform-hook paths where richer logging is not guaranteed.

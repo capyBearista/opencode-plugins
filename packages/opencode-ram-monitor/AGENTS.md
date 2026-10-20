@@ -75,7 +75,7 @@ This package is a split-output plugin:
 - Config load order in `src/sidebar-config.ts` is non-obvious: global `cli.json(c)` precedes all worktree files, global `tui.json(c)` is never read, later files override earlier ones, and the global dir honors `$XDG_CONFIG_HOME/opencode` between `$OPENCODE_CONFIG_DIR` and `~/.config/opencode/`. Keep the README's Configuration order in lockstep.
 - Do not introduce top-level async work in `src/tui.ts`; keep polling startup inside `onMount`.
 - Use recursive `setTimeout`, not `setInterval`, so RAM probes cannot overlap.
-- Any change to RAM collection should be validated on the target OS pattern documented in `docs/opencode-plugin-ipc-and-os-patterns.md`.
+- Any change to RAM collection should be validated on the target OS pattern documented in `../../docs/opencode-plugin-ipc-and-os-patterns.md`.
 - The modal opens with `dialog.clear()`, then `show()`, then `set({ size: "xlarge" })` — order matters because `show()` resets the size.
 - The `/ram` keymap layer must live inside the `app` slot render (host ownership rule); keep the dedupe guard.
 - Server injection failures must fail clearly; `/ram` should not silently swallow output or leave the session hanging.

@@ -65,7 +65,7 @@ As the plugin grows beyond 150 lines, split into focused modules. If that happen
 
 ### Gotchas
 - The `/output-style` command is handled by throwing `__STYLE_COMMAND_HANDLED__` to short-circuit the command pipeline; there is no command file to edit.
-- Prompt injection changes should always be cross-checked against `docs/opencode-system-prompt-guide.md` and local style persistence tests.
+- Prompt injection changes should always be cross-checked against `../../docs/opencode-system-prompt-guide.md` and local style persistence tests.
 - Built-in styles are published assets. Keep runtime code and packaged file layout in sync.
 - This plugin relies on stable append/prepend behavior. When changing text composition, verify restarts and repeated `/style` usage.
 
