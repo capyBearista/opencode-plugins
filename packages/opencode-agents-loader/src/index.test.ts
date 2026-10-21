@@ -1371,10 +1371,98 @@ Mixed permission dialects.
       await unlink(lock);
       await scheduled?.();
       expect(
-        diagnostics.some((message) => message.includes("bridge synchronization recovered")),
+        diagnostics.some((message) =>
+          message.includes("bridge reconciliation resumed; pending cleanup may remain"),
+        ),
       ).toBe(true);
       expect(reloads).toBe(1);
       expect(await readlink(path.join(config, "agents", "recovered.md"))).toContain(".agents");
+    } finally {
+      await bridge.dispose();
+    }
+  });
+
+  test("B16 reports resumed reconciliation when stale cleanup remains blocked", async () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const root = await temporaryDirectory();
+    const home = path.join(root, "home");
+    const project = path.join(root, "project");
+    const config = path.join(root, "config");
+    const source = path.join(home, ".agents", "agents", "stale.md");
+    const destinationRoot = path.join(config, "agents");
+    const destination = path.join(destinationRoot, "stale.md");
+    const manifestDirectory = path.join(config, ".agents-loader");
+    const manifestPath = path.join(manifestDirectory, "agents-manifest.json");
+    const lock = path.join(manifestDirectory, "agents.lock");
+    const options = { home, environment: { OPENCODE_CONFIG_DIR: config } };
+
+    await mkdir(project, { recursive: true });
+    await markdown(path.join(home, ".agents"), "agents/stale.md", {}, "stale agent");
+    expect((await syncAgentLinks(location(project), options)).safe).toBe(true);
+    await unlink(source);
+    await writeFile(lock, "held");
+
+    const diagnostics: string[] = [];
+    let scheduled: (() => void | Promise<void>) | undefined;
+    const bridge = await startAgentBridge(
+      { location: location(project), agent: { reload: async () => {} } },
+      {
+        ...options,
+        lockAttempts: 1,
+        lockDelayMs: 0,
+        diagnostics: (message) => diagnostics.push(message),
+        scheduler: {
+          setInterval: (callback) => {
+            scheduled = callback;
+            return "timer";
+          },
+          clearInterval: () => {},
+        },
+      },
+    );
+
+    try {
+      expect(diagnostics.some((message) => message.includes("cooperating lock timed out"))).toBe(
+        true,
+      );
+      await chmod(destinationRoot, 0o500);
+      try {
+        await unlink(lock);
+        await scheduled?.();
+        expect(
+          diagnostics.some((message) => message.includes("could not remove owned stale link")),
+        ).toBe(true);
+        expect(
+          diagnostics.some((message) =>
+            message.includes("bridge reconciliation resumed; pending cleanup may remain"),
+          ),
+        ).toBe(true);
+        expect(diagnostics.some((message) => message.includes("synchronization recovered"))).toBe(
+          false,
+        );
+        expect(await readlink(destination)).toContain(".agents");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        expect(manifest.links.map((entry: { destination: string }) => entry.destination)).toEqual([
+          "stale.md",
+        ]);
+        await scheduled?.();
+        expect(
+          diagnostics.filter((message) =>
+            message.includes("bridge reconciliation resumed; pending cleanup may remain"),
+          ),
+        ).toHaveLength(1);
+      } finally {
+        await chmod(destinationRoot, 0o700);
+      }
+
+      await scheduled?.();
+      await expectPathMissing(destination);
+      expect(JSON.parse(await readFile(manifestPath, "utf8")).links).toEqual([]);
+      expect(
+        diagnostics.filter((message) =>
+          message.includes("bridge reconciliation resumed; pending cleanup may remain"),
+        ),
+      ).toHaveLength(1);
     } finally {
       await bridge.dispose();
     }

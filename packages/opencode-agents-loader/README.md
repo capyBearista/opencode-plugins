@@ -160,7 +160,8 @@ V1 configuration as described in [Install](#install).
   before moving lock files aside for recovery; never remove a lock while a process might
   be reconciling. Preserve the manifests, then restart OpenCode.
 - An active plugin does not guarantee every scope reconciled. Unsafe scopes emit
-  diagnostic errors, and the bridge reports when synchronization recovers.
+  diagnostic errors; when safe reconciliation resumes, the bridge reports that pending
+  cleanup may remain. This message does not mean all stale links have been removed.
 
 ## Development Notes
 

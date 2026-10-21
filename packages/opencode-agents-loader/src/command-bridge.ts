@@ -224,7 +224,10 @@ async function startNativeBridge(
         const wasSafe = lastResult.safe;
         lastResult = next;
         if (!next.safe) return;
-        if (!wasSafe) diagnostics(`${domain.destination} bridge synchronization recovered`);
+        if (!wasSafe)
+          diagnostics(
+            `${domain.destination} bridge reconciliation resumed; pending cleanup may remain`,
+          );
         const changed = lastFingerprint === undefined || lastFingerprint !== next.fingerprint;
         lastFingerprint = next.fingerprint;
         if (changed) await context.reload();
