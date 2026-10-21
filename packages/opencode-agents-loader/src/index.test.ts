@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -1249,5 +1250,127 @@ Mixed permission dialects.
     expect(malformed.safe).toBe(false);
     expect(malformed.changed).toBe(false);
     expect(await readlink(destination)).toContain(".agents");
+  });
+
+  test("B13 global deletion reconciles manifests without touching another plugin's commands", async () => {
+    const root = await temporaryDirectory();
+    const home = path.join(root, "home");
+    const project = path.join(root, "project");
+    const config = path.join(root, "config");
+    const sourceRoot = path.join(home, ".agents");
+    const options = { home, environment: { OPENCODE_CONFIG_DIR: config } };
+    await mkdir(project, { recursive: true });
+    await markdown(sourceRoot, "agents/removed.md", { mode: "subagent" }, "old agent");
+    await markdown(sourceRoot, "commands/removed.md", {}, "old command");
+    await markdown(sourceRoot, "commands/adversarial-review.md", {}, "must not replace native");
+    const native = path.join(config, "commands", "adversarial-review.md");
+    const constructive = path.join(config, "commands", "constructive-review.md");
+    await mkdir(path.dirname(native), { recursive: true });
+    await writeFile(native, "native adversarial review");
+    await writeFile(constructive, "native constructive review");
+
+    expect((await syncAgentLinks(location(project), options)).safe).toBe(true);
+    expect((await syncCommandLinks(location(project), options)).safe).toBe(true);
+    await unlink(path.join(sourceRoot, "agents", "removed.md"));
+    await unlink(path.join(sourceRoot, "commands", "removed.md"));
+    expect((await syncAgentLinks(location(project), options)).safe).toBe(true);
+    expect((await syncCommandLinks(location(project), options)).safe).toBe(true);
+
+    await expectPathMissing(path.join(config, "agents", "removed.md"));
+    await expectPathMissing(path.join(config, "commands", "removed.md"));
+    expect(await readFile(native, "utf8")).toBe("native adversarial review");
+    expect(await readFile(constructive, "utf8")).toBe("native constructive review");
+    for (const domain of ["agents", "commands"]) {
+      const manifest = JSON.parse(
+        await readFile(path.join(config, ".agents-loader", domain + "-manifest.json"), "utf8"),
+      );
+      expect(manifest.links).toEqual([]);
+    }
+  });
+
+  test("B14 failed stale-link unlink retains manifest ownership until successful retry", async () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const root = await temporaryDirectory();
+    const home = path.join(root, "home");
+    const project = path.join(root, "project");
+    const config = path.join(root, "config");
+    const source = path.join(home, ".agents", "agents", "removed.md");
+    const destinationRoot = path.join(config, "agents");
+    const destination = path.join(destinationRoot, "removed.md");
+    const manifestPath = path.join(config, ".agents-loader", "agents-manifest.json");
+    const options = { home, environment: { OPENCODE_CONFIG_DIR: config } };
+    await mkdir(project, { recursive: true });
+    await markdown(path.join(home, ".agents"), "agents/removed.md", {}, "old agent");
+    expect((await syncAgentLinks(location(project), options)).safe).toBe(true);
+    await unlink(source);
+
+    await chmod(destinationRoot, 0o500);
+    try {
+      const diagnostics: string[] = [];
+      const blocked = await syncAgentLinks(location(project), {
+        ...options,
+        diagnostics: (message) => diagnostics.push(message),
+      });
+      expect(blocked.safe).toBe(true);
+      expect(blocked.changed).toBe(false);
+      expect(diagnostics.some((message) => message.includes("could not remove owned stale link"))).toBe(true);
+      expect(await readlink(destination)).toContain(".agents");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      expect(manifest.links.map((entry: { destination: string }) => entry.destination)).toEqual([
+        "removed.md",
+      ]);
+    } finally {
+      await chmod(destinationRoot, 0o700);
+    }
+
+    const recovered = await syncAgentLinks(location(project), options);
+    expect(recovered.safe).toBe(true);
+    expect(recovered.changed).toBe(true);
+    await expectPathMissing(destination);
+    expect(JSON.parse(await readFile(manifestPath, "utf8")).links).toEqual([]);
+  });
+
+  test("B15 emits unhealthy and recovered diagnostics around a held lock", async () => {
+    const root = await temporaryDirectory();
+    const home = path.join(root, "home");
+    const project = path.join(root, "project");
+    const config = path.join(root, "config");
+    const manifestDir = path.join(config, ".agents-loader");
+    await mkdir(project, { recursive: true });
+    await markdown(path.join(home, ".agents"), "agents/recovered.md", {}, "new agent");
+    await mkdir(manifestDir, { recursive: true });
+    const lock = path.join(manifestDir, "agents.lock");
+    await writeFile(lock, "held-by-another-process");
+    const diagnostics: string[] = [];
+    let scheduled: (() => void | Promise<void>) | undefined;
+    let reloads = 0;
+    const bridge = await startAgentBridge(
+      { location: location(project), agent: { reload: async () => void reloads++ } },
+      {
+        home,
+        environment: { OPENCODE_CONFIG_DIR: config },
+        lockAttempts: 1,
+        lockDelayMs: 0,
+        diagnostics: (message) => diagnostics.push(message),
+        scheduler: {
+          setInterval: (callback) => {
+            scheduled = callback;
+            return "timer";
+          },
+          clearInterval: () => {},
+        },
+      },
+    );
+    try {
+      expect(diagnostics.some((message) => message.includes("bridge started with unsafe scopes"))).toBe(true);
+      await expectPathMissing(path.join(config, "agents", "recovered.md"));
+      await unlink(lock);
+      await scheduled?.();
+      expect(diagnostics.some((message) => message.includes("bridge synchronization recovered"))).toBe(true);
+      expect(reloads).toBe(1);
+      expect(await readlink(path.join(config, "agents", "recovered.md"))).toContain(".agents");
+    } finally {
+      await bridge.dispose();
+    }
   });
 });

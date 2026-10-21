@@ -213,6 +213,13 @@ async function startNativeBridge(
   let lastResult = initial;
   if (initial.safe) {
     lastFingerprint = initial.fingerprint;
+  } else {
+    diagnostics(
+      `${domain.destination} bridge started with unsafe scopes: ${initial.scopes
+        .filter((scope) => !scope.safe)
+        .map((scope) => scope.scope)
+        .join(", ")}`,
+    );
   }
 
   const poll = async () => {
@@ -221,8 +228,20 @@ async function startNativeBridge(
     const operation = (async () => {
       try {
         const next = await syncNativeLinks(context.location, domain, { ...options, diagnostics });
+        const wasSafe = lastResult.safe;
         lastResult = next;
-        if (!next.safe) return;
+        if (!next.safe) {
+          if (wasSafe) {
+            diagnostics(
+              `${domain.destination} bridge synchronization became unsafe: ${next.scopes
+                .filter((scope) => !scope.safe)
+                .map((scope) => scope.scope)
+                .join(", ")}`,
+            );
+          }
+          return;
+        }
+        if (!wasSafe) diagnostics(`${domain.destination} bridge synchronization recovered`);
         const changed = lastFingerprint === undefined || lastFingerprint !== next.fingerprint;
         lastFingerprint = next.fingerprint;
         if (changed) await context.reload();
@@ -491,6 +510,7 @@ async function reconcileLocked(
         await unlink(destinationPath);
         changed = true;
       } catch (error) {
+        retained.set(oldLink.destination, oldLink);
         options.diagnostics(
           `${spec.id}: could not remove owned stale link ${oldLink.destination}: ${formatError(error)}`,
         );

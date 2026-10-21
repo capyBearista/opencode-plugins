@@ -154,6 +154,13 @@ V1 configuration as described in [Install](#install).
 - Confirm the directory naming is `commands/` or `command/`, `agents/` or `agent/`
 - Inspect the scoped `.agents-loader/{commands,agents}-manifest.json` and diagnostics before removing
   anything; unowned native files are intentionally preserved
+- If synchronization stops after a crash, inspect `.agents-loader/agents.lock` and
+  `.agents-loader/commands.lock`. The bridge deliberately fails closed on held locks,
+  including abandoned ones. Stop **all** OpenCode processes using that config directory
+  before moving lock files aside for recovery; never remove a lock while a process might
+  be reconciling. Preserve the manifests, then restart OpenCode.
+- An active plugin does not guarantee every scope reconciled. The bridge reports
+  unsafe scopes at startup and transitions into or out of an unsafe state.
 
 ## Development Notes
 
