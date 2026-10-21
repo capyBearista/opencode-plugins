@@ -1,5 +1,11 @@
 # @capybearista/opencode-agents-loader
 
+## 2.0.1
+
+### Patch Changes
+
+- 59d9736: Retain ownership of stale symlinks whose removal fails, report when safe reconciliation resumes without implying cleanup is complete, and document safe manual lock recovery.
+
 ## 2.0.0
 
 ### Major Changes

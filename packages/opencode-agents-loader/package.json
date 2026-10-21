@@ -1,6 +1,6 @@
 {
   "name": "@capybearista/opencode-agents-loader",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "OpenCode V2 plugin that extends command and agent discovery to ~/.agents/ and .agents/ directories",
   "author": "capyBearista <capybearista@github.com>",
   "repository": {
