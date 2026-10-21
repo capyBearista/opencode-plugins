@@ -1282,7 +1282,7 @@ Mixed permission dialects.
     expect(await readFile(constructive, "utf8")).toBe("native constructive review");
     for (const domain of ["agents", "commands"]) {
       const manifest = JSON.parse(
-        await readFile(path.join(config, ".agents-loader", domain + "-manifest.json"), "utf8"),
+        await readFile(path.join(config, ".agents-loader", `${domain}-manifest.json`), "utf8"),
       );
       expect(manifest.links).toEqual([]);
     }
@@ -1313,7 +1313,9 @@ Mixed permission dialects.
       });
       expect(blocked.safe).toBe(true);
       expect(blocked.changed).toBe(false);
-      expect(diagnostics.some((message) => message.includes("could not remove owned stale link"))).toBe(true);
+      expect(
+        diagnostics.some((message) => message.includes("could not remove owned stale link")),
+      ).toBe(true);
       expect(await readlink(destination)).toContain(".agents");
       const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
       expect(manifest.links.map((entry: { destination: string }) => entry.destination)).toEqual([
@@ -1362,11 +1364,15 @@ Mixed permission dialects.
       },
     );
     try {
-      expect(diagnostics.some((message) => message.includes("bridge started with unsafe scopes"))).toBe(true);
+      expect(
+        diagnostics.some((message) => message.includes("bridge started with unsafe scopes")),
+      ).toBe(true);
       await expectPathMissing(path.join(config, "agents", "recovered.md"));
       await unlink(lock);
       await scheduled?.();
-      expect(diagnostics.some((message) => message.includes("bridge synchronization recovered"))).toBe(true);
+      expect(
+        diagnostics.some((message) => message.includes("bridge synchronization recovered")),
+      ).toBe(true);
       expect(reloads).toBe(1);
       expect(await readlink(path.join(config, "agents", "recovered.md"))).toContain(".agents");
     } finally {
