@@ -159,8 +159,8 @@ V1 configuration as described in [Install](#install).
   including abandoned ones. Stop **all** OpenCode processes using that config directory
   before moving lock files aside for recovery; never remove a lock while a process might
   be reconciling. Preserve the manifests, then restart OpenCode.
-- An active plugin does not guarantee every scope reconciled. The bridge reports
-  unsafe scopes at startup and transitions into or out of an unsafe state.
+- An active plugin does not guarantee every scope reconciled. Unsafe scopes emit
+  diagnostic errors, and the bridge reports when synchronization recovers.
 
 ## Development Notes
 

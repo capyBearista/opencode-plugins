@@ -1364,9 +1364,9 @@ Mixed permission dialects.
       },
     );
     try {
-      expect(
-        diagnostics.some((message) => message.includes("bridge started with unsafe scopes")),
-      ).toBe(true);
+      expect(diagnostics.some((message) => message.includes("cooperating lock timed out"))).toBe(
+        true,
+      );
       await expectPathMissing(path.join(config, "agents", "recovered.md"));
       await unlink(lock);
       await scheduled?.();
