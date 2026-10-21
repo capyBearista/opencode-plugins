@@ -221,8 +221,13 @@ async function startNativeBridge(
     const operation = (async () => {
       try {
         const next = await syncNativeLinks(context.location, domain, { ...options, diagnostics });
+        const wasSafe = lastResult.safe;
         lastResult = next;
         if (!next.safe) return;
+        if (!wasSafe)
+          diagnostics(
+            `${domain.destination} bridge reconciliation resumed; pending cleanup may remain`,
+          );
         const changed = lastFingerprint === undefined || lastFingerprint !== next.fingerprint;
         lastFingerprint = next.fingerprint;
         if (changed) await context.reload();
@@ -491,6 +496,7 @@ async function reconcileLocked(
         await unlink(destinationPath);
         changed = true;
       } catch (error) {
+        retained.set(oldLink.destination, oldLink);
         options.diagnostics(
           `${spec.id}: could not remove owned stale link ${oldLink.destination}: ${formatError(error)}`,
         );
