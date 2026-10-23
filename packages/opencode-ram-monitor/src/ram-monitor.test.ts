@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "@opentui/solid/preload";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { createTestRenderer } from "@opentui/core/testing";
 import { type JSX, testRender } from "@opentui/solid";
 import { createRoot } from "solid-js";
 import { getRamMonitorDebugLogPath, isRamMonitorDebugEnabled } from "./debug.js";
@@ -125,7 +126,7 @@ type MockTuiContext = {
   keymap: { layer: (input: () => unknown) => (() => void) | undefined };
   theme: Record<string, unknown>;
   location: { directory: string };
-  renderer: { idle: () => Promise<void> };
+  renderer: { idle: () => Promise<void>; nativeScene?: unknown };
 };
 
 function mockOpenTuiSolid(): void {
@@ -574,8 +575,8 @@ describe("@capybearista/opencode-ram-monitor", () => {
     expect(packageJson.exports["./tui"].default).toBe("./dist/tui.js");
     expect(packageJson.files).toEqual(["dist", "server.js", "tui.js"]);
     expect(packageJson["oc-plugin"]).toBeUndefined();
-    expect(packageJson.peerDependencies["@opencode/plugin"]).toMatch(/^2\./);
-    expect(packageJson.devDependencies["@opencode/plugin"]).toMatch(/^2\./);
+    expect(packageJson.peerDependencies["@opencode/plugin"]).toBe(">=2.1.0 <3");
+    expect(packageJson.devDependencies["@opencode/plugin"]).toMatch(/^2\.1\./);
     expect(packageJson.peerDependencies["@opencode-ai/plugin"]).toBeUndefined();
   });
 
@@ -733,6 +734,8 @@ describe("@capybearista/opencode-ram-monitor", () => {
 
     const module = await loadTuiPlugin();
     const { context, slots, dialog, dialogCalls, getShownRender } = createTuiContext();
+    const { renderer } = await createTestRenderer({ width: 40, height: 12 });
+    context.renderer = renderer;
     await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
 
     const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");
@@ -816,6 +819,8 @@ describe("@capybearista/opencode-ram-monitor", () => {
 
     const module = await loadTuiPlugin();
     const { context, slots, getShownRender } = createTuiContext();
+    const { renderer } = await createTestRenderer({ width: 40, height: 12 });
+    context.renderer = renderer;
     await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
 
     const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");

@@ -81,12 +81,11 @@ function formatRamHeaderRight(count: number): string {
 
 // A plugin cannot reach the host's syntax style, so mirror the markdown
 // subset of the host's generator from the plugin-visible theme tokens.
-function createMarkdownSyntaxStyle(theme: TuiContext["theme"], owner?: unknown): SyntaxStyle {
+function createMarkdownSyntaxStyle(
+  theme: TuiContext["theme"],
+  owner: TuiContext["renderer"]["nativeScene"],
+): SyntaxStyle {
   const { markdown } = theme;
-  const fromTheme = SyntaxStyle.fromTheme as (
-    rules: Parameters<typeof SyntaxStyle.fromTheme>[0],
-    owner?: unknown,
-  ) => SyntaxStyle;
   const rules: Parameters<typeof SyntaxStyle.fromTheme>[0] = [
     {
       scope: [
@@ -121,7 +120,7 @@ function createMarkdownSyntaxStyle(theme: TuiContext["theme"], owner?: unknown):
     },
     { scope: ["markup.strikethrough"], style: { foreground: theme.text.muted } },
   ];
-  return fromTheme(rules, owner);
+  return SyntaxStyle.fromTheme(rules, owner);
 }
 
 function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Element {
@@ -279,7 +278,7 @@ function RamModal(props: { context: TuiContext }): JSX.Element {
   const theme = () => readRamWidgetTheme(props.context.theme);
   const syntaxStyle = createMarkdownSyntaxStyle(
     props.context.theme,
-    (props.context.renderer as { nativeScene?: unknown }).nativeScene,
+    props.context.renderer.nativeScene,
   );
   const [tree, setTree] = createSignal<string | null>(null);
   const [error, setError] = createSignal<string | null>(null);
