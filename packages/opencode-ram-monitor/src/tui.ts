@@ -4,7 +4,7 @@ import type { JSX } from "@opentui/solid";
 import { createElement, insert, spread } from "@opentui/solid";
 import { createComponent, createSignal, onCleanup, onMount } from "solid-js";
 import { debugLog, getErrorMessage } from "./debug.js";
-import { formatBytes, formatRoleRow } from "./format.js";
+import { formatBytes, formatMinimalLine, formatRoleRow } from "./format.js";
 import {
   type Inspection,
   inspectProcesses,
@@ -187,6 +187,39 @@ function RamWidget(props: {
     if (timeout) clearTimeout(timeout);
   });
 
+  const flash = () => (tick() % 2 === 0 ? "●" : "○");
+
+  if (props.options.layout === "minimal") {
+    return createContainerNode(
+      "box",
+      {
+        flexDirection: "row",
+        gap: 1,
+        onMouseUp: () => {
+          props.onOpen();
+        },
+      },
+      [
+        createTextNode(
+          { fg: () => statusColor(theme().success), flexShrink: 0 },
+          () => `RAM ${flash()}`,
+        ),
+        createTextNode(
+          {
+            fg: () => (error() ? theme().error : statusColor(theme().text)),
+            wrapMode: "none",
+            truncate: true,
+          },
+          () => {
+            if (error()) return `Error: ${error()}`;
+            const current = sample();
+            return current ? formatMinimalLine(current.breakdown) : "…";
+          },
+        ),
+      ],
+    );
+  }
+
   return createContainerNode(
     "box",
     {
@@ -210,7 +243,7 @@ function RamWidget(props: {
             {
               fg: () => statusColor(theme().success),
             },
-            () => formatRamHeaderLeft(tick() % 2 === 0 ? "●" : "○"),
+            () => formatRamHeaderLeft(flash()),
           ),
           createTextNode(
             {

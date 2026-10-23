@@ -290,6 +290,58 @@ describe("full layout", () => {
   });
 });
 
+describe("minimal layout", () => {
+  test("renders one borderless row with the total and tools share", async () => {
+    const { setup, frame } = await mountWidget(fakeDeps(), { layout: "minimal" });
+    const lines = (await frame()).split("\n").filter((line) => line.trim());
+
+    expect(lines).toEqual([expect.stringMatching(/RAM [●○] 1\.81 GB \(tools 350 MB\)/)]);
+    expect(lines[0]).not.toContain("│");
+    setup.renderer.destroy();
+  });
+
+  test("keeps notices to one row", async () => {
+    const { setup, frame } = await mountWidget(
+      fakeDeps({
+        inspect: async () => ({
+          ...inspection,
+          layout: { ...inspection.layout, serverPid: null },
+          notice: "server not visible",
+        }),
+      }),
+      { layout: "minimal", refreshIntervalMs: "bad" },
+    );
+    const lines = (await frame()).split("\n").filter((line) => line.trim());
+
+    expect(lines).toEqual([expect.stringMatching(/RAM [●○] 600 MB \(tools 0 MB\)/)]);
+    setup.renderer.destroy();
+  });
+
+  test("shows poll errors on the same row", async () => {
+    const { setup, frame } = await mountWidget(
+      fakeDeps({
+        inspect: async () => {
+          throw new Error("boom");
+        },
+      }),
+      { layout: "minimal" },
+    );
+    const lines = (await frame()).split("\n").filter((line) => line.trim());
+
+    expect(lines).toEqual([expect.stringMatching(/RAM [●○] Error: boom/)]);
+    setup.renderer.destroy();
+  });
+
+  test("opens the modal on click", async () => {
+    const { setup, frame, dialogCalls } = await mountWidget(fakeDeps(), { layout: "minimal" });
+    await frame();
+
+    await setup.mockMouse.click(2, 0);
+    expect(dialogCalls).toEqual(["clear", "show", "set"]);
+    setup.renderer.destroy();
+  });
+});
+
 describe("modal", () => {
   async function renderModal(
     deps: RamMonitorDeps,
