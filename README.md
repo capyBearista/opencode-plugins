@@ -37,7 +37,7 @@ A keyboard-driven UI extension. Double-tap the Escape key to instantly open the 
 
 ### 🐏 [opencode-ram-monitor](./packages/opencode-ram-monitor/)
 
-Zero-dependency RAM monitoring for OpenCode sessions. Shows live session memory usage in the sidebar and adds a `/ram` command for a detailed process tree and aggregate OpenCode RAM totals.
+Zero-dependency RAM monitoring for OpenCode. Shows live memory in the sidebar, split into OpenCode itself and the tools its server runs, with an optional one-line layout, and adds a `/ram` command for the full process tree.
 
 ### 💬 [opencode-agent-prompt-inheritance](./packages/opencode-agent-prompt-inheritance/)
 
@@ -54,7 +54,7 @@ Persistent response styles for OpenCode sessions. This plugin injects selected g
 | `opencode-adversarial-review` | `@latest` in `opencode.json(c)` | `@1.0.0` in `opencode.json(c)` |
 | `opencode-agents-loader` | `@latest` in `opencode.json(c)` | `@1.0.0` in `opencode.json(c)` |
 | `opencode-double-tap-timeline` | `@latest` in `cli.json(c)` | `@1.0.1` in `tui.json(c)` |
-| `opencode-ram-monitor` | `@latest` in `opencode.json(c)` and/or `cli.json(c)` | `@1.1.0` in `opencode.json(c)` and `tui.json(c)` |
+| `opencode-ram-monitor` | `@latest` in `cli.json(c)` (requires OpenCode 2.1+) | `@1.1.0` in `opencode.json(c)` and `tui.json(c)` |
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port TBD | `@1.0.0` in `opencode.json(c)` |
 | `opencode-output-styles` | V1 only; V2 unplanned |  `@1.0.1` in `opencode.json(c)` |
 
@@ -71,8 +71,7 @@ Server profile. Add to `opencode.json(c)`:
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     "@capybearista/opencode-adversarial-review@latest",
-    "@capybearista/opencode-agents-loader@latest",
-    "@capybearista/opencode-ram-monitor@latest"
+    "@capybearista/opencode-agents-loader@latest"
   ]
 }
 ```
