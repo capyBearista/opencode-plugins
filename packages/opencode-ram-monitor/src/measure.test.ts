@@ -64,6 +64,38 @@ describe("findOrphanPtyDaemons", () => {
 });
 
 describe("measureRam", () => {
+  test("counts a TUI started inside an OpenCode terminal pane once", () => {
+    const nested = [
+      entry(1, 0, 10, "/sbin/init"),
+      entry(SERVER, 1, 900, "/home/a/.opencode/bin/opencode serve --service"),
+      entry(300, SERVER, 30, PTY_CMD),
+      entry(310, 300, 20, "bash"),
+      entry(TUI, 310, 600, "opencode"),
+      entry(400, TUI, 50, "sh -c ps -A"),
+      entry(401, 400, 50, "ps -A"),
+    ];
+    expect(measureRam(nested, { tuiPid: TUI, serverPid: SERVER, terminalPids: [] }, 0)).toEqual({
+      opencode: 1600 * MB,
+      tools: 50 * MB,
+      total: 1650 * MB,
+    });
+  });
+
+  test("counts a TUI inside an orphaned terminal pane once", () => {
+    const nested = [
+      ...childServer.filter((item) => item.pid !== TUI && item.pid !== 400),
+      entry(500, 1, 30, PTY_CMD),
+      entry(510, 500, 20, "bash"),
+      entry(TUI, 510, 600, "opencode"),
+      entry(520, TUI, 10, "sh -c ps -A"),
+    ];
+    expect(measureRam(nested, { tuiPid: TUI, serverPid: SERVER, terminalPids: [500] }, 0)).toEqual({
+      opencode: 1510 * MB,
+      tools: 400 * MB,
+      total: 1910 * MB,
+    });
+  });
+
   test("splits TUI + server from everything under the server", () => {
     expect(
       measureRam(childServer, { tuiPid: TUI, serverPid: SERVER, terminalPids: [] }, 0),

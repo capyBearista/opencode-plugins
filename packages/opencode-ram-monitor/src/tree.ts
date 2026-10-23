@@ -79,11 +79,12 @@ export function renderProcessTree(
       fallbackTuiRss,
     ),
   );
+  const tuiBranch = new Set([layout.tuiPid]);
   if (layout.serverPid !== null) {
-    sections.push(renderSection("Server", layout.serverPid, inspection, children, new Set(), 0));
+    sections.push(renderSection("Server", layout.serverPid, inspection, children, tuiBranch, 0));
   }
   for (const daemon of layout.terminalPids) {
-    sections.push(renderSection("Terminals", daemon, inspection, children, new Set(), 0));
+    sections.push(renderSection("Terminals", daemon, inspection, children, tuiBranch, 0));
   }
   return sections.join("\n\n");
 }

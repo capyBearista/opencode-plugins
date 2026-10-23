@@ -55,6 +55,24 @@ describe("renderProcessTree", () => {
     expect(markdown).toContain("> refreshIntervalMs must be a number; using 5000");
   });
 
+  test("does not repeat a TUI that runs inside an OpenCode terminal pane", () => {
+    const nested: ProcessEntry[] = [
+      entry(200, 1, 900, "/home/a/.opencode/bin/opencode serve --service"),
+      entry(300, 200, 30, "/x/opencode-pty daemon --runtime-dir /home/a/state/pty --name z"),
+      entry(310, 300, 20, "bash"),
+      entry(100, 310, 600, "opencode"),
+      entry(400, 100, 50, "sh -c ps -A"),
+    ];
+    const markdown = renderProcessTree(
+      { entries: nested, layout: { tuiPid: 100, serverPid: 200, terminalPids: [] }, notice: null },
+      0,
+    );
+    expect(markdown.match(/\[opencode\] \(PID 100\)/g)?.length).toBe(1);
+    expect(markdown.match(/\(PID 400\)/g)?.length).toBe(1);
+    expect(markdown).toContain("Total 1.56 GB · OpenCode 1.51 GB · Tools 50 MB");
+    expect(markdown).toContain("**Server** (PID 200) - 950 MB");
+  });
+
   test("does not repeat the server inside the TUI tree", () => {
     const markdown = renderProcessTree(inspection, 0);
     expect(markdown.match(/\(PID 200\) - 900\.00 MB/g)?.length).toBe(1);

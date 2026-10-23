@@ -137,9 +137,12 @@ export function measureRam(
     : fallbackTuiRss;
   const server = layout.serverPid === null ? 0 : (rssByPid.get(layout.serverPid) ?? 0);
 
+  // A TUI opened inside an OpenCode terminal pane sits under the server or a
+  // terminal daemon; its share is already counted above.
+  const tuiBranch = new Set([layout.tuiPid]);
   const tools = new Set<number>();
   for (const root of roots) {
-    for (const pid of collectSubtree(children, root)) tools.add(pid);
+    for (const pid of collectSubtree(children, root, tuiBranch)) tools.add(pid);
   }
   tools.delete(layout.tuiPid);
   if (layout.serverPid !== null) tools.delete(layout.serverPid);
