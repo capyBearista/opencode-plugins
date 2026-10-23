@@ -47,6 +47,8 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 - **MUST NOT** write `@v2` as a specifier — npm parses it as a semver range. Use `@latest` (or an exact `@2.0.0` pin for a fixed setup).
 - **MUST** keep V1 and V2 lines apart. The loader and timeline V1 releases are frozen but available by exact pin. Both lines may share the default config directory, so use separate profiles (`OPENCODE_CONFIG_DIR`) for side-by-side testing.
 - **SHOULD** manage V2 targets with `opencode plugin check` / `opencode plugin update`; a restart or reload alone does not upgrade a cached target, and exact pins stay fixed.
+- **MUST** keep plugin majors in step with OpenCode majors: a package in release class `vN` only ever publishes major N. Ship breaking changes within an OpenCode major as a `minor` changeset, never `major`. 3.x is reserved for OpenCode V3. `bun run release:changesets` (CI: Changesets workflow) and the publish guard enforce this.
+- When a package moves to a new OpenCode major, change its `releaseClass` in both `tools/release-channels.json` and the guard's `APPROVED_POLICY` in the same PR as its `major` changeset. That bump is the only `major` the guard allows.
 - Channel source of truth: [`tools/release-channels.json`](tools/release-channels.json), enforced by [`tools/release-channel-guard.ts`](tools/release-channel-guard.ts).
 
 ### Bug Fix Workflow (MUST)
@@ -74,6 +76,7 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 - `bun run lint` — Lint all code (runs the release-channel guard first)
 - `bun run check` — Format and lint all packages
 - `bun changeset` — Manage versioning and publishing
+- `bun run release:changesets` — Check pending changesets and manifests against the class-major rule (local, no registry)
 - `bun run changeset:publish` — Build and publish releasable packages
 - `bun run release:check` — Inspect unpublished set and channel (no publish)
 
