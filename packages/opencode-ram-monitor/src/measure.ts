@@ -45,8 +45,11 @@ export function findServer(
   return server && isServerCommand(server.command) ? server.pid : null;
 }
 
-function isUnder(path: string, directory: string): boolean {
-  const normalize = (value: string) => value.replace(/[\\/]+$/, "").toLowerCase();
+function isUnder(path: string, directory: string, platform: NodeJS.Platform): boolean {
+  const normalize = (value: string) => {
+    const trimmed = value.replace(/[\\/]+$/, "");
+    return platform === "win32" ? trimmed.toLowerCase() : trimmed;
+  };
   const parent = normalize(directory);
   const child = normalize(path);
   return child.startsWith(`${parent}/`) || child.startsWith(`${parent}\\`);
@@ -54,48 +57,65 @@ function isUnder(path: string, directory: string): boolean {
 
 // A server spawns its terminal daemon detached, so after a server restart the
 // daemon survives under init and would drop out of the server's subtree.
-export function findOrphanPtyDaemons(entries: readonly ProcessEntry[], home: string): number[] {
+export function findOrphanPtyDaemons(
+  entries: readonly ProcessEntry[],
+  home: string,
+  platform: NodeJS.Platform = process.platform,
+): number[] {
   const byPid = new Map(entries.map((item) => [item.pid, item]));
   return entries
     .filter((item) => {
       const runtimeDir = readPtyDaemonRuntimeDir(item.command);
-      if (runtimeDir === null || !isUnder(runtimeDir, home)) return false;
+      if (runtimeDir === null || !isUnder(runtimeDir, home, platform)) return false;
       const parent = byPid.get(item.ppid);
       return !parent || !isServerCommand(parent.command);
     })
     .map((item) => item.pid);
 }
 
-function collectSubtree(entries: readonly ProcessEntry[], rootPid: number): Set<number> {
-  const children = new Map<number, number[]>();
-  for (const item of entries) {
-    const siblings = children.get(item.ppid);
-    if (siblings) siblings.push(item.pid);
-    else children.set(item.ppid, [item.pid]);
-  }
+export type ChildrenByParent = ReadonlyMap<number, readonly ProcessEntry[]>;
 
+export function childrenByParent(entries: readonly ProcessEntry[]): ChildrenByParent {
+  const children = new Map<number, ProcessEntry[]>();
+  for (const item of entries) {
+    if (item.ppid === item.pid) continue;
+    const siblings = children.get(item.ppid);
+    if (siblings) siblings.push(item);
+    else children.set(item.ppid, [item]);
+  }
+  return children;
+}
+
+function collectSubtree(
+  children: ChildrenByParent,
+  rootPid: number,
+  skip: ReadonlySet<number> = new Set(),
+): Set<number> {
   const seen = new Set<number>();
   const pending = [rootPid];
   while (pending.length > 0) {
     const pid = pending.pop() as number;
-    if (seen.has(pid)) continue;
+    if (seen.has(pid) || (pid !== rootPid && skip.has(pid))) continue;
     seen.add(pid);
-    pending.push(...(children.get(pid) ?? []));
+    for (const child of children.get(pid) ?? []) pending.push(child.pid);
   }
   return seen;
 }
 
-export function toolPids(entries: readonly ProcessEntry[], layout: ProcessLayout): Set<number> {
-  const pids = new Set<number>();
-  if (layout.serverPid !== null) {
-    for (const pid of collectSubtree(entries, layout.serverPid)) pids.add(pid);
+function separateRoots(layout: ProcessLayout): Set<number> {
+  const roots = new Set<number>(layout.terminalPids);
+  if (layout.serverPid !== null) roots.add(layout.serverPid);
+  return roots;
+}
+
+// The TUI's share stops at any server process, verified or not, so a server
+// that could not be verified never lands in "OpenCode" with its tools.
+export function tuiBoundary(entries: readonly ProcessEntry[], layout: ProcessLayout): Set<number> {
+  const boundary = separateRoots(layout);
+  for (const item of entries) {
+    if (isServerCommand(item.command)) boundary.add(item.pid);
   }
-  for (const daemon of layout.terminalPids) {
-    for (const pid of collectSubtree(entries, daemon)) pids.add(pid);
-  }
-  pids.delete(layout.tuiPid);
-  if (layout.serverPid !== null) pids.delete(layout.serverPid);
-  return pids;
+  return boundary;
 }
 
 export function measureRam(
@@ -104,12 +124,29 @@ export function measureRam(
   fallbackTuiRss: number,
 ): RamBreakdown {
   const rssByPid = new Map(entries.map((item) => [item.pid, item.rss]));
-  const tui = rssByPid.get(layout.tuiPid) ?? fallbackTuiRss;
+  const children = childrenByParent(entries);
+  const roots = separateRoots(layout);
+  const sum = (pids: Iterable<number>) => {
+    let total = 0;
+    for (const pid of pids) total += rssByPid.get(pid) ?? 0;
+    return total;
+  };
+
+  const tui = rssByPid.has(layout.tuiPid)
+    ? sum(collectSubtree(children, layout.tuiPid, tuiBoundary(entries, layout)))
+    : fallbackTuiRss;
   const server = layout.serverPid === null ? 0 : (rssByPid.get(layout.serverPid) ?? 0);
-  let tools = 0;
-  for (const pid of toolPids(entries, layout)) tools += rssByPid.get(pid) ?? 0;
+
+  const tools = new Set<number>();
+  for (const root of roots) {
+    for (const pid of collectSubtree(children, root)) tools.add(pid);
+  }
+  tools.delete(layout.tuiPid);
+  if (layout.serverPid !== null) tools.delete(layout.serverPid);
+
   const opencode = tui + server;
-  return { opencode, tools, total: opencode + tools };
+  const toolsRss = sum(tools);
+  return { opencode, tools: toolsRss, total: opencode + toolsRss };
 }
 
 async function readServerPid(client: ServerInfoClient): Promise<number | null> {

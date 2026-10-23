@@ -40,9 +40,33 @@ describe("renderProcessTree", () => {
     expect(markdown).toContain("[bash] (PID 510) - 20.00 MB");
   });
 
+  test("section totals add up to the summary", () => {
+    const withHelper = { ...inspection, entries: [...entries, entry(400, 100, 4, "sh -c ps -A")] };
+    const markdown = renderProcessTree(withHelper, 0);
+    expect(markdown).toContain("OpenCode 1.47 GB");
+    expect(markdown).toContain("**TUI** (PID 100) - 604 MB");
+  });
+
+  test("lists option warnings with the notice", () => {
+    const markdown = renderProcessTree({ ...inspection, notice: "server not visible" }, 0, [
+      "refreshIntervalMs must be a number; using 5000",
+    ]);
+    expect(markdown).toContain("> server not visible");
+    expect(markdown).toContain("> refreshIntervalMs must be a number; using 5000");
+  });
+
   test("does not repeat the server inside the TUI tree", () => {
     const markdown = renderProcessTree(inspection, 0);
     expect(markdown.match(/\(PID 200\) - 900\.00 MB/g)?.length).toBe(1);
+  });
+
+  test("keeps an unverified server child out of the TUI tree", () => {
+    const markdown = renderProcessTree(
+      { entries, layout: { tuiPid: 100, serverPid: null, terminalPids: [] }, notice: null },
+      0,
+    );
+    expect(markdown).toContain("**TUI** (PID 100) - 600 MB");
+    expect(markdown).not.toContain("(PID 200)");
   });
 
   test("shows the notice and only the TUI when the server is not visible", () => {

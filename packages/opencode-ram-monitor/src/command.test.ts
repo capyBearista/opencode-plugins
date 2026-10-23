@@ -13,10 +13,17 @@ describe("isServerCommand", () => {
     );
   });
 
+  test("recognizes wrapped and flagged servers", () => {
+    expect(isServerCommand("node /usr/lib/node_modules/opencode-ai/bin/opencode serve")).toBe(true);
+    expect(isServerCommand("bun run /src/opencode/packages/cli/src/index.ts serve --service")).toBe(
+      true,
+    );
+    expect(isServerCommand("opencode --print-logs serve --service")).toBe(true);
+  });
+
   test("rejects TUIs, other subcommands, and unrelated processes", () => {
     expect(isServerCommand("opencode")).toBe(false);
     expect(isServerCommand("opencode --standalone")).toBe(false);
-    expect(isServerCommand("opencode run serve")).toBe(false);
     expect(isServerCommand("python3 -m http.server serve")).toBe(false);
     expect(isServerCommand("node /srv/app.js serve")).toBe(false);
     expect(isServerCommand("")).toBe(false);
@@ -35,6 +42,17 @@ describe("readPtyDaemonRuntimeDir", () => {
         'C:\\opencode-pty\\opencode-pty.exe daemon --runtime-dir "C:\\Users\\a\\state\\pty" --name x',
       ),
     ).toBe("C:\\Users\\a\\state\\pty");
+  });
+
+  test("keeps spaces that ps prints unquoted, and the = form", () => {
+    expect(
+      readPtyDaemonRuntimeDir(
+        "/x/opencode-pty daemon --runtime-dir /Users/John Smith/.local/state/opencode/pty --name 1",
+      ),
+    ).toBe("/Users/John Smith/.local/state/opencode/pty");
+    expect(readPtyDaemonRuntimeDir("opencode-pty daemon --runtime-dir=/home/a/pty --name 1")).toBe(
+      "/home/a/pty",
+    );
   });
 
   test("returns null for anything else", () => {

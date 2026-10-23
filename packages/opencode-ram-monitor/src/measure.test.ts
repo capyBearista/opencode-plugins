@@ -55,13 +55,19 @@ describe("findOrphanPtyDaemons", () => {
     ];
     expect(findOrphanPtyDaemons(entries, HOME)).toEqual([500, 503]);
   });
+
+  test("compares paths case-sensitively outside Windows", () => {
+    const entries = [entry(500, 1, 30, PTY_CMD.replaceAll(HOME, "/home/A"))];
+    expect(findOrphanPtyDaemons(entries, HOME, "linux")).toEqual([]);
+    expect(findOrphanPtyDaemons(entries, HOME, "win32")).toEqual([500]);
+  });
 });
 
 describe("measureRam", () => {
   test("splits TUI + server from everything under the server", () => {
     expect(
       measureRam(childServer, { tuiPid: TUI, serverPid: SERVER, terminalPids: [] }, 0),
-    ).toEqual({ opencode: 1500 * MB, tools: 350 * MB, total: 1850 * MB });
+    ).toEqual({ opencode: 1504 * MB, tools: 350 * MB, total: 1854 * MB });
   });
 
   test("does not count the TUI's own helper children as tools", () => {
@@ -72,9 +78,9 @@ describe("measureRam", () => {
   test("measures a detached server the same way", () => {
     const detached = childServer.map((item) => (item.pid === SERVER ? { ...item, ppid: 1 } : item));
     expect(measureRam(detached, { tuiPid: TUI, serverPid: SERVER, terminalPids: [] }, 0)).toEqual({
-      opencode: 1500 * MB,
+      opencode: 1504 * MB,
       tools: 350 * MB,
-      total: 1850 * MB,
+      total: 1854 * MB,
     });
   });
 
@@ -92,11 +98,20 @@ describe("measureRam", () => {
     ).toBe(380 * MB);
   });
 
-  test("falls back to the TUI only when the server is not visible", () => {
+  test("keeps an unverified server child out of the TUI's share", () => {
     expect(measureRam(childServer, { tuiPid: TUI, serverPid: null, terminalPids: [] }, 0)).toEqual({
-      opencode: 600 * MB,
+      opencode: 604 * MB,
       tools: 0,
-      total: 600 * MB,
+      total: 604 * MB,
+    });
+  });
+
+  test("falls back to the TUI only when the server is not visible", () => {
+    const tuiOnly = childServer.filter((item) => item.pid !== SERVER);
+    expect(measureRam(tuiOnly, { tuiPid: TUI, serverPid: null, terminalPids: [] }, 0)).toEqual({
+      opencode: 604 * MB,
+      tools: 0,
+      total: 604 * MB,
     });
   });
 

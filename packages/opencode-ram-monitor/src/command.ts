@@ -27,21 +27,24 @@ export function getTokenBaseName(token: string): string {
   return parts.length > 0 ? parts[parts.length - 1] : "";
 }
 
-function isOpencodeBinary(token: string | undefined): boolean {
-  return token !== undefined && OPENCODE_BINARIES.has(getTokenBaseName(token));
-}
-
+// Only guards against trusting a pid reported by a remote server, so any
+// launcher shape (binary, node/bun wrapper, leading flags) is accepted.
 export function isServerCommand(commandLine: string): boolean {
   const tokens = splitCommandTokens(commandLine);
-  return isOpencodeBinary(tokens[0]) && tokens[1] === "serve";
+  const serveIndex = tokens.indexOf("serve", 1);
+  return (
+    serveIndex > 0 &&
+    tokens.slice(0, serveIndex).some((token) => token.toLowerCase().includes("opencode"))
+  );
 }
 
+// ps prints arguments unquoted, so the path runs up to the next known flag.
 export function readPtyDaemonRuntimeDir(commandLine: string): string | null {
   const tokens = splitCommandTokens(commandLine);
   if (!tokens[0] || !PTY_BINARIES.has(getTokenBaseName(tokens[0]))) return null;
   if (tokens[1] !== "daemon") return null;
-  const flagIndex = tokens.indexOf("--runtime-dir");
-  return flagIndex === -1 ? null : (tokens[flagIndex + 1] ?? null);
+  const match = commandLine.match(/\s--runtime-dir(?:=|\s+)(.+?)(?=\s+--name\b|\s*$)/);
+  return match ? match[1].trim().replace(/^['"]|['"]$/g, "") : null;
 }
 
 export function getProcessDisplayLabel(commandLine: string): string {

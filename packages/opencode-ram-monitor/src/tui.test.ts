@@ -261,9 +261,14 @@ describe("full layout", () => {
     setup.renderer.destroy();
   });
 
-  test("shows option warnings in a footer row", async () => {
-    const { setup, frame } = await mountWidget(fakeDeps(), { refreshIntervalMs: "bad" });
-    expect(await frame()).toContain("refreshIntervalMs must be");
+  test("shows every option warning in footer rows", async () => {
+    const { setup, frame } = await mountWidget(fakeDeps(), {
+      refreshIntervalMs: "bad",
+      layout: "tiny",
+    });
+    const text = await frame();
+    expect(text).toContain("refreshIntervalMs must be");
+    expect(text).toContain("layout must be");
     setup.renderer.destroy();
   });
 
