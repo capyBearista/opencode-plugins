@@ -192,6 +192,21 @@ describe("inspectProcesses", () => {
     expect(result.notice).toBe("server not visible");
   });
 
+  test("leaves local terminals out of the TUI-only fallback", async () => {
+    const entries = [
+      ...childServer,
+      entry(500, 1, 30, PTY_CMD),
+      entry(510, 500, 400, "npm run dev"),
+    ];
+    const result = await inspectProcesses(client(4242), {
+      tuiPid: TUI,
+      home: HOME,
+      takeSnapshot: async () => snapshot(entries),
+    });
+    expect(result.notice).toBe("server not visible");
+    expect(result.layout).toEqual({ tuiPid: TUI, serverPid: null, terminalPids: [] });
+  });
+
   test("reports a notice when the server info request fails", async () => {
     const failing = {
       server: {

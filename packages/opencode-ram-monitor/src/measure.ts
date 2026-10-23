@@ -182,6 +182,14 @@ export async function inspectProcesses(
   }
 
   const serverPid = findServer(snapshot.entries, reportedPid, tuiPid);
+  if (serverPid === null) {
+    // The fallback reports this TUI only; local terminals may belong to another server.
+    return {
+      entries: snapshot.entries,
+      layout: { tuiPid, serverPid, terminalPids: [] },
+      notice: "server not visible",
+    };
+  }
   return {
     entries: snapshot.entries,
     layout: {
@@ -189,6 +197,6 @@ export async function inspectProcesses(
       serverPid,
       terminalPids: findOrphanPtyDaemons(snapshot.entries, options.home ?? homedir()),
     },
-    notice: serverPid === null ? "server not visible" : null,
+    notice: null,
   };
 }
