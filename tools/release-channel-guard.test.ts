@@ -17,6 +17,8 @@ import path from "node:path";
 import {
   buildReleasePlan,
   type ChangesetsRunner,
+  checkClassMajor,
+  checkPendingChangesets,
   createChangesetsEnvironment,
   PUBLIC_REGISTRY,
   type RegistryClient,
@@ -322,19 +324,13 @@ describe("release-channel-guard policy matrix", () => {
     expect(invocation).toEqual(["publish", "--tag", "latest", "--no-git-tag"]);
   });
 
-  test("R15 accepts a future stable 3.0 package version on OpenCode 2", async () => {
+  test("R15 rejects a stable 3.0 package version on OpenCode 2", async () => {
     const cwd = await createFixture({ [packageNames.agents]: "3.0.0" });
 
-    const plan = await buildReleasePlan({ cwd, registryClient: createRegistryClient() });
-
-    expect(plan.channel).toBe("latest");
-    expect(plan.unpublished).toEqual([
-      expect.objectContaining({
-        name: packageNames.agents,
-        version: "3.0.0",
-        releaseClass: "v2",
-      }),
-    ]);
+    await expectGuardRejects(
+      buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
+      "may only publish major 2 from the v2 release class",
+    );
   });
 
   test("R3 a remaining unpublished V2 package stays on latest after partial publication", async () => {
@@ -485,8 +481,8 @@ describe("release-channel-guard policy matrix", () => {
     );
   });
 
-  test("R2 accepts major 2 and 3 for the V2 class", async () => {
-    for (const version of ["2.0.0", "3.0.0"]) {
+  test("R2 accepts major 2 for the V2 class", async () => {
+    for (const version of ["2.0.0", "2.1.0"]) {
       const cwd = await createFixture({ [packageNames.ram]: version });
 
       const plan = await buildReleasePlan({ cwd, registryClient: createRegistryClient() });
@@ -508,7 +504,7 @@ describe("release-channel-guard policy matrix", () => {
 
     await expectGuardRejects(
       buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
-      "stable package version >=2.0.0",
+      "may only publish major 2 from the v2 release class",
     );
   });
 
@@ -662,7 +658,7 @@ describe("release-channel-guard policy matrix", () => {
 
     await expectGuardRejects(
       buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
-      "stable package version >=2.0.0",
+      "may only publish major 2 from the v2 release class",
     );
   });
 
@@ -716,12 +712,12 @@ describe("release-channel-guard policy matrix", () => {
     );
   });
 
-  test("R8 explains the V2 stable version threshold", async () => {
+  test("R8 explains the V2 major pin", async () => {
     const cwd = await createFixture({ [packageNames.timeline]: "1.0.2" });
 
     await expectGuardRejects(
       buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
-      "may only publish a stable package version >=2.0.0 from the V2 release class",
+      "@capybearista/opencode-double-tap-timeline may only publish major 2 from the v2 release class",
     );
   });
 
@@ -1589,4 +1585,98 @@ describe("R11 disposable real Changesets publication", () => {
 
 test("the policy points at the public npm registry", () => {
   expect(PUBLIC_REGISTRY).toBe("https://registry.npmjs.org/");
+});
+
+describe("class-major rule", () => {
+  test("allows minor and patch bumps inside the class major", () => {
+    for (const bump of ["minor", "patch", "none", undefined] as const) {
+      expect(
+        checkClassMajor({ name: "pkg", releaseClass: "v2", version: "2.0.1", bump }),
+      ).toBeNull();
+    }
+  });
+
+  test("rejects a major bump for a package already on its class major", () => {
+    expect(
+      checkClassMajor({ name: "pkg", releaseClass: "v2", version: "2.0.1", bump: "major" }),
+    ).toContain("pkg cannot take a major bump");
+  });
+
+  test("rejects a version above its class major", () => {
+    expect(
+      checkClassMajor({ name: "pkg", releaseClass: "v2", version: "3.0.0", bump: undefined }),
+    ).toContain("pkg is on major 3, above its v2 release class");
+  });
+
+  test("allows the major bump that moves a package into a newer class", () => {
+    expect(
+      checkClassMajor({ name: "pkg", releaseClass: "v3", version: "2.4.0", bump: "major" }),
+    ).toBeNull();
+  });
+
+  test("keeps V1 packages on major 1", () => {
+    expect(
+      checkClassMajor({ name: "pkg", releaseClass: "v1", version: "1.0.1", bump: "major" }),
+    ).toContain("cannot take a major bump");
+  });
+});
+
+describe("pending changesets", () => {
+  async function writeChangeset(root: string, file: string, body: string) {
+    await writeFile(path.join(root, ".changeset", file), body);
+  }
+
+  test("accepts minor and patch changesets for V2 packages", async () => {
+    const cwd = await createFixture({
+      [packageNames.ram]: "2.0.1",
+      [packageNames.agents]: "2.0.1",
+    });
+    await writeChangeset(
+      cwd,
+      "a.md",
+      `---\n"${packageNames.ram}": minor\n---\n\nBreaking, but minor.\n`,
+    );
+    await writeChangeset(cwd, "b.md", `---\n'${packageNames.agents}': patch\n---\n\nFix.\n`);
+    await writeFile(path.join(cwd, ".changeset", "README.md"), "# Changesets\n");
+
+    await expect(checkPendingChangesets({ cwd })).resolves.toEqual({ files: 2, problems: [] });
+  });
+
+  test("rejects a major changeset for a V2 package", async () => {
+    const cwd = await createFixture({ [packageNames.ram]: "2.0.1" });
+    await writeChangeset(cwd, "a.md", `---\n"${packageNames.ram}": major\n---\n\nOops.\n`);
+
+    await expectGuardRejects(
+      checkPendingChangesets({ cwd }),
+      `${packageNames.ram} cannot take a major bump`,
+    );
+  });
+
+  test("rejects a hand-edited manifest above its class major", async () => {
+    const cwd = await createFixture({ [packageNames.timeline]: "3.0.0" });
+
+    await expectGuardRejects(
+      checkPendingChangesets({ cwd }),
+      `${packageNames.timeline} is on major 3, above its v2 release class`,
+    );
+  });
+
+  test("reports every problem at once", async () => {
+    const cwd = await createFixture({
+      [packageNames.ram]: "2.0.1",
+      [packageNames.review]: "3.1.0",
+    });
+    await writeChangeset(cwd, "a.md", `---\n${packageNames.ram}: major\n---\n\nOops.\n`);
+
+    const failure = checkPendingChangesets({ cwd });
+    await expectGuardRejects(failure, packageNames.ram);
+    await expectGuardRejects(checkPendingChangesets({ cwd }), packageNames.review);
+  });
+
+  test("ignores packages outside the release policy", async () => {
+    const cwd = await createFixture();
+    await writeChangeset(cwd, "a.md", `---\n"@someone/else": major\n---\n\nNot ours.\n`);
+
+    await expect(checkPendingChangesets({ cwd })).resolves.toEqual({ files: 1, problems: [] });
+  });
 });
