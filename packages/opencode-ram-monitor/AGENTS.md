@@ -1,22 +1,23 @@
 # opencode-ram-monitor — OpenCode plugin
 
 **Technology**: TypeScript / OpenCode Plugin / OpenTUI
-**Entry Points**: `src/server.ts`, `src/tui.ts`
+**Entry Point**: `src/tui.ts`
 **Parent Context**: This extends [../../AGENTS.md](../../AGENTS.md)
-**Compatibility**: V2 (`@opencode/plugin` 2.x) — single package, dual `server.js`/`tui.js` entries.
+**Compatibility**: V2 (`@opencode/plugin >=2.1.0 <3`) — TUI-only, single `tui.js` entry. Versions stay on 2.x; 3.x is reserved for OpenCode V3.
 
-This package is a dual server/TUI plugin. The TUI side is primary: sidebar widget with lightweight RAM polling, plus a `/ram` modal (also opened by clicking the widget). The server side is secondary: it registers `/ram` for non-TUI sessions by injecting process-tree output into the session.
+This package is a TUI-only plugin: a sidebar widget (full card or one-line minimal layout) with lightweight RAM polling, plus a `/ram` modal (also opened by clicking the widget). OpenCode V2 runs one shared server per user, so RAM is reported by role — **OpenCode** (this TUI + its server) and **Tools** (the server's subtree + orphaned terminal daemons) — not per session.
 
 ## Quick Reference
 
-| Script              | Purpose                                   |
-| ------------------- | ----------------------------------------- |
-| `bun run check`     | Lint and format (Biome)                   |
-| `bun run lint`      | Validate without modifying                |
-| `bun run ci`        | CI mode (non-mutating)                    |
-| `bun run typecheck` | Type check                                |
-| `bun test`          | Run tests                                 |
-| `bun run build`     | Build server/TUI outputs and declarations |
+| Script              | Purpose                                                   |
+| ------------------- | --------------------------------------------------------- |
+| `bun run check`     | Lint and format (Biome)                                   |
+| `bun run lint`      | Validate without modifying                                |
+| `bun run ci`        | CI mode (non-mutating)                                    |
+| `bun run typecheck` | Type check                                                |
+| `bun test`          | Run tests                                                 |
+| `bun run build`     | Build the TUI output and declarations                     |
+| `bun run smoke`     | Build, then load the entry through OpenCode's resolver    |
 
 ## Development Commands
 
@@ -26,6 +27,7 @@ bun run build
 bun test
 bun run typecheck
 bun run lint
+bun run smoke
 `
 
 ### From Root
@@ -36,56 +38,61 @@ bun --filter @capybearista/opencode-ram-monitor test
 ### Pre-PR Checklist
 `bun --filter @capybearista/opencode-ram-monitor typecheck && \
 bun --filter @capybearista/opencode-ram-monitor lint && \
-bun --filter @capybearista/opencode-ram-monitor test
+bun --filter @capybearista/opencode-ram-monitor test && \
+bun --filter @capybearista/opencode-ram-monitor smoke
 `
 
 ## Code Style
 
 - Zero comments by default. Only add when code isn't self-explanatory.
 - No `console.log`. Use the debug helpers in `src/debug.ts` so failures can be correlated without polluting chat output.
-- Colocate tests with source files (`src/ram-monitor.test.ts`).
+- Colocate one test file per module (`src/<module>.test.ts`).
 - Imports: builtins first, then external, then relative.
 
 ## Architecture
 
 ### Directory Structure
 `src/
-├── server.ts           # V2 server entry: registers /ram for non-TUI sessions
-├── tui.ts              # V2 TUI entry: sidebar widget, /ram modal, keymap command
-├── theme.ts            # V2 theme-token adapter for widget and modal
-├── memory.ts           # Heavy/lightweight RAM collection helpers
-├── snapshot.ts         # Cache for repeated process snapshots
-├── sidebar-config.ts   # Widget config loading and validation
-└── debug.ts            # File-backed debug logging
+├── tui.ts        # V2 TUI entry: sidebar widget (full/minimal), /ram modal, keymap command
+├── options.ts    # Plugin options parsing (layout, refreshIntervalMs) with warnings
+├── measure.ts    # Server pid lookup, process inspection, OpenCode/Tools attribution
+├── tree.ts       # /ram modal markdown: TUI, server, and terminal trees
+├── command.ts    # Command-line parsing: server/pty-daemon detection, display labels
+├── format.ts     # Byte formatting and width-bounded row formatters
+├── snapshot.ts   # ps/wmic process snapshot and parsers
+├── theme.ts      # V2 theme-token adapter for widget and modal
+└── debug.ts      # File-backed debug logging and error messages
 `
 
 ### Core (understand these first)
-- `src/tui.ts` — sidebar widget with recursive `setTimeout` polling, theme-aware rendering, and cleanup on unmount; opens the RAM modal on `/ram` and on widget click
-- `src/server.ts` — registers the `/ram` command via `command.transform` and injects output for sessions without a TUI
-- `src/memory.ts` — process inspection logic; this is where OS-specific behavior and performance tradeoffs live
-- `src/sidebar-config.ts` — plugin `options` first, then config-file discovery with fallback behavior for widget refresh intervals
+- `src/tui.ts` — widget with recursive `setTimeout` polling and cleanup on unmount; dependencies (`inspect`, `selfRss`) are injectable through `createRamMonitorPlugin` for tests; the default export is the real plugin
+- `src/measure.ts` — `inspectProcesses` asks `client.server.info()` for the server pid and trusts it only when the local snapshot shows an `opencode … serve` command there; `measureRam` splits the TUI's share (stopping at any server process) from the server's subtree and orphaned `opencode-pty daemon` processes under the home directory
+- `src/options.ts` — the only config surface: the plugin's `cli.json` `options`
 
 ### Build
-This package is a split-output plugin:
 - `tsc --project tsconfig.build.json --emitDeclarationOnly` emits type declarations
-- `bun build` compiles each runtime entrypoint separately for server and TUI use
-- `package.json` publishes separate `./server` and `./tui` exports with package-root `server.js`/`tui.js` wrappers (no `oc-plugin` key)
+- `bun build src/tui.ts` compiles the TUI entry
+- `package.json` exports only `./tui`, with a package-root `tui.js` wrapper (no `main`, no `.` export, no `oc-plugin` key)
 
 ### Gotchas
-- Config load order in `src/sidebar-config.ts` is non-obvious: global `cli.json(c)` precedes all worktree files, global `tui.json(c)` is never read, later files override earlier ones, and the global dir honors `$XDG_CONFIG_HOME/opencode` between `$OPENCODE_CONFIG_DIR` and `~/.config/opencode/`. Keep the README's Configuration order in lockstep.
+- Never add a package-root or `./server` export, `main`, or a root `server.js`: OpenCode resolves `<pkg>/server`, then `<pkg>` itself, as a server entry. The smoke script asserts that no server entry resolves.
+- `cli.json` entries must use the object form `{ "package", "options" }`. A V1 tuple entry fails the whole `cli.json` decode and OpenCode silently ignores the file.
+- OpenCode re-activates the plugin when its options change, so options are parsed once in `setup`; do not add a config-file watcher.
 - Do not introduce top-level async work in `src/tui.ts`; keep polling startup inside `onMount`.
 - Use recursive `setTimeout`, not `setInterval`, so RAM probes cannot overlap.
-- Any change to RAM collection should be validated on the target OS pattern documented in `docs/opencode-plugin-ipc-and-os-patterns.md`.
+- Rows must fit the sidebar: 33 columns inside the full card, 37 for the minimal line. `format.test.ts` asserts worst-case widths; keep `wrapMode: "none"` + `truncate` on row text.
+- Any change to process inspection should be validated on the target OS pattern documented in `docs/opencode-plugin-ipc-and-os-patterns.md`.
 - The modal opens with `dialog.clear()`, then `show()`, then `set({ size: "xlarge" })` — order matters because `show()` resets the size.
 - The `/ram` keymap layer must live inside the `app` slot render (host ownership rule); keep the dedupe guard.
-- Server injection failures must fail clearly; `/ram` should not silently swallow output or leave the session hanging.
+- The OpenTUI preload must be registered under `[test]` in `bunfig.toml`; importing it from a test file runs too late and leaves `solid-js` on its server build, where `onMount` never fires.
 
 ## Testing Guidelines
 
-- Location: colocated
+- Location: colocated, one file per module
 - Framework: bun test
 - Running Tests: `bun test`
-- Runtime smoke: `bun run smoke` verifies both the `./server` and `./tui` built exports load and register; also verify the sidebar widget renders without IPC startup regressions
+- Widget and modal tests render for real with `testRender` and inject fake `inspect`/`selfRss`; avoid `mock.module`, which leaks across files in one bun process
+- Runtime smoke: `bun run smoke` resolves the built package through `@opencode/plugin/host`, asserts no server entry, and registers the TUI entry against a fake context
 
 ## License
 
