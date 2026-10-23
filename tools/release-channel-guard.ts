@@ -262,9 +262,9 @@ export async function checkPendingChangesets(
   const policy = await readPolicy(cwd);
   validatePolicy(policy);
   const workspace = await readWorkspace(cwd, policy);
-  const { files, bumps } = await readChangesetBumps(path.join(cwd, ".changeset"));
+  const { files, bumps, unreadable } = await readChangesetBumps(path.join(cwd, ".changeset"));
 
-  const problems: string[] = [];
+  const problems: string[] = [...unreadable];
   for (const item of workspace) {
     const releaseClass = policy.packages[item.name].releaseClass;
     const packageBumps = bumps.get(item.name) ?? [undefined];
@@ -282,15 +282,22 @@ export async function checkPendingChangesets(
   return { files, problems };
 }
 
-async function readChangesetBumps(
-  directory: string,
-): Promise<{ files: number; bumps: Map<string, ChangesetBump[]> }> {
+// Fails closed: a frontmatter line this reader cannot parse is reported, never skipped,
+// so a bump Changesets would apply cannot pass the check unread.
+const CHANGESET_ENTRY = /^(["']?)(.+?)\1\s*:\s*(["']?)(major|minor|patch|none)\3\s*(?:#.*)?$/;
+
+async function readChangesetBumps(directory: string): Promise<{
+  files: number;
+  bumps: Map<string, ChangesetBump[]>;
+  unreadable: string[];
+}> {
   const bumps = new Map<string, ChangesetBump[]>();
+  const unreadable: string[] = [];
   let entries: Dirent[];
   try {
     entries = await readdir(directory, { withFileTypes: true });
   } catch {
-    return { files: 0, bumps };
+    return { files: 0, bumps, unreadable };
   }
   const changesets = entries.filter(
     (entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== "README.md",
@@ -299,15 +306,20 @@ async function readChangesetBumps(
     const text = await readFile(path.join(directory, entry.name), "utf8");
     const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!frontmatter) continue;
-    for (const line of frontmatter[1].split(/\r?\n/)) {
-      const match = line.match(/^\s*(["']?)(.+?)\1\s*:\s*(major|minor|patch|none)\s*$/);
-      if (!match) continue;
+    for (const rawLine of frontmatter[1].split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (line === "" || line.startsWith("#")) continue;
+      const match = line.match(CHANGESET_ENTRY);
+      if (!match) {
+        unreadable.push(`${entry.name}: cannot read changeset entry "${line}"`);
+        continue;
+      }
       const list = bumps.get(match[2]) ?? [];
-      list.push(match[3] as ChangesetBump);
+      list.push(match[4] as ChangesetBump);
       bumps.set(match[2], list);
     }
   }
-  return { files: changesets.length, bumps };
+  return { files: changesets.length, bumps, unreadable };
 }
 
 function printPlan(plan: ReleasePlan, output: (line: string) => void) {

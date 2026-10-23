@@ -1679,4 +1679,48 @@ describe("pending changesets", () => {
 
     await expect(checkPendingChangesets({ cwd })).resolves.toEqual({ files: 1, problems: [] });
   });
+
+  test("rejects major bumps written in any form Changesets accepts", async () => {
+    for (const entry of [
+      `"${packageNames.ram}": "major"`,
+      `'${packageNames.ram}': 'major'`,
+      `"${packageNames.ram}": major # breaking`,
+      `${packageNames.ram}:   major`,
+    ]) {
+      const cwd = await createFixture({ [packageNames.ram]: "2.0.1" });
+      await writeChangeset(cwd, "a.md", `---\n${entry}\n---\n\nOops.\n`);
+
+      await expectGuardRejects(
+        checkPendingChangesets({ cwd }),
+        `${packageNames.ram} cannot take a major bump`,
+      );
+    }
+  });
+
+  test("accepts quoted values, comments, and blank lines in the frontmatter", async () => {
+    const cwd = await createFixture({ [packageNames.ram]: "2.0.1" });
+    await writeChangeset(
+      cwd,
+      "a.md",
+      `---\n# release notes\n\n"${packageNames.ram}": "minor" # breaking, but minor\n---\n\nOk.\n`,
+    );
+
+    await expect(checkPendingChangesets({ cwd })).resolves.toEqual({ files: 1, problems: [] });
+  });
+
+  test("rejects frontmatter lines it cannot read instead of skipping them", async () => {
+    for (const entry of [
+      `"${packageNames.ram}" major`,
+      `"${packageNames.ram}": huge`,
+      `"${packageNames.ram}": { type: major }`,
+    ]) {
+      const cwd = await createFixture({ [packageNames.ram]: "2.0.1" });
+      await writeChangeset(cwd, "a.md", `---\n${entry}\n---\n\nUnclear.\n`);
+
+      await expectGuardRejects(
+        checkPendingChangesets({ cwd }),
+        "a.md: cannot read changeset entry",
+      );
+    }
+  });
 });
