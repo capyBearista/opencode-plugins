@@ -1,12 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import "@opentui/solid/preload";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { type JSX, testRender } from "@opentui/solid";
 import { createRoot } from "solid-js";
-import { getRamMonitorDebugLogPath, isRamMonitorDebugEnabled } from "./debug.js";
+import { getErrorMessage, getRamMonitorDebugLogPath, isRamMonitorDebugEnabled } from "./debug.js";
 import * as MemoryModule from "./memory.js";
 import {
   classifyOpencodeProcess,
@@ -25,8 +22,6 @@ import {
   selectValidatedSessionPids,
   shouldUseBulkSnapshot,
 } from "./memory.js";
-import * as SidebarConfig from "./sidebar-config.js";
-import { getErrorMessage, normalizeRefreshIntervalMs } from "./sidebar-config.js";
 import {
   type ProcessEntry,
   type ProcessSnapshot,
@@ -35,18 +30,6 @@ import {
   parseWmicProcessSnapshot,
 } from "./snapshot.js";
 import { readRamWidgetTheme } from "./theme.js";
-
-type LoadRamMonitorWidgetConfig = (worktree: string) => Promise<{
-  intervalMs: number;
-  sourcePath: string | null;
-  warning: string | null;
-  warningPath: string | null;
-}>;
-
-function getLoadRamMonitorWidgetConfig(): LoadRamMonitorWidgetConfig {
-  const module = SidebarConfig as Record<string, unknown>;
-  return module.loadRamMonitorWidgetConfig as LoadRamMonitorWidgetConfig;
-}
 
 type OpenCodePidSets = {
   core: Set<number>;
@@ -127,6 +110,7 @@ type MockTuiContext = {
   theme: Record<string, unknown>;
   location: { directory: string };
   renderer: { idle: () => Promise<void>; nativeScene?: unknown };
+  options?: Record<string, unknown>;
 };
 
 function mockOpenTuiSolid(): void {
@@ -236,12 +220,13 @@ async function loadTuiPlugin() {
   return await import(`./tui.js?tui=${Date.now()}-${Math.random()}`);
 }
 
-async function mountSidebarWidget(): Promise<{
+async function mountSidebarWidget(options: Record<string, unknown> = {}): Promise<{
   setup: Awaited<ReturnType<typeof testRender>>;
   box: RealRenderable;
 }> {
   const module = await loadTuiPlugin();
   const { context, slots } = createTuiContext();
+  context.options = options;
   await (module.default.setup as unknown as (input: unknown) => Promise<void>)(context);
 
   const sidebarSlot = slots.find((slot) => slot.append === "sidebar.content");
@@ -520,14 +505,6 @@ describe("@capybearista/opencode-ram-monitor", () => {
     ).toBe(2);
   });
 
-  test("normalizes refresh interval to safe bounds", () => {
-    expect(normalizeRefreshIntervalMs("200")).toBe(1000);
-    expect(normalizeRefreshIntervalMs(0)).toBe(1000);
-    expect(normalizeRefreshIntervalMs(1500)).toBe(1500);
-    expect(normalizeRefreshIntervalMs(999999)).toBe(60_000);
-    expect(normalizeRefreshIntervalMs("bad")).toBe(5000);
-  });
-
   test("formats large byte counts as gigabytes", () => {
     expect(formatBytes(0)).toBe("0 MB");
     expect(formatBytes(1024 * 1024 * 1024)).toBe("1.00 GB");
@@ -639,6 +616,15 @@ describe("@capybearista/opencode-ram-monitor", () => {
 
     expect(box.getChildren().length).toBe(4);
     expect(box.height).toBe(6);
+
+    setup.renderer.destroy();
+  });
+
+  test("sidebar widget shows option warnings in a footer row", async () => {
+    const { setup, box } = await mountSidebarWidget({ refreshIntervalMs: "bad" });
+
+    expect(box.getChildren().length).toBe(5);
+    expect(setup.captureCharFrame()).toContain("refreshIntervalMs must be");
 
     setup.renderer.destroy();
   });
@@ -1134,418 +1120,6 @@ describe("@capybearista/opencode-ram-monitor", () => {
     ]);
     expect(sampled.get(961)).toBe(1024);
     expect(sampled.get(962)).toBe(2048);
-  });
-
-  test("loads refresh interval from supported root config files with TUI precedence", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-
-    try {
-      await writeFile(
-        join(dir, "opencode.jsonc"),
-        `{
-  // general setting
-  "experimental": {
-    "ramMonitor": {
-      "refreshIntervalMs": 2000,
-    },
-  },
-}
-`,
-      );
-      await writeFile(
-        join(dir, "tui.json"),
-        JSON.stringify({
-          experimental: {
-            ramMonitor: {
-              refreshIntervalMs: 4000,
-            },
-          },
-        }),
-      );
-
-      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
-        intervalMs: 4000,
-        sourcePath: join(dir, "tui.json"),
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("prefers plugin options over config files", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-
-    try {
-      await writeFile(
-        join(dir, "opencode.json"),
-        JSON.stringify({
-          experimental: {
-            ramMonitor: {
-              refreshIntervalMs: 2000,
-            },
-          },
-        }),
-      );
-
-      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 7000 })).resolves.toEqual({
-        intervalMs: 7000,
-        sourcePath: "plugin options",
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("ignores invalid plugin options and falls back to config files", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-
-    try {
-      await writeFile(
-        join(dir, "opencode.json"),
-        JSON.stringify({
-          experimental: {
-            ramMonitor: {
-              refreshIntervalMs: 2000,
-            },
-          },
-        }),
-      );
-
-      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: "bad" })).resolves.toEqual({
-        intervalMs: 2000,
-        sourcePath: join(dir, "opencode.json"),
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("treats blank or non-numeric plugin options as absent", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-
-    try {
-      await writeFile(
-        join(dir, "opencode.json"),
-        JSON.stringify({
-          experimental: {
-            ramMonitor: {
-              refreshIntervalMs: 2000,
-            },
-          },
-        }),
-      );
-
-      const fromFile = {
-        intervalMs: 2000,
-        sourcePath: join(dir, "opencode.json"),
-        warning: null,
-        warningPath: null,
-      };
-
-      const absentValues = [
-        "",
-        null,
-        false,
-        true,
-        "   ",
-        [],
-        {},
-        Number.NaN,
-        Number.POSITIVE_INFINITY,
-      ];
-      for (const refreshIntervalMs of absentValues) {
-        await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs })).resolves.toEqual(
-          fromFile,
-        );
-      }
-
-      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: "3000" })).resolves.toEqual(
-        {
-          intervalMs: 3000,
-          sourcePath: "plugin options",
-          warning: null,
-          warningPath: null,
-        },
-      );
-
-      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 0 })).resolves.toEqual({
-        intervalMs: 1000,
-        sourcePath: "plugin options",
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("floors and clamps numeric plugin options", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-
-    try {
-      const fromOptions = (intervalMs: number) => ({
-        intervalMs,
-        sourcePath: "plugin options",
-        warning: null,
-        warningPath: null,
-      });
-
-      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 2500.9 })).resolves.toEqual(
-        fromOptions(2500),
-      );
-      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: -500 })).resolves.toEqual(
-        fromOptions(1000),
-      );
-      await expect(
-        loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: 999_999 }),
-      ).resolves.toEqual(fromOptions(60_000));
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("uses the default when plugin options and config files are both unusable", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-    const emptyGlobal = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
-    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    process.env.OPENCODE_CONFIG_DIR = emptyGlobal;
-
-    try {
-      await expect(loadRamMonitorWidgetConfig(dir, { refreshIntervalMs: "bad" })).resolves.toEqual({
-        intervalMs: 5000,
-        sourcePath: null,
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
-      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
-      await rm(dir, { recursive: true, force: true });
-      await rm(emptyGlobal, { recursive: true, force: true });
-    }
-  });
-
-  test("reads the global config dir when the project has no config", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-    const globalDir = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
-    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    process.env.OPENCODE_CONFIG_DIR = globalDir;
-
-    try {
-      await writeFile(
-        join(globalDir, "cli.json"),
-        JSON.stringify({
-          experimental: {
-            ramMonitor: {
-              refreshIntervalMs: 2600,
-            },
-          },
-        }),
-      );
-
-      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
-        intervalMs: 2600,
-        sourcePath: join(globalDir, "cli.json"),
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
-      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
-      await rm(dir, { recursive: true, force: true });
-      await rm(globalDir, { recursive: true, force: true });
-    }
-  });
-
-  test("prefers project config over the global config dir", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-    const globalDir = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
-    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    process.env.OPENCODE_CONFIG_DIR = globalDir;
-
-    try {
-      await writeFile(
-        join(globalDir, "cli.json"),
-        JSON.stringify({
-          experimental: {
-            ramMonitor: {
-              refreshIntervalMs: 2600,
-            },
-          },
-        }),
-      );
-      await writeFile(
-        join(dir, "opencode.json"),
-        JSON.stringify({
-          experimental: {
-            ramMonitor: {
-              refreshIntervalMs: 2800,
-            },
-          },
-        }),
-      );
-
-      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
-        intervalMs: 2800,
-        sourcePath: join(dir, "opencode.json"),
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
-      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
-      await rm(dir, { recursive: true, force: true });
-      await rm(globalDir, { recursive: true, force: true });
-    }
-  });
-
-  test("resolves the global config dir from XDG_CONFIG_HOME", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-    const globalDir = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
-    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    const priorXdg = process.env.XDG_CONFIG_HOME;
-    delete process.env.OPENCODE_CONFIG_DIR;
-    process.env.XDG_CONFIG_HOME = globalDir;
-
-    try {
-      await mkdir(join(globalDir, "opencode"), { recursive: true });
-      await writeFile(
-        join(globalDir, "opencode", "cli.json"),
-        JSON.stringify({
-          experimental: {
-            ramMonitor: {
-              refreshIntervalMs: 2900,
-            },
-          },
-        }),
-      );
-
-      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
-        intervalMs: 2900,
-        sourcePath: join(globalDir, "opencode", "cli.json"),
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
-      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
-      if (priorXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-      else process.env.XDG_CONFIG_HOME = priorXdg;
-      await rm(dir, { recursive: true, force: true });
-      await rm(globalDir, { recursive: true, force: true });
-    }
-  });
-
-  test("prefers OPENCODE_CONFIG_DIR over XDG_CONFIG_HOME", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-    const configDir = await mkdtemp(join(tmpdir(), "ram-monitor-global-"));
-    const xdgDir = await mkdtemp(join(tmpdir(), "ram-monitor-xdg-"));
-    const priorConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    const priorXdg = process.env.XDG_CONFIG_HOME;
-    process.env.OPENCODE_CONFIG_DIR = configDir;
-    process.env.XDG_CONFIG_HOME = xdgDir;
-
-    try {
-      await writeFile(
-        join(xdgDir, "cli.json"),
-        JSON.stringify({
-          experimental: {
-            ramMonitor: {
-              refreshIntervalMs: 2900,
-            },
-          },
-        }),
-      );
-
-      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
-        intervalMs: 5000,
-        sourcePath: null,
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      if (priorConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
-      else process.env.OPENCODE_CONFIG_DIR = priorConfigDir;
-      if (priorXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-      else process.env.XDG_CONFIG_HOME = priorXdg;
-      await rm(dir, { recursive: true, force: true });
-      await rm(configDir, { recursive: true, force: true });
-      await rm(xdgDir, { recursive: true, force: true });
-    }
-  });
-
-  test("loads refresh interval from .opencode JSONC config files", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-
-    try {
-      await mkdir(join(dir, ".opencode"), { recursive: true });
-      await writeFile(
-        join(dir, ".opencode", "tui.jsonc"),
-        `{
-  "experimental": {
-    "ramMonitor": {
-      "refreshIntervalMs": 3100,
-    },
-  },
-}
-`,
-      );
-
-      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
-        intervalMs: 3100,
-        sourcePath: join(dir, ".opencode", "tui.jsonc"),
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("clears stale config warnings when a later config file loads successfully", async () => {
-    const loadRamMonitorWidgetConfig = getLoadRamMonitorWidgetConfig();
-    const dir = await mkdtemp(join(tmpdir(), "ram-monitor-config-"));
-
-    try {
-      await writeFile(join(dir, "opencode.jsonc"), "{ invalid }");
-      await writeFile(
-        join(dir, "tui.jsonc"),
-        `{
-  "experimental": {
-    "ramMonitor": {
-      "refreshIntervalMs": 4200,
-    },
-  },
-}
-`,
-      );
-
-      await expect(loadRamMonitorWidgetConfig(dir)).resolves.toEqual({
-        intervalMs: 4200,
-        sourcePath: join(dir, "tui.jsonc"),
-        warning: null,
-        warningPath: null,
-      });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
   });
 
   test("keeps live launcher and core sessions together when both are active", () => {

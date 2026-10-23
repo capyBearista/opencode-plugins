@@ -3,18 +3,14 @@ import { SyntaxStyle } from "@opentui/core";
 import type { JSX } from "@opentui/solid";
 import { createElement, insert, spread } from "@opentui/solid";
 import { createComponent, createSignal, onCleanup, onMount } from "solid-js";
-import { debugLog } from "./debug.js";
+import { debugLog, getErrorMessage } from "./debug.js";
 import {
   formatBytes,
   getHeavyProcessTree,
   getLightweightRam,
   type LightweightRamResult,
 } from "./memory.js";
-import {
-  getDefaultRefreshIntervalMs,
-  getErrorMessage,
-  loadRamMonitorWidgetConfig,
-} from "./sidebar-config.js";
+import { parseOptions, type RamMonitorOptions } from "./options.js";
 import { processSnapshotCache } from "./snapshot.js";
 import { readRamWidgetTheme } from "./theme.js";
 
@@ -123,7 +119,11 @@ function createMarkdownSyntaxStyle(
   return SyntaxStyle.fromTheme(rules, owner);
 }
 
-function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Element {
+function RamWidget(props: {
+  context: TuiContext;
+  options: RamMonitorOptions;
+  onOpen: () => void;
+}): JSX.Element {
   const theme = () => readRamWidgetTheme(props.context.theme);
   const worktree = () => props.context.location?.directory ?? process.cwd();
   const [ram, setRam] = createSignal<LightweightRamResult>({
@@ -134,28 +134,12 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
     count: 0,
   });
   const [error, setError] = createSignal<string | null>(null);
-  const [configError, setConfigError] = createSignal<string | null>(null);
-  const [intervalMs, setIntervalMs] = createSignal<number>(getDefaultRefreshIntervalMs());
   const [tick, setTick] = createSignal(0);
-  const [warning, setWarning] = createSignal<string | null>(null);
+  const intervalMs = props.options.refreshIntervalMs;
+  const warning = props.options.warnings[0] ?? null;
 
   let disposed = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
-
-  const loadConfig = async () => {
-    const config = await loadRamMonitorWidgetConfig(worktree(), props.context.options);
-    setIntervalMs(config.intervalMs);
-    processSnapshotCache.setTtlMs(config.intervalMs);
-    setWarning(config.warning ? `Config warning: using ${config.intervalMs}ms fallback` : null);
-
-    if (!config.warning) return;
-    await debugLog("sidebar-config-fallback", {
-      appliedConfigPath: config.sourcePath || "unknown",
-      failedConfigPath: config.warningPath || "unknown",
-      error: config.warning,
-      fallbackIntervalMs: config.intervalMs,
-    });
-  };
 
   const poll = async () => {
     try {
@@ -168,7 +152,7 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
     } catch (err: unknown) {
       await debugLog("sidebar-poll-failed", {
         worktree: worktree(),
-        intervalMs: intervalMs(),
+        intervalMs,
         error: getErrorMessage(err),
       });
       if (!disposed) {
@@ -177,40 +161,19 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
     }
 
     if (!disposed) {
-      timeout = setTimeout(poll, intervalMs());
+      timeout = setTimeout(poll, intervalMs);
     }
   };
 
   const statusColor = (fallback: RamWidgetToken): RamWidgetToken => {
-    if (error() || configError()) return theme().error;
-    if (warning()) return theme().warning;
+    if (error()) return theme().error;
+    if (warning) return theme().warning;
     return fallback;
   };
 
-  const footerHint = (): string | null => {
-    if (configError()) return `Config error: ${configError()}`;
-    if (error()) return warning();
-    return null;
-  };
-
   onMount(() => {
-    void (async () => {
-      try {
-        await loadConfig();
-      } catch (err: unknown) {
-        await debugLog("sidebar-config-load-failed", {
-          worktree: worktree(),
-          error: getErrorMessage(err),
-        });
-        if (!disposed) {
-          setConfigError(getErrorMessage(err));
-        }
-      }
-
-      if (!disposed) {
-        void poll();
-      }
-    })();
+    processSnapshotCache.setTtlMs(intervalMs);
+    void poll();
   });
 
   onCleanup(() => {
@@ -266,10 +229,7 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
       createTextNode({ fg: () => (error() ? theme().error : theme().secondary) }, () =>
         !error() ? formatRamRow("All", ram().allDirect, ram().allWithTools) : null,
       ),
-      () => {
-        const hint = footerHint();
-        return hint ? createTextNode({ fg: () => theme().textMuted }, hint) : null;
-      },
+      warning ? createTextNode({ fg: () => theme().textMuted }, warning) : null,
     ],
   );
 }
@@ -365,6 +325,7 @@ function openRamModal(context: TuiContext): void {
 export default Plugin.define({
   id: "capybearista.opencode-ram-monitor",
   setup(context) {
+    const options = parseOptions(context.options);
     const unregisterSidebar = context.ui.slot({
       // `append` renders inside `sidebar.content` in plugin enable order, so
       // the widget follows the built-in Context/MCP panels yet precedes
@@ -373,7 +334,11 @@ export default Plugin.define({
       // a slot replacement — traded away here for ordering.)
       append: "sidebar.content",
       render() {
-        return createComponent(RamWidget, { context, onOpen: () => openRamModal(context) });
+        return createComponent(RamWidget, {
+          context,
+          options,
+          onOpen: () => openRamModal(context),
+        });
       },
     });
 
