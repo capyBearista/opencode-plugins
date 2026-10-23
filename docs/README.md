@@ -10,10 +10,11 @@ The root [README](../README.md) and package READMEs describe current installatio
 | [migration-guide-1.15.md](./migration-guide-1.15.md) | Scoped snapshot | 1.15 Effect-native migration notes. Historical reference; kept as is. |
 | [plugin-system-1.15.md](./plugin-system-1.15.md) | Scoped snapshot | 1.15 internals deep dive (`EventV2`, Zod bridge, `WithInstance` removal). Historical reference; kept as is. |
 | [opencode-system-prompt-guide.md](./opencode-system-prompt-guide.md) | V1 reference | How OpenCode V1 assembles its system prompt and where the `experimental.chat.system.transform` hook fits. Background for output-styles and prompt-inheritance contributors. |
-| [opencode-plugin-ipc-and-os-patterns.md](./opencode-plugin-ipc-and-os-patterns.md) | Plugin-author reference | IPC and cross-platform patterns learned from building these plugins. |
+| [opencode-v2-plugin-runtime.md](./opencode-v2-plugin-runtime.md) | Plugin-author reference | What a V2 plugin can rely on: process model, `context.client` and options, the `cli.json` tuple trap, entry resolution, and OpenTUI test setup. Verified against OpenCode 2.1.4. |
+| [opencode-plugin-ipc-and-os-patterns.md](./opencode-plugin-ipc-and-os-patterns.md) | Plugin-author reference | IPC and cross-platform patterns learned from building these plugins, with V1 and V2 startup examples. |
 | [output-styles/claude-output-styles.md](./output-styles/claude-output-styles.md) | Upstream reference | Snapshot of Claude Code output-style docs. Background for the output-styles plugin, not a statement of this repo's behavior. |
-| [ram-monitor/post-mortem-v1.0.0.md](./ram-monitor/post-mortem-v1.0.0.md) | Package note | What broke and what fixed it during ram-monitor 1.0.0 stabilization. |
-| [ram-monitor/codex-comparison.md](./ram-monitor/codex-comparison.md) | Package note | Prompt-structure comparison between the official Codex plugin and this repo's review plugin. |
+| [ram-monitor/post-mortem-v1.0.0.md](./ram-monitor/post-mortem-v1.0.0.md) | Historical package note | What broke and what fixed it during ram-monitor 1.0.0 stabilization (V1; the config and session-discovery approach it describes was replaced in 2.1.0). |
+| [adversarial-review/codex-comparison.md](./adversarial-review/codex-comparison.md) | Package note | Prompt-structure comparison between the official Codex plugin and this repo's review plugin. |
 
 ## Generated prompt sources
 
