@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { FULL_ROW_WIDTH, formatBytes, formatRoleRow, formatTreeSize } from "./format.js";
+import {
+  FULL_ROW_WIDTH,
+  formatBytes,
+  formatMinimalLine,
+  formatRoleRow,
+  formatTreeSize,
+  MINIMAL_LINE_WIDTH,
+} from "./format.js";
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
@@ -40,5 +47,18 @@ describe("formatRoleRow", () => {
   test("fits the box at worst-case widths", () => {
     const row = formatRoleRow({ opencode: 12.34 * GB, tools: 99.4 * GB, total: 111.74 * GB });
     expect(row.length).toBeLessThanOrEqual(FULL_ROW_WIDTH);
+  });
+});
+
+describe("formatMinimalLine", () => {
+  test("shows the total and the tools share on one line", () => {
+    expect(formatMinimalLine({ opencode: 1.486 * GB, tools: 3.39 * GB, total: 4.876 * GB })).toBe(
+      "4.88 GB (tools 3.39 GB)",
+    );
+  });
+
+  test("fits the sidebar next to the RAM label at worst-case widths", () => {
+    const line = formatMinimalLine({ opencode: 12.34 * GB, tools: 99.4 * GB, total: 111.74 * GB });
+    expect(`RAM ● ${line}`.length).toBeLessThanOrEqual(MINIMAL_LINE_WIDTH);
   });
 });

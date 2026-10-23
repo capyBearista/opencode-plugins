@@ -2,8 +2,11 @@ const DEFAULT_REFRESH_INTERVAL_MS = 5000;
 const MIN_REFRESH_INTERVAL_MS = 1000;
 const MAX_REFRESH_INTERVAL_MS = 60_000;
 
+export type RamMonitorLayout = "full" | "minimal";
+
 export interface RamMonitorOptions {
   readonly refreshIntervalMs: number;
+  readonly layout: RamMonitorLayout;
   readonly warnings: readonly string[];
 }
 
@@ -34,5 +37,13 @@ export function parseOptions(
     }
   }
 
-  return { refreshIntervalMs, warnings };
+  const rawLayout = options?.layout;
+  let layout: RamMonitorLayout = "full";
+  if (rawLayout === "full" || rawLayout === "minimal") {
+    layout = rawLayout;
+  } else if (rawLayout !== undefined) {
+    warnings.push('layout must be "full" or "minimal"; using "full"');
+  }
+
+  return { refreshIntervalMs, layout, warnings };
 }
