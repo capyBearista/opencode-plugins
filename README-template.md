@@ -36,7 +36,7 @@ OpenCode is designed to be highly extensible. This plugin [...].
 ## Install
 
 <NOTE>
-Some plugins, like `opencode-ram-monitor`, will be special cases where one component (Server / TUI) is not required and only adds/enables specific features. As such, they may not strictly adhere to the cases below.
+Some plugins will be special cases where one component (Server / TUI) is not required and only adds/enables specific features. As such, they may not strictly adhere to the cases below.
 </NOTE>
 
 ### OpenCode V2
@@ -128,6 +128,28 @@ Remove the plugin from `"plugin(s)"` from the respective config files they were 
 ## Configuration
 
 [...]
+
+<V2 options>
+Pass options in the plugin's entry, using the object form:
+
+```json
+{
+  "plugins": [
+    {
+      "package": "@capybearista/opencode-<plugin-name>@latest",
+      "options": { "<option>": "<value>" }
+    }
+  ]
+}
+```
+
+> [!WARNING]
+> Use the object form above. The V1 tuple form (`["@capybearista/opencode-<plugin-name>", { ... }]`) is not valid in V2, and in `cli.json` one invalid entry makes OpenCode ignore the whole file, including your theme, keybinds, and every other plugin.
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `<option>` | `<type>` | `<default>` | [...] |
+</V2 options>
 
 <optional>
 
