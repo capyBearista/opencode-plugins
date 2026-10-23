@@ -39,7 +39,7 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 | `opencode-adversarial-review` | Ported: server plugin, plural `plugins` in `opencode.json`; `2.0.0` on `latest` |
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port TBD |
 | `opencode-output-styles` | V1 only; deprecated for V2 |
-| `opencode-ram-monitor` | Ported: dual server+TUI plugin, plural `plugins` (`opencode.json` + `cli.json`); `2.0.0` on `latest` |
+| `opencode-ram-monitor` | Ported: TUI plugin (TUI-only since `2.1.0`, requires OpenCode 2.1+), plural `plugins` in `cli.json`; `2.x` on `latest` |
 
 - **MUST** use the V2 Promise API in ports: `Plugin.define({ id, setup })` from `@opencode/plugin` 2.x. Do not carry V1 `server`/`config` hook signatures into a port.
 - **MUST** keep V2 entrypoints at the package root: `server.js` for the loader, `tui.js` for the timeline. Filesystem-local config points at the package directory, not the entry file.
@@ -94,7 +94,7 @@ CI runs typecheck, lint, and test only — `bun run build` is a local-only gate;
 - **`packages/opencode-agents-loader/`** → OpenCode plugin that extends command and agent discovery to ~/.agents/ and .agents/ directories (see packages/opencode-agents-loader/AGENTS.md)
 - **`packages/opencode-double-tap-timeline/`** → OpenCode plugin (see packages/opencode-double-tap-timeline/AGENTS.md)
 - **`packages/opencode-output-styles/`** → OpenCode plugin (see packages/opencode-output-styles/AGENTS.md)
-- **`packages/opencode-ram-monitor/`** → Dual server/TUI plugin for live RAM telemetry and the `/ram` command (see `packages/opencode-ram-monitor/AGENTS.md`)
+- **`packages/opencode-ram-monitor/`** → TUI plugin for live RAM telemetry (sidebar widget and `/ram` modal) (see `packages/opencode-ram-monitor/AGENTS.md`)
 
 ### Supporting Directories
 - **`.agents/`** → Shared commands and skills used by local harness workflows
