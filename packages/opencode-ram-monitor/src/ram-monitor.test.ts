@@ -552,10 +552,12 @@ describe("@capybearista/opencode-ram-monitor", () => {
     );
   });
 
-  test("package metadata targets dual V2 server and TUI entries", async () => {
+  test("package metadata exposes only the V2 TUI entry", async () => {
     const packageJson = JSON.parse(
       await Bun.file(new URL("../package.json", import.meta.url)).text(),
     ) as {
+      main?: string;
+      types?: string;
       scripts: { build: string };
       files: string[];
       exports: Record<string, { types: string; default: string }>;
@@ -564,55 +566,39 @@ describe("@capybearista/opencode-ram-monitor", () => {
       "oc-plugin"?: unknown;
     };
 
-    expect(packageJson.scripts.build).toContain(
-      "bun build src/server.ts --outfile=dist/server.js --target=bun",
-    );
+    expect(packageJson.scripts.build).not.toContain("src/server.ts");
     expect(packageJson.scripts.build).toContain(
       "bun build src/tui.ts --outfile=dist/tui.js --target=bun",
     );
-    expect(packageJson.exports["."].default).toBe("./dist/server.js");
-    expect(packageJson.exports["./server"].default).toBe("./dist/server.js");
+    expect(packageJson.main).toBeUndefined();
+    expect(packageJson.types).toBeUndefined();
+    expect(Object.keys(packageJson.exports)).toEqual(["./tui"]);
     expect(packageJson.exports["./tui"].default).toBe("./dist/tui.js");
-    expect(packageJson.files).toEqual(["dist", "server.js", "tui.js"]);
+    expect(packageJson.files).toEqual(["dist", "tui.js"]);
     expect(packageJson["oc-plugin"]).toBeUndefined();
     expect(packageJson.peerDependencies["@opencode/plugin"]).toBe(">=2.1.0 <3");
     expect(packageJson.devDependencies["@opencode/plugin"]).toMatch(/^2\.1\./);
     expect(packageJson.peerDependencies["@opencode-ai/plugin"]).toBeUndefined();
   });
 
-  test("server and TUI wrappers re-export their built entrypoints", async () => {
-    const serverWrapper = await Bun.file(new URL("../server.js", import.meta.url)).text();
+  test("ships no server entry for OpenCode to resolve", async () => {
+    expect(await Bun.file(new URL("../server.js", import.meta.url)).exists()).toBe(false);
+    expect(await Bun.file(new URL("./server.ts", import.meta.url)).exists()).toBe(false);
+  });
+
+  test("TUI wrapper re-exports its built entrypoint", async () => {
     const tuiWrapper = await Bun.file(new URL("../tui.js", import.meta.url)).text();
     const bunfig = await Bun.file(new URL("../bunfig.toml", import.meta.url)).text();
 
-    expect(serverWrapper).toContain("./dist/server.js");
     expect(tuiWrapper).toContain("./dist/tui.js");
     expect(bunfig).toContain('preload = ["@opentui/solid/preload"]');
   });
 
-  test("source entrypoints expose the V2 server and TUI contracts", async () => {
-    const server = await import(`./server.js?contract=${Date.now()}`);
+  test("source entrypoint exposes the V2 TUI contract", async () => {
     const tui = await import(`./tui.js?contract=${Date.now()}`);
 
-    expect(server.default.id).toBe("capybearista.opencode-ram-monitor");
-    expect(server.default.setup).toBeFunction();
     expect(tui.default.id).toBe("capybearista.opencode-ram-monitor");
     expect(tui.default.setup).toBeFunction();
-
-    const commandNames: string[] = [];
-    await (server.default.setup as unknown as (input: unknown) => Promise<void>)({
-      command: {
-        transform: async (callback: (editor: unknown) => void) => {
-          callback({
-            add: (definition: { name: string }) => {
-              commandNames.push(definition.name);
-            },
-          });
-        },
-      },
-      session: { synthetic: async () => {} },
-    });
-    expect(commandNames).toEqual(["ram"]);
 
     const { context, slots } = createTuiContext();
     await (tui.default.setup as unknown as (input: unknown) => Promise<void>)(context);
@@ -1608,121 +1594,5 @@ describe("@capybearista/opencode-ram-monitor", () => {
     } finally {
       process.stderr.write = originalWrite;
     }
-  });
-
-  test("/ram command owns prompt injection and resolves normally", async () => {
-    mock.module("./memory.js", () => ({
-      getHeavyProcessTree: async () => "tree",
-    }));
-
-    const module = await import(`./server.js?server=${Date.now()}`);
-    const definitions: Array<{
-      name: string;
-      description?: string;
-      execute: (input: unknown) => Promise<void>;
-    }> = [];
-    const synthetic = mock(async (_input: unknown) => {});
-
-    await (module.default.setup as unknown as (input: unknown) => Promise<void>)({
-      command: {
-        transform: async (callback: (editor: unknown) => void) => {
-          callback({
-            add: (definition: unknown) => {
-              definitions.push(definition as (typeof definitions)[number]);
-            },
-          });
-        },
-      },
-      session: { synthetic },
-    });
-
-    const command = definitions[0];
-    expect(command?.name).toBe("ram");
-    expect(command?.description).toBe("Show a detailed process tree and RAM usage");
-
-    await command?.execute({ sessionID: "s-1", prompt: { text: "" }, delivery: "steer" });
-
-    expect(synthetic).toHaveBeenCalledTimes(1);
-    expect(synthetic.mock.calls[0]?.[0]).toMatchObject({
-      sessionID: "s-1",
-      text: "tree",
-      delivery: "steer",
-      resume: false,
-    });
-  });
-
-  test("/ram command raises a user-visible error when prompt injection fails", async () => {
-    mock.module("./memory.js", () => ({
-      getHeavyProcessTree: async () => "tree",
-    }));
-
-    const module = await import(`./server.js?server-fail=${Date.now()}`);
-    const definitions: Array<{ execute: (input: unknown) => Promise<void> }> = [];
-
-    await (module.default.setup as unknown as (input: unknown) => Promise<void>)({
-      command: {
-        transform: async (callback: (editor: unknown) => void) => {
-          callback({
-            add: (definition: unknown) => {
-              definitions.push(definition as (typeof definitions)[number]);
-            },
-          });
-        },
-      },
-      session: {
-        synthetic: async () => {
-          throw new Error("injection failed");
-        },
-      },
-    });
-
-    let caught: unknown;
-    try {
-      await definitions[0]?.execute({ sessionID: "s-1", prompt: { text: "" }, delivery: "steer" });
-    } catch (error) {
-      caught = error;
-    }
-
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toBe("Unable to display RAM usage output. Please try again.");
-    expect((caught as Error).cause).toBeInstanceOf(Error);
-    expect(((caught as Error).cause as Error).message).toBe("injection failed");
-  });
-
-  test("/ram command reports tree failures through prompt injection without throwing", async () => {
-    mock.module("./memory.js", () => ({
-      getHeavyProcessTree: async () => {
-        throw new Error("tree failed");
-      },
-    }));
-
-    const module = await import(`./server.js?server-tree-fail=${Date.now()}`);
-    const definitions: Array<{ execute: (input: unknown) => Promise<void> }> = [];
-    const synthetic = mock(async (_input: unknown) => {});
-
-    await (module.default.setup as unknown as (input: unknown) => Promise<void>)({
-      command: {
-        transform: async (callback: (editor: unknown) => void) => {
-          callback({
-            add: (definition: unknown) => {
-              definitions.push(definition as (typeof definitions)[number]);
-            },
-          });
-        },
-      },
-      session: { synthetic },
-    });
-
-    await definitions[0]?.execute({ sessionID: "s-1", prompt: { text: "" }, delivery: "steer" });
-
-    expect(synthetic).toHaveBeenCalledTimes(1);
-    expect(synthetic.mock.calls[0]?.[0]).toMatchObject({
-      sessionID: "s-1",
-      delivery: "steer",
-      resume: false,
-    });
-    expect((synthetic.mock.calls[0]?.[0] as { text: string }).text).toContain(
-      "Unable to generate RAM usage tree. Please try again.",
-    );
   });
 });
