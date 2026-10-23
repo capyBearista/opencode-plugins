@@ -14,39 +14,41 @@
 
 ## Why?
 
-> This plugin gives developers real-time, zero-dependency insight into OpenCode session memory. The sidebar shows direct RSS and with-tools RSS for the current session and all sessions. The `/ram` command (and clicking the widget) opens the broader process-tree view in a pop-up.
+> This plugin gives developers real-time, zero-dependency insight into how much memory OpenCode is using. The sidebar shows the total, split into OpenCode itself (this TUI and the shared server) and the tools the server runs (MCP servers, language servers, shell commands, terminals). The `/ram` command (and clicking the widget) opens the full process tree in a pop-up.
 
 ## Philosophy: Extending OpenCode
 
-OpenCode is designed to be highly extensible. The TUI side is the primary way to use this plugin: a sidebar slot renders a compact card, and `/ram` (or clicking the card) opens the full tree in a modal. The server side is secondary: it registers `/ram` for sessions without a TUI by injecting the tree into the session. It runs locally and falls back cleanly if process sampling fails.
+OpenCode V2 runs one shared background server per user. Every TUI connects to it, and the server owns sessions and tool execution. Memory is shared rather than per-session, so this plugin reports it by role:
+
+- **OpenCode**: this TUI (plus its own helper processes) and the server it is connected to.
+- **Tools**: everything the server runs, plus terminal panes (`opencode-pty`) that outlived a server restart.
+
+The plugin asks OpenCode which server this TUI talks to and only trusts that answer when the local process table confirms it. It runs locally, needs no dependencies, and falls back to this TUI's own memory if the server or the process list cannot be read.
 
 ### Architecture
 
 ```mermaid
 flowchart TB
-  TUI["TUI plugin (primary)"] --> Widget["RAM widget"]
+  TUI["TUI plugin"] --> Widget["Sidebar widget (full or minimal)"]
   TUI --> Modal["/ram modal"]
-  Widget --> Snapshot["Shared process snapshot cache"]
-  Snapshot --> Metrics["RSS + session metrics"]
-  Modal --> Tree["Session process tree"]
-  Server["Server plugin (secondary)"] --> Headless["/ram for non-TUI sessions"]
+  Widget --> Inspect["Server pid (client.server.info) + one process snapshot per poll"]
+  Modal --> Inspect
+  Inspect --> Roles["OpenCode = TUI + server · Tools = server's subtree + orphaned terminals"]
 ```
-
-Compact sidebar summary on the left. Full process tree in a modal on `/ram` or widget click.
 
 ## Features
 
-- **Real-time sidebar widget**: shows direct and with-tools RAM for the current session and all sessions in a compact OpenCode sidebar card.
-- **Active session tracking**: automatically discovers logical OpenCode sessions and aggregates their RAM.
+- **Real-time sidebar widget**: shows the total, then OpenCode vs. tools, in a compact card.
+- **Minimal layout**: one borderless line, `RAM ● 4.88 GB (tools 3.39 GB)`, for a quieter sidebar.
+- **`/ram` command**: opens the TUI, server, and terminal process trees in a pop-up (also opened by clicking the widget).
 - **Cross-platform**: uses native commands (`ps` on Unix, `wmic` on Windows) for lightweight zero-dependency metrics.
-- **`/ram` command**: opens a detailed, heavy process-tree breakdown across all active OpenCode sessions in a pop-up (also opened by clicking the sidebar widget). In sessions without a TUI, the server entry injects the tree into the chat instead.
-- **Configurable**: polling interval via plugin `options`.
+- **Configurable**: layout and polling interval via plugin `options`, applied live when `cli.json` changes.
 
 ## Install
 
 ### OpenCode V2
 
-Add it under the `"plugins"` key in `cli.json`:
+Requires OpenCode 2.1 or later. This is a TUI-only plugin: add it under the `"plugins"` key in `cli.json` (your global OpenCode config directory, usually `~/.config/opencode/cli.json`):
 
 ```json
 {
@@ -54,13 +56,8 @@ Add it under the `"plugins"` key in `cli.json`:
 }
 ```
 
-For sessions without a TUI, also add it under the `"plugins"` key in `opencode.json(c)`:
-
-```json
-{
-  "plugins": ["@capybearista/opencode-ram-monitor@latest"]
-}
-```
+> [!IMPORTANT]
+> Do not add it to `opencode.json(c)`. Since 2.1.0 the package has no server entry, and OpenCode reports "Plugin entrypoint not found" for it there. If you are upgrading from 2.0.x, remove that entry.
 
 ### OpenCode V1
 
@@ -90,57 +87,56 @@ Remove the plugin from `"plugin(s)"` from the respective config files they were 
 
 ## Usage
 
-Once installed, the RAM monitor will automatically appear in your OpenCode TUI sidebar, polling your system to display direct and with-tools memory for the current session and the aggregate total across all active sessions.
+Once installed, the RAM monitor appears in the TUI sidebar of every session:
 
-To get a detailed heavy process tree of memory usage across all currently active OpenCode sessions, type `/ram` or click the sidebar widget. Both open the same pop-up; `esc` closes it.
+```text
+╭───────────────────────────────────╮
+│ RAM Usage ●              4.88 GB  │
+│ OpenCode 1.49 GB · Tools 3.39 GB  │
+╰───────────────────────────────────╯
+```
+
+- **Header**: total memory; the dot flips on every refresh.
+- **OpenCode**: this TUI plus the shared server.
+- **Tools**: MCP servers, language servers, shell commands, and terminal panes the server runs.
+
+Type `/ram` or click the widget for the full process tree; `esc` closes it.
 
 ## Configuration
 
-Preferred: pass the interval as plugin `options` alongside the plugin entry (server `opencode.json(c)` object form, TUI `cli.json` tuple form):
+Pass options in the plugin's `cli.json` entry, using the object form:
 
 ```json
 {
   "plugins": [
-    ["@capybearista/opencode-ram-monitor", { "refreshIntervalMs": 2000 }]
+    {
+      "package": "@capybearista/opencode-ram-monitor@latest",
+      "options": { "layout": "minimal", "refreshIntervalMs": 2000 }
+    }
   ]
 }
 ```
 
-Fallback: add `experimental.ramMonitor.refreshIntervalMs` to any supported config file. Supported files, in load order:
+> [!WARNING]
+> Use the object form above. The V1 tuple form (`["@capybearista/opencode-ram-monitor", { ... }]`) is not valid in V2's `cli.json`, and one invalid entry makes OpenCode ignore the whole file, including your theme, keybinds, and every other plugin.
 
-1. `opencode.json(c)`
-2. `tui.json(c)` - legacy TUI configs
-3. `cli.json`
-
-Plugin `options` win over config files when the value is a valid number; invalid values fall back to files, then the default. Files load the global config dir first (`$OPENCODE_CONFIG_DIR` or `~/.config/opencode/`), then project files — later files override earlier ones.
-
-JSONC comments and trailing commas are supported.
-
-| Property | Type | Default | Description |
+| Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `refreshIntervalMs` (plugin options) or `experimental.ramMonitor.refreshIntervalMs` (config file) | `number` | `5000` | Polling interval for the sidebar widget in milliseconds. Clamped between `1000` and `60000`. |
+| `layout` | `"full"` \| `"minimal"` | `"full"` | `full` is the bordered two-row card. `minimal` is one borderless line: `RAM ● 4.88 GB (tools 3.39 GB)`. |
+| `refreshIntervalMs` | `number` | `5000` | Polling interval in milliseconds. Numeric strings are accepted. Values are clamped between `1000` and `60000`. |
 
-File-key example:
-```json
-{
-  "experimental": {
-    "ramMonitor": {
-      "refreshIntervalMs": 2000
-    }
-  }
-}
-```
+Invalid values fall back to the default and show a warning: as footer text in the full layout, as a warning color in the minimal layout, and listed at the top of the `/ram` pop-up.
 
-Note if you want to modify this setting on the fly: OpenCode only delivers `options` for entries declared in the global `cli.json` (TUI) / `opencode.json` (server) plugin lists. The TUI re-reads the global `cli.json` when the file changes; the server profile applies changes on a configuration reload (`/reload` or `opencode reload`) or a restart.
+OpenCode re-applies a plugin's options when `cli.json` changes, so edits take effect without a restart. Options are only read from `cli.json`; the 2.0.x `experimental.ramMonitor` config-file key is no longer supported.
 
 ## Troubleshooting
 
-- **Widget missing from sidebar**: Ensure the TUI plugin is registered in your `cli.json` `plugins` list (project `cli.json` files are not read by OpenCode — use the global one).
-- **Refresh interval did not change**: Prefer plugin `options` (tuple/object entry form) — options only apply to declared entries and are read when the plugin is set up. The TUI re-reads `cli.json` on save; the server profile needs a configuration reload or restart. File keys remain as fallback.
-- **Config warning shown in the sidebar**: A supported config file could not be parsed, so the widget is using the last valid value it found or the default `5000ms` interval.
-- **Active count seems off**: The plugin tokenizes command lines and parent links to find logical sessions. Deeply nested wrappers or unusual invocation aliases might still be missed.
-- **Sidebar numbers look higher than expected**: The sidebar shows both direct RSS and with-tools RSS. The with-tools column includes child processes spawned by the session.
-- **Total RAM shows `0`**: If sampling fails completely (e.g. `ps` is missing), the plugin falls back to using `process.memoryUsage().rss` of the current process. Ensure standard process utilities are available.
+- **Widget missing from sidebar**: Check the entry is in the global `cli.json` `plugins` list. OpenCode does not read project-level `cli.json` files. The sidebar also hides for subagent sessions and on narrow terminals (toggle it with the `session.sidebar.toggle` command).
+- **"server not visible"**: The plugin could not confirm which server this TUI uses, so it shows only this TUI's memory. This is expected when the TUI is connected to a remote server with `--server`, because that server's processes are on another machine.
+- **"process list unavailable"**: `ps` (or `wmic` on Windows) could not be run, so only this TUI's own memory is shown. Ensure standard process utilities are installed.
+- **Other OpenCode windows are not counted**: Each TUI counts itself plus the shared server and its tools. Other TUI windows connected to the same server are not included.
+- **Tools look high**: Tools include everything the server starts: MCP servers, language servers, shell commands, and terminal panes. Open `/ram` to see which processes are responsible.
+- **Options did not apply**: Make sure the entry uses the object form (see [Configuration](#configuration)) and lives in the global `cli.json`.
 
 ## Development Notes
 
@@ -161,7 +157,7 @@ This package lives in the `opencode-plugins` monorepo.
 See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
 
 - From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`,`bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test` as the workspace check.
-- For a focused run, `bun test` is supported from this package directory; its tests include the real local-directory resolver regression.
+- For a focused run, `bun test` is supported from this package directory. `bun run smoke` builds the package and loads it through OpenCode's own entry resolver.
 - `bun run check` writes Biome changes; use it only when formatting changes are intended.
 - Prefer small, direct changes.
 
