@@ -1,24 +1,17 @@
 import { getProcessDisplayLabel } from "./command.js";
 import { formatBytes, formatTreeSize } from "./format.js";
-import { type Inspection, measureRam } from "./measure.js";
+import {
+  type ChildrenByParent,
+  childrenByParent,
+  type Inspection,
+  measureRam,
+  tuiBoundary,
+} from "./measure.js";
 import type { ProcessEntry } from "./snapshot.js";
-
-type ChildrenByPid = Map<number, ProcessEntry[]>;
-
-function groupChildren(entries: readonly ProcessEntry[]): ChildrenByPid {
-  const children: ChildrenByPid = new Map();
-  for (const item of entries) {
-    if (item.ppid === item.pid) continue;
-    const siblings = children.get(item.ppid);
-    if (siblings) siblings.push(item);
-    else children.set(item.ppid, [item]);
-  }
-  return children;
-}
 
 function renderBranch(
   node: ProcessEntry,
-  children: ChildrenByPid,
+  children: ChildrenByParent,
   skip: ReadonlySet<number>,
   prefix: string,
   isLast: boolean,
@@ -51,7 +44,7 @@ function renderSection(
   title: string,
   rootPid: number,
   inspection: Inspection,
-  children: ChildrenByPid,
+  children: ChildrenByParent,
   skip: ReadonlySet<number>,
   fallbackRss: number,
 ): string {
@@ -61,20 +54,30 @@ function renderSection(
   return `**${title}** (PID ${rootPid}) - ${formatBytes(branch.total)}\n\`\`\`text\n${branch.text}\`\`\``;
 }
 
-export function renderProcessTree(inspection: Inspection, fallbackTuiRss: number): string {
+export function renderProcessTree(
+  inspection: Inspection,
+  fallbackTuiRss: number,
+  warnings: readonly string[] = [],
+): string {
   const { layout } = inspection;
   const ram = measureRam(inspection.entries, layout, fallbackTuiRss);
-  const children = groupChildren(inspection.entries);
-  const separateRoots = new Set<number>(layout.terminalPids);
-  if (layout.serverPid !== null) separateRoots.add(layout.serverPid);
+  const children = childrenByParent(inspection.entries);
 
   const sections = [
     "### OpenCode RAM Usage",
     `Total ${formatBytes(ram.total)} · OpenCode ${formatBytes(ram.opencode)} · Tools ${formatBytes(ram.tools)}`,
   ];
-  if (inspection.notice) sections.push(`> ${inspection.notice}`);
+  const notes = [inspection.notice, ...warnings].filter((note): note is string => Boolean(note));
+  if (notes.length > 0) sections.push(notes.map((note) => `> ${note}`).join("\n>\n"));
   sections.push(
-    renderSection("TUI", layout.tuiPid, inspection, children, separateRoots, fallbackTuiRss),
+    renderSection(
+      "TUI",
+      layout.tuiPid,
+      inspection,
+      children,
+      tuiBoundary(inspection.entries, layout),
+      fallbackTuiRss,
+    ),
   );
   if (layout.serverPid !== null) {
     sections.push(renderSection("Server", layout.serverPid, inspection, children, new Set(), 0));

@@ -1,5 +1,6 @@
 import "@opentui/solid/preload";
-import { fileURLToPath } from "node:url";
+import { basename } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "@opencode/plugin/host";
 import { createRoot } from "solid-js";
 
@@ -21,9 +22,13 @@ function assert(condition: unknown, message: string): asserts condition {
 const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
 const entrypoints = resolve({ directory: packageDirectory });
 assert(entrypoints.server === undefined, `unexpected server entry: ${entrypoints.server}`);
-assert(entrypoints.tui?.endsWith("/tui.js"), `unexpected TUI entry: ${entrypoints.tui}`);
+assert(entrypoints.tui, "no TUI entry resolves");
+const tuiUrl = entrypoints.tui.startsWith("file:")
+  ? entrypoints.tui
+  : pathToFileURL(entrypoints.tui).href;
+assert(basename(fileURLToPath(tuiUrl)) === "tui.js", `unexpected TUI entry: ${entrypoints.tui}`);
 
-const tui = (await import(entrypoints.tui)) as { default: PluginDefinition };
+const tui = (await import(tuiUrl)) as { default: PluginDefinition };
 
 assert(tui.default.id === "capybearista.opencode-ram-monitor", "tui id mismatch");
 assert(typeof tui.default.setup === "function", "tui setup is not a function");

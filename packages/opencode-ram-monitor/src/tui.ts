@@ -140,7 +140,7 @@ function RamWidget(props: {
   const [error, setError] = createSignal<string | null>(null);
   const [tick, setTick] = createSignal(0);
   const intervalMs = props.options.refreshIntervalMs;
-  const warning = props.options.warnings[0] ?? null;
+  const warnings = props.options.warnings;
 
   let disposed = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -174,7 +174,7 @@ function RamWidget(props: {
 
   const statusColor = (fallback: RamWidgetToken): RamWidgetToken => {
     if (error()) return theme().error;
-    if (warning || sample()?.notice) return theme().warning;
+    if (warnings.length > 0 || sample()?.notice) return theme().warning;
     return fallback;
   };
 
@@ -271,7 +271,7 @@ function RamWidget(props: {
           return current ? formatRoleRow(current.breakdown) : "Measuring…";
         },
       ),
-      warning ? createTextNode({ fg: () => theme().textMuted }, warning) : null,
+      ...warnings.map((warning) => createTextNode({ fg: () => theme().textMuted }, warning)),
       () => {
         const notice = sample()?.notice;
         return notice ? createTextNode({ fg: () => theme().textMuted }, notice) : null;
@@ -280,7 +280,11 @@ function RamWidget(props: {
   );
 }
 
-function RamModal(props: { context: TuiContext; deps: RamMonitorDeps }): JSX.Element {
+function RamModal(props: {
+  context: TuiContext;
+  options: RamMonitorOptions;
+  deps: RamMonitorDeps;
+}): JSX.Element {
   const theme = () => readRamWidgetTheme(props.context.theme);
   const syntaxStyle = createMarkdownSyntaxStyle(
     props.context.theme,
@@ -294,7 +298,9 @@ function RamModal(props: { context: TuiContext; deps: RamMonitorDeps }): JSX.Ele
   void props.deps
     .inspect(props.context.client)
     .then((inspection) => {
-      if (!disposed) setTree(renderProcessTree(inspection, props.deps.selfRss()));
+      if (!disposed) {
+        setTree(renderProcessTree(inspection, props.deps.selfRss(), props.options.warnings));
+      }
     })
     .catch((cause: unknown) => {
       if (!disposed) setError(getErrorMessage(cause));
@@ -360,12 +366,12 @@ function RamModal(props: { context: TuiContext; deps: RamMonitorDeps }): JSX.Ele
   );
 }
 
-function openRamModal(context: TuiContext, deps: RamMonitorDeps): void {
+function openRamModal(context: TuiContext, options: RamMonitorOptions, deps: RamMonitorDeps): void {
   const dialog = context.ui.dialog;
   // show() replaces the dialog stack, so clearing first keeps repeat opens
   // idempotent; set() must follow show() because show() resets the size.
   dialog.clear();
-  dialog.show(() => createComponent(RamModal, { context, deps }));
+  dialog.show(() => createComponent(RamModal, { context, options, deps }));
   dialog.set({ size: "xlarge" });
 }
 
@@ -386,7 +392,7 @@ export function createRamMonitorPlugin(deps: RamMonitorDeps = defaultDeps) {
             context,
             options,
             deps,
-            onOpen: () => openRamModal(context, deps),
+            onOpen: () => openRamModal(context, options, deps),
           });
         },
       });
@@ -417,7 +423,7 @@ export function createRamMonitorPlugin(deps: RamMonitorDeps = defaultDeps) {
                 palette: true,
                 slash: { name: "ram", arguments: true },
                 run: () => {
-                  openRamModal(context, deps);
+                  openRamModal(context, options, deps);
                 },
               },
             ],
