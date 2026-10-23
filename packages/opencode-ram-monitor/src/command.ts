@@ -38,11 +38,17 @@ export function isServerCommand(commandLine: string): boolean {
   );
 }
 
-// ps prints arguments unquoted, so the path runs up to the next known flag.
+// ps prints the executable and arguments unquoted, so a path with spaces cannot be
+// tokenized: match the executable on the raw line, and read the runtime dir up to the
+// next known flag.
+const PTY_DAEMON = /^["']?(?:[^"']*[\\/])?opencode-pty(?:\.exe)?["']?\s+daemon(?=\s|$)/i;
+
+function isPtyDaemonCommand(commandLine: string): boolean {
+  return PTY_DAEMON.test(commandLine.trimStart());
+}
+
 export function readPtyDaemonRuntimeDir(commandLine: string): string | null {
-  const tokens = splitCommandTokens(commandLine);
-  if (!tokens[0] || !PTY_BINARIES.has(getTokenBaseName(tokens[0]))) return null;
-  if (tokens[1] !== "daemon") return null;
+  if (!isPtyDaemonCommand(commandLine)) return null;
   const match = commandLine.match(/\s--runtime-dir(?:=|\s+)(.+?)(?=\s+--name\b|\s*$)/);
   return match ? match[1].trim().replace(/^['"]|['"]$/g, "") : null;
 }
@@ -53,6 +59,7 @@ export function getProcessDisplayLabel(commandLine: string): string {
 
   const first = getTokenBaseName(tokens[0]);
   if (isServerCommand(commandLine)) return "opencode serve";
+  if (isPtyDaemonCommand(commandLine)) return "opencode-pty";
   if (OPENCODE_BINARIES.has(first)) return "opencode";
   if (PTY_BINARIES.has(first)) return "opencode-pty";
   if (INTERPRETERS.has(first)) return first;

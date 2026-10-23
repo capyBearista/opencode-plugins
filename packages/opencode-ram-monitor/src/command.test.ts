@@ -55,10 +55,29 @@ describe("readPtyDaemonRuntimeDir", () => {
     );
   });
 
+  test("recognizes a daemon whose unquoted executable path contains spaces", () => {
+    expect(
+      readPtyDaemonRuntimeDir(
+        "/Users/John Smith/.cache/opencode/bin/opencode-pty/1.0-abc/opencode-pty daemon --runtime-dir /Users/John Smith/.local/state/opencode/pty --name x",
+      ),
+    ).toBe("/Users/John Smith/.local/state/opencode/pty");
+    expect(
+      getProcessDisplayLabel(
+        "/Users/John Smith/.cache/opencode/bin/opencode-pty/1.0-abc/opencode-pty daemon --runtime-dir /x --name y",
+      ),
+    ).toBe("opencode-pty");
+  });
+
   test("returns null for anything else", () => {
     expect(readPtyDaemonRuntimeDir("opencode-pty daemon --name x")).toBeNull();
     expect(readPtyDaemonRuntimeDir("opencode-pty attach --runtime-dir /tmp/x")).toBeNull();
     expect(readPtyDaemonRuntimeDir("bash --runtime-dir /tmp/x daemon")).toBeNull();
+    expect(
+      readPtyDaemonRuntimeDir("/home/a/opencode-pty-notes daemon --runtime-dir /tmp/x --name y"),
+    ).toBeNull();
+    expect(
+      readPtyDaemonRuntimeDir("bash -c opencode-pty daemon --runtime-dir /tmp/x --name y"),
+    ).toBeNull();
   });
 });
 
