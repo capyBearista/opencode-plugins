@@ -258,7 +258,7 @@ async function installChangesetsMarker(root: string, marker: string) {
   await mkdir(cli, { recursive: true });
   await writeJson(path.join(cli, "package.json"), {
     name: "@changesets/cli",
-    version: "2.31.0",
+    version: "3.0.3",
     bin: "bin.js",
   });
   await writeFile(
@@ -1518,6 +1518,11 @@ describe("R11 disposable real Changesets publication", () => {
       [packageNames.timeline]: "2.0.0",
     });
     await linkChangesetsCli(fixture);
+    // Changesets v3 (@manypkg/tools 2) only detects a Bun workspace when a bun.lock exists.
+    await writeFile(
+      path.join(fixture, "bun.lock"),
+      '{\n  "lockfileVersion": 1,\n  "workspaces": {}\n}\n',
+    );
     const evidenceRoot = await createScratch("release-channel-registry-");
     await mkdir(path.join(evidenceRoot, "home"), { recursive: true });
     await mkdir(path.join(evidenceRoot, "npm-cache"), { recursive: true });
