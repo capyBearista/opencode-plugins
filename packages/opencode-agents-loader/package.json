@@ -34,9 +34,9 @@
     "gray-matter": "^4.0.3"
   },
   "peerDependencies": {
-    "@opencode/plugin": "2.0.2"
+    "@opencode/plugin": "2.1.2"
   },
   "devDependencies": {
-    "@opencode/plugin": "2.0.2"
+    "@opencode/plugin": "2.1.2"
   }
 }
