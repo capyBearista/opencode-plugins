@@ -12,7 +12,7 @@
     <style>
       .sans { font-family: "JetBrains Mono"; }
       .mono { font-family: "JetBrains Mono"; }
-      .section { font-size: 14px; font-weight: 750; letter-spacing: 2.3px; }
+      .section { font-size: 16px; font-weight: 750; letter-spacing: 2.3px; }
       .path { font-size: 23px; font-weight: 650; letter-spacing: -0.7px; }
       .file { font-size: 15px; fill: #b5b5b5; }
     </style>
