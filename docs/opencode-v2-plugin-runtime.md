@@ -26,7 +26,7 @@ The `services/www` docs describe V2. The older `packages/web` docs still describ
 ## What a TUI plugin gets
 
 - **It runs inside the TUI process.** `process.pid` is the TUI, and child processes the plugin spawns (such as `ps`) appear under it **(verified)**.
-- **`context.client` talks to the server this TUI uses.** `client.server.info()` returns `{ version, pid, urls }`, where `pid` is the server's own process ID, so a plugin can find the server it is connected to **(verified, standalone and shared service)**. It first ships in `@opencode/client` 2.1.0. In 2.0.x the closest call is `client.health.get()`.
+- **`context.client` talks to the server this TUI uses.** `client.server.info()` returns `{ version, pid, urls, paths, capabilities }`, where `pid` is the server's own process ID, so a plugin can find the server it is connected to **(verified, standalone and shared service)**. It is available from `@opencode/client` 2.1.0; the 2.0.2 client has `client.health.get()` instead, which also returns `pid`. Under `--server`, that `pid` may belong to another machine, so check it against the local process table before trusting it.
 - **`context.client` is captured once.** The context stores `host.client.api` when the plugin activates (`packages/tui/src/plugin/api.tsx:159`). It is not a getter, and plugins are not re-activated when the TUI reconnects. In practice it keeps working across `opencode service restart`, because the default service keeps a fixed port and a password persisted in `<config>/service.json` **(verified)**. A changed port or password would leave it stale **(source)**.
 - **`context.options`** is the `options` object of the plugin's `cli.json` entry, or `{}` (`packages/tui/src/plugin/api.tsx:153`). Plugins loaded only from the server's inventory get no options (`packages/tui/src/plugin/context.tsx:301-305`).
 - **`setup` is awaited** before the plugin is active (`packages/tui/src/plugin/context.tsx:639-641`). Register slots synchronously and do I/O inside components (see the [IPC guide](./opencode-plugin-ipc-and-os-patterns.md)).
@@ -40,13 +40,18 @@ The `services/www` docs describe V2. The older `packages/web` docs still describ
 
 ## Entry resolution
 
-`Host.resolve` (`packages/plugin/src/host.ts:43`, exported as `@opencode/plugin/host`) looks for:
+`Host.resolve` (`packages/plugin/src/host.ts:17-43`, exported as `@opencode/plugin/host`) looks for:
 
 - **server**: `<pkg>/server`, then the package root (`<pkg>`, or `index` for a local directory)
 - **tui**: `<pkg>/tui`
 - **rpc**: `<pkg>/rpc`
 
-So a **TUI-only package must not export `.`**, set `main`, or ship a root `server.js`. Otherwise OpenCode treats it as a server plugin too. A package listed in `opencode.json` with no server entry fails with "Plugin entrypoint not found" (`packages/core/src/plugin/module.ts:118`). The ram-monitor smoke script calls `resolve()` directly to assert this **(verified)**.
+What counts as a server entry depends on how the plugin is loaded:
+
+- **Named package** (npm): resolution goes through the package's `exports` map. A TUI-only package must not export `.` or `./server`. Without an `exports` map, `main` would count as the root.
+- **Local directory** (a path in `cli.json`): resolution looks at files. A TUI-only package must not ship a root `server.js` or `index.js`.
+
+Otherwise OpenCode treats it as a server plugin too. A TUI-only package does nothing from `opencode.json`; list it in `cli.json`. The ram-monitor smoke script calls `resolve()` with the package directory, so it asserts the local-directory case **(verified)**.
 
 ## Testing TUI plugins with OpenTUI
 

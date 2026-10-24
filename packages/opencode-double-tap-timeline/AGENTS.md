@@ -55,7 +55,7 @@ bun --filter @capybearista/opencode-double-tap-timeline test
 `
 Package root:
 - `tui.js` — local-directory entrypoint that re-exports `./dist/index.js` (built artifact must exist)
-- `bunfig.toml` — Bun preload for `@opentui/solid` JSX transformation at runtime
+- `bunfig.toml` — Bun preload for `@opentui/solid` JSX transformation at runtime, plus a `[test]` preload so `bun test` loads Solid's client build (effects such as `onMount` fire under `testRender`)
 
 ### Core (understand these first)
 - `src/escape-detector.ts` — core state machine: `createEscapeDetector` tracks the 800ms double-tap window, applies modal and session-route guards, and exposes `handle`/`dispose` with explicit timer cleanup

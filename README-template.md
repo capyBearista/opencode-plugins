@@ -52,7 +52,8 @@ Add it under the `"plugins"` key in [`opencode.json(c)`|`cli.json`]:
 }
 ```
 
-[TUI|Server] entry only, so [`cli.json`|`opencode.json(c)`] needs no entry.
+> [!IMPORTANT]
+> This plugin is [TUI|Server]-only, so it belongs in [`cli.json`|`opencode.json(c)`].
 </server|TUI>
 
 <server+TUI>

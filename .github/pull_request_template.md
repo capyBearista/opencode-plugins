@@ -43,6 +43,7 @@
 - [ ] If local `.opencode` config was part of testing, I verified it points at the package root or published plugin name rather than a stale `dist/*` artifact
 - [ ] For bug fixes, I captured the root cause and why earlier symptoms/reviewer findings were misleading
 - [ ] I updated docs for user-facing changes
+- [ ] I added a changeset if this should ship; breaking changes within an OpenCode major use `minor`, and `major` only moves a package to a new OpenCode major (see CONTRIBUTING)
 - [ ] I have read the [Contributing Guidelines](../CONTRIBUTING.md)
 
 ## Screenshots <!-- delete if unused -->

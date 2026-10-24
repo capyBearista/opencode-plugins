@@ -34,15 +34,15 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 
 | Package | V2 status |
 | --- | --- |
-| `opencode-agents-loader` | Ported: server plugin, plural `plugins` in `opencode.json`; `2.0.0` on `latest` |
-| `opencode-double-tap-timeline` | Ported: TUI plugin, plural `plugins` in `cli.json`; `2.0.0` on `latest` |
-| `opencode-adversarial-review` | Ported: server plugin, plural `plugins` in `opencode.json`; `2.0.0` on `latest` |
+| `opencode-agents-loader` | Ported: server plugin, plural `plugins` in `opencode.json`; `2.x` on `latest` |
+| `opencode-double-tap-timeline` | Ported: TUI plugin, plural `plugins` in `cli.json`; `2.x` on `latest` |
+| `opencode-adversarial-review` | Ported: server plugin, plural `plugins` in `opencode.json`; `2.x` on `latest` |
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port TBD |
 | `opencode-output-styles` | V1 only; deprecated for V2 |
 | `opencode-ram-monitor` | Ported: TUI plugin (TUI-only since `2.1.0`, requires OpenCode 2.1+), plural `plugins` in `cli.json`; `2.x` on `latest` |
 
 - **MUST** use the V2 Promise API in ports: `Plugin.define({ id, setup })` from `@opencode/plugin` 2.x. Do not carry V1 `server`/`config` hook signatures into a port.
-- **MUST** keep V2 entrypoints at the package root: `server.js` for the loader, `tui.js` for the timeline. Filesystem-local config points at the package directory, not the entry file.
+- **MUST** keep V2 entrypoints at the package root: `server.js` for server plugins (loader, adversarial-review), `tui.js` for TUI plugins (timeline, ram-monitor). Filesystem-local config points at the package directory, not the entry file.
 - **MUST** use the plural `"plugins"` key and split host config: server plugins in `opencode.json`, TUI plugins in `cli.json`. V1 keeps the singular `"plugin"` key in `opencode.json` / `tui.json`.
 - **MUST NOT** write `@v2` as a specifier — npm parses it as a semver range. Use `@latest` (or an exact `@2.0.0` pin for a fixed setup).
 - **MUST** keep V1 and V2 lines apart. The loader and timeline V1 releases are frozen but available by exact pin. Both lines may share the default config directory, so use separate profiles (`OPENCODE_CONFIG_DIR`) for side-by-side testing.

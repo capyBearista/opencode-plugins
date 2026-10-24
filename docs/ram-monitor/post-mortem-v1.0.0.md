@@ -1,5 +1,7 @@
 # `opencode-ram-monitor` v1.0.0 Post-Mortem
 
+> **Historical:** describes the 1.x plugin. The config-file key, session discovery, and process classification below were replaced in 2.1.0; see the [package README](../../packages/opencode-ram-monitor/README.md).
+
 This document summarizes the architectural challenges and bug fixes encountered during the stabilization and v1.0.0 preparation of the `@capybearista/opencode-ram-monitor` plugin.
 
 ## 1. IPC Boot Deadlock
