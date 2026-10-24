@@ -42,8 +42,8 @@ Plugin majors track OpenCode majors, not strict semver. A package in release cla
 
 ### Release channels
 
-- The four V2 ports are published as `2.x` on `latest`.
-- The two V1-only packages (`opencode-agent-prompt-inheritance`, `opencode-output-styles`) continue to publish under `latest`. The loader and timeline V1 releases stay available at `1.0.0` and `1.0.1` by exact pin.
+- The five V2 ports are published as `2.x` on `latest`.
+- The one V1-only package (`opencode-agent-prompt-inheritance`) continues to publish under `latest`. The output-styles V1 line is frozen at `1.0.2`. The loader and timeline V1 releases stay available at `1.0.0` and `1.0.1` by exact pin.
 - Keep V1 and V2 version/release batches separate. The guard checks **all unpublished public workspace versions**, not just the packages named in a changeset or Git diff. A mixed batch is rejected before publishing.
 
 Publishing is CI-only. The release workflow uses the `npm-publish` environment and npm trusted publishing, and runs `bun run changeset:publish` through the pinned Changesets Action. Version application and publication require maintainer authorization; do not run a real-registry publish locally.
