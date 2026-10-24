@@ -1,6 +1,6 @@
 ---
 name: Concise
-description: "Claude responds tersely, leading with results and skipping preamble and narration"
+description: "Responds tersely, leading with results and skipping preamble and narration"
 turn-reminder: "Be concise: lead with the result, skip preamble and narration, keep only what the user needs."
 ---
 
