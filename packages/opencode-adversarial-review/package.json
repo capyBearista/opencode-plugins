@@ -33,10 +33,10 @@
     }
   },
   "peerDependencies": {
-    "@opencode/plugin": "2.1.2"
+    "@opencode/plugin": ">=2.0.2 <3"
   },
   "devDependencies": {
-    "@opencode/plugin": "2.1.2",
+    "@opencode/plugin": "2.1.4",
     "@tsconfig/node22": "^22.0.6",
     "@types/bun": "latest",
     "typescript": "^7.0.2"
