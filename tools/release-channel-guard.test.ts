@@ -113,7 +113,7 @@ async function createFixture(
       [packageNames.agents]: { releaseClass: "v2", channel: "latest" },
       [packageNames.timeline]: { releaseClass: "v2", channel: "latest" },
       [packageNames.inheritance]: { releaseClass: "v1", channel: "latest" },
-      [packageNames.styles]: { releaseClass: "v1", channel: "latest" },
+      [packageNames.styles]: { releaseClass: "v2", channel: "latest" },
       [packageNames.ram]: { releaseClass: "v2", channel: "latest" },
       [packageNames.review]: { releaseClass: "v2", channel: "latest" },
     },
@@ -418,27 +418,31 @@ describe("release-channel-guard policy matrix", () => {
   });
 
   test("R4 one ordinary V1 update selects latest", async () => {
-    const cwd = await createFixture({ [packageNames.styles]: "1.0.2" });
+    const cwd = await createFixture({ [packageNames.inheritance]: "1.0.1" });
 
     const plan = await buildReleasePlan({ cwd, registryClient: createRegistryClient() });
 
     expect(plan.channel).toBe("latest");
     expect(plan.unpublished).toEqual([
-      expect.objectContaining({ name: packageNames.styles, version: "1.0.2", releaseClass: "v1" }),
+      expect.objectContaining({
+        name: packageNames.inheritance,
+        version: "1.0.1",
+        releaseClass: "v1",
+      }),
     ]);
   });
 
-  test("R5 several ordinary V1 updates remain one latest publication", async () => {
+  test("R5 several ordinary V2 updates remain one latest publication", async () => {
     const cwd = await createFixture({
-      [packageNames.inheritance]: "1.0.1",
-      [packageNames.styles]: "1.0.2",
+      [packageNames.agents]: "2.0.0",
+      [packageNames.styles]: "2.0.0",
     });
 
     const plan = await buildReleasePlan({ cwd, registryClient: createRegistryClient() });
 
     expect(plan.channel).toBe("latest");
     expect(plan.unpublished.map((pkg) => pkg.name)).toEqual([
-      packageNames.inheritance,
+      packageNames.agents,
       packageNames.styles,
     ]);
   });
@@ -446,7 +450,7 @@ describe("release-channel-guard policy matrix", () => {
   test("R6 mixed unpublished V1 and V2 releases reject before any publish invocation", async () => {
     const cwd = await createFixture({
       [packageNames.agents]: "2.0.0",
-      [packageNames.styles]: "1.0.2",
+      [packageNames.inheritance]: "1.0.1",
     });
     let invocations = 0;
 
@@ -583,7 +587,7 @@ describe("release-channel-guard policy matrix", () => {
   test("R4 mixed unpublished V1 and V2-class releases reject before any publish invocation", async () => {
     const cwd = await createFixture({
       [packageNames.ram]: "2.0.0",
-      [packageNames.styles]: "1.0.2",
+      [packageNames.inheritance]: "1.0.1",
     });
     let invocations = 0;
 
@@ -699,7 +703,7 @@ describe("release-channel-guard policy matrix", () => {
   });
 
   test("R8 wrong major and prerelease versions reject stable policy", async () => {
-    const wrongMajor = await createFixture({ [packageNames.styles]: "2.0.0" });
+    const wrongMajor = await createFixture({ [packageNames.inheritance]: "2.0.0" });
     await expectGuardRejects(
       buildReleasePlan({ cwd: wrongMajor, registryClient: createRegistryClient() }),
       "V1 major",
@@ -945,7 +949,7 @@ describe("release-channel-guard policy matrix", () => {
   });
 
   test("production invocation preserves normal Changesets git tagging", async () => {
-    const cwd = await createFixture({ [packageNames.styles]: "1.0.2" });
+    const cwd = await createFixture({ [packageNames.inheritance]: "1.0.1" });
     let invocation: readonly string[] | undefined;
 
     await runReleaseGuard({
@@ -1076,7 +1080,7 @@ describe("R12 isolated npm configuration", () => {
       ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example/request",
       ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-secret",
     };
-    const successFixture = await createFixture({ [packageNames.styles]: "1.0.2" });
+    const successFixture = await createFixture({ [packageNames.inheritance]: "1.0.1" });
     let successConfig: string | undefined;
     let successEnv: NodeJS.ProcessEnv | undefined;
     await runReleaseGuard({
@@ -1096,7 +1100,7 @@ describe("R12 isolated npm configuration", () => {
     expect(await Bun.file(successConfig).exists()).toBe(false);
     expect(await pathExists(path.dirname(successConfig))).toBe(false);
 
-    const failureFixture = await createFixture({ [packageNames.styles]: "1.0.2" });
+    const failureFixture = await createFixture({ [packageNames.inheritance]: "1.0.1" });
     let failureConfig: string | undefined;
     await expectGuardRejects(
       runReleaseGuard({
@@ -1245,7 +1249,7 @@ describe("R13 cleanup failure handling", () => {
     ];
 
     for (const mode of modes) {
-      const fixture = await createFixture({ [packageNames.styles]: "1.0.2" });
+      const fixture = await createFixture({ [packageNames.inheritance]: "1.0.1" });
       const warnings: string[] = [];
       let environmentDirectory = "";
       let caught: unknown;
@@ -1558,7 +1562,7 @@ describe("R11 disposable real Changesets publication", () => {
       expect(registry.packages.get(packageNames.agents)?.distTags.opencode2).toBeUndefined();
       expect(registry.packages.get(packageNames.timeline)?.distTags.opencode2).toBeUndefined();
 
-      await updateManifest(fixture, packageNames.styles, { version: "1.0.2" });
+      await updateManifest(fixture, packageNames.inheritance, { version: "1.0.1" });
       const second = await runReleaseGuard({
         cwd: fixture,
         mode: "publish",
@@ -1570,16 +1574,16 @@ describe("R11 disposable real Changesets publication", () => {
       });
       expect(second.channel).toBe("latest");
       expect(registry.publishes.at(-1)).toEqual({
-        name: packageNames.styles,
-        version: "1.0.2",
+        name: packageNames.inheritance,
+        version: "1.0.1",
         tag: "latest",
       });
       expect(publishedPackageNames(registry)).toEqual(
-        [packageNames.agents, packageNames.timeline, packageNames.styles].sort(),
+        [packageNames.agents, packageNames.timeline, packageNames.inheritance].sort(),
       );
       expect(registry.packages.get(packageNames.agents)?.distTags.latest).toBe("2.0.0");
       expect(registry.packages.get(packageNames.timeline)?.distTags.latest).toBe("2.0.0");
-      expect(registry.packages.get(packageNames.inheritance)?.distTags.latest).toBe("1.0.0");
+      expect(registry.packages.get(packageNames.inheritance)?.distTags.latest).toBe("1.0.1");
       expect(registry.requests.some((request) => request.method === "PUT")).toBe(true);
       expect(await Bun.file(path.join(fixture, ".git", "refs")).exists()).toBe(false);
     } finally {

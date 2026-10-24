@@ -54,6 +54,16 @@ What counts as a server entry depends on how the plugin is loaded:
 
 Otherwise OpenCode treats it as a server plugin too. A TUI-only package does nothing from `opencode.json`; list it in `cli.json`. The ram-monitor smoke script calls `resolve()` with the package directory, so it asserts the local-directory case **(verified)**.
 
+## Combined server + TUI packages
+
+Learned while porting `opencode-output-styles`; details and evidence in [output-styles/v2-port-findings.md](./output-styles/v2-port-findings.md).
+
+- **One `opencode.json` entry loads both halves.** The TUI loads the `./tui` entry of any active server plugin that reports `features.tui` **(verified on 2.0.23, 2.1.4)**. That TUI half gets `context.options = {}`, so hand server options over with an RPC (`ctx.rpc.register` on the server, `context.client.rpc(Def)` in the TUI). Every RPC call needs an object input; a missing one fails with `rpc.invalid_input` **(verified)**.
+- **The SDK peer stays required.** The server half needs its own `@opencode/plugin` copy before 2.0.25 (see above) **(verified on 2.0.23)**.
+- **Session metadata is replace-only and inherited.** `session.update({ metadata })` replaces the whole object, and subagent sessions inherit it, so merge before writing and check `parentID` **(verified)**.
+- **`session.hook("context")` runs last and on every agent request**, including the step after a tool call, after the built-in `identity` and `optimize` hooks **(verified)**.
+- **TUI session data does not react to metadata changes.** Feed a signal from `data.on("session.metadata.updated")` **(verified)**. A slot element with `onMouseUp → context.keymap.dispatch("<command id>")` runs the plugin's own command, which is how the TUI's own footer works **(verified)**.
+
 ## Testing TUI plugins with OpenTUI
 
 Register the preload under `[test]` in the package's `bunfig.toml`:

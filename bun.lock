@@ -54,7 +54,7 @@
     },
     "packages/opencode-double-tap-timeline": {
       "name": "@capybearista/opencode-double-tap-timeline",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "devDependencies": {
         "@opencode/plugin": "2.1.4",
         "@opentui/core": "0.6.8",
@@ -78,15 +78,29 @@
         "yaml": "^2.9.1",
       },
       "devDependencies": {
-        "@opencode-ai/plugin": ">=1.19.3 <2",
+        "@opencode/plugin": "2.1.4",
+        "@opentui/core": "0.6.8",
+        "@opentui/solid": "0.6.8",
+        "@types/bun": "latest",
+        "@types/node": "^26.6.5",
+        "solid-js": "1.9.17",
+        "typescript": "^7.0.2",
       },
       "peerDependencies": {
-        "@opencode-ai/plugin": ">=1.19.3 <2",
+        "@opencode/plugin": ">=2.0.23 <3",
+        "@opentui/core": ">=0.6.6",
+        "@opentui/solid": ">=0.6.6",
+        "solid-js": ">=1.9.0",
       },
+      "optionalPeers": [
+        "@opentui/core",
+        "@opentui/solid",
+        "solid-js",
+      ],
     },
     "packages/opencode-ram-monitor": {
       "name": "@capybearista/opencode-ram-monitor",
-      "version": "2.1.0",
+      "version": "2.1.1",
       "devDependencies": {
         "@opencode/plugin": "2.1.4",
         "@opentui/core": "0.6.8",
@@ -1132,6 +1146,8 @@
 
     "@capybearista/opencode-adversarial-review/@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
+    "@capybearista/opencode-output-styles/@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
+
     "@capybearista/opencode-ram-monitor/@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
     "@isaacs/cliui/string-width": ["string-width@5.1.2", "", { "dependencies": { "eastasianwidth": "^0.2.0", "emoji-regex": "^9.2.2", "strip-ansi": "^7.0.1" } }, "sha512-HnLOCR3vjcY8beoNLtcjZ5/nxn2afmME6lhrDrebokqMap+XbeW8n9TXpPDOqdGK5qcI3oT0GKTW6wC7EMiVqA=="],
@@ -1291,6 +1307,8 @@
     "@babel/plugin-transform-modules-commonjs/@babel/helper-module-transforms/@babel/traverse": ["@babel/traverse@7.29.0", "", { "dependencies": { "@babel/code-frame": "^7.29.0", "@babel/generator": "^7.29.0", "@babel/helper-globals": "^7.28.0", "@babel/parser": "^7.29.0", "@babel/template": "^7.28.6", "@babel/types": "^7.29.0", "debug": "^4.3.1" } }, "sha512-4HPiQr0X7+waHfyXPZpWPfWL/J7dcN1mx9gL6WdQVMbPnF3+ZhSMs8tCxN7oHddJE9fhNE7+lxdnlyemKfJRuA=="],
 
     "@capybearista/opencode-adversarial-review/@types/bun/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@capybearista/opencode-output-styles/@types/bun/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
     "@capybearista/opencode-ram-monitor/@types/bun/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
