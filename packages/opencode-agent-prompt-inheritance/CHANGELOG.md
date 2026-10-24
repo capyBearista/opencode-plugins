@@ -1,5 +1,11 @@
 # @capybearista/opencode-agent-prompt-inheritance
 
+## 1.0.1
+
+### Patch Changes
+
+- 608d2ff: Require `@opencode-ai/plugin` `>=1.19.3 <2`. The floor follows the SDK that is tested against; the new upper bound keeps this V1 plugin from claiming OpenCode 2.x support.
+
 ## 1.0.0
 
 ### Major Changes
