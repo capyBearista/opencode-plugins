@@ -18,6 +18,23 @@ When exporting a TUI plugin module, the factory function must return immediately
 **The Solution:**
 Defer asynchronous data loading to the UI lifecycle layer. Use SolidJS's `onMount` (or equivalent React hooks if using React) inside the actual widget component.
 
+In V2 (`@opencode/plugin/tui`), the host awaits `setup` before the plugin is active, so the same rule applies: register slots synchronously and do I/O in the component. See [V2 plugin runtime notes](./opencode-v2-plugin-runtime.md).
+
+```tsx
+// V2: setup registers synchronously; the widget loads its data in onMount
+export default Plugin.define({
+  id: "example.widget",
+  setup(context) {
+    context.ui.slot({
+      append: "sidebar.content",
+      render: () => <Widget />,
+    });
+  },
+});
+```
+
+The V1 equivalent (`TuiPlugin`, `api.slots.register`):
+
 ```tsx
 // ❌ BAD: Blocks IPC during host boot
 const tui: TuiPlugin = async (api) => {
@@ -60,6 +77,10 @@ macOS does not expose a `/proc` filesystem. To get similar metrics, you must she
 - **Safety:** Always wrap the `exec` call in a `try...catch` and execute isolated per-PID queries. Shelling out for a large batch of PIDs simultaneously can fail entirely if a single PID in the query string exits before execution completes.
 
 ### Windows (Pwsh/CMD): `wmic` and CSV Hazards
+
+> [!WARNING]
+> Microsoft has deprecated `wmic`, and newer Windows 11 releases no longer enable it by default. Treat it as best-effort: when the command fails, degrade to what the plugin can measure in-process (for example `process.memoryUsage()`) and say so in the UI. The long-term replacement is PowerShell (`Get-CimInstance Win32_Process`), whose startup cost makes it a poor fit for a tight polling loop without a long-lived process.
+
 Windows querying using `wmic` or PowerShell introduces text-parsing hazards, particularly with command lines that include commas or nested quotes.
 
 - **The CSV Bug:** Never use `wmic /format:csv`. If a process command line contains a comma, it breaks the CSV column alignment, leading to NaN errors and logic failures.

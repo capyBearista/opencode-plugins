@@ -3,20 +3,18 @@ import { SyntaxStyle } from "@opentui/core";
 import type { JSX } from "@opentui/solid";
 import { createElement, insert, spread } from "@opentui/solid";
 import { createComponent, createSignal, onCleanup, onMount } from "solid-js";
-import { debugLog } from "./debug.js";
+import { debugLog, getErrorMessage } from "./debug.js";
+import { formatBytes, formatMinimalLine, formatRoleRow } from "./format.js";
 import {
-  formatBytes,
-  getHeavyProcessTree,
-  getLightweightRam,
-  type LightweightRamResult,
-} from "./memory.js";
-import {
-  getDefaultRefreshIntervalMs,
-  getErrorMessage,
-  loadRamMonitorWidgetConfig,
-} from "./sidebar-config.js";
-import { processSnapshotCache } from "./snapshot.js";
+  type Inspection,
+  inspectProcesses,
+  measureRam,
+  type RamBreakdown,
+  type ServerInfoClient,
+} from "./measure.js";
+import { parseOptions, type RamMonitorOptions } from "./options.js";
 import { readRamWidgetTheme } from "./theme.js";
+import { renderProcessTree } from "./tree.js";
 
 type NodePropValue = unknown | (() => unknown);
 type TuiContext = Plugin.Context;
@@ -24,6 +22,21 @@ type RamWidgetThemeTokens = ReturnType<typeof readRamWidgetTheme>;
 type RamWidgetToken = RamWidgetThemeTokens[keyof RamWidgetThemeTokens];
 
 const MODAL_MAX_HEIGHT = 24;
+
+export interface RamMonitorDeps {
+  readonly inspect: (client: ServerInfoClient) => Promise<Inspection>;
+  readonly selfRss: () => number;
+}
+
+const defaultDeps: RamMonitorDeps = {
+  inspect: (client) => inspectProcesses(client),
+  selfRss: () => process.memoryUsage().rss,
+};
+
+interface RamSample {
+  readonly breakdown: RamBreakdown;
+  readonly notice: string | null;
+}
 
 function isEventProp(key: string): boolean {
   return key.startsWith("on") && key.length > 2 && key[2] === key[2]?.toUpperCase();
@@ -67,26 +80,17 @@ function createContainerNode(
   return node as unknown as JSX.Element;
 }
 
-function formatRamRow(label: string, direct: number, withTools: number): string {
-  return `${label.padEnd(4)} ${formatBytes(direct).padStart(10)} | ${formatBytes(withTools).padStart(10)}`;
-}
-
 function formatRamHeaderLeft(flash: string): string {
   return `RAM Usage ${flash}`;
 }
 
-function formatRamHeaderRight(count: number): string {
-  return `${count} session${count === 1 ? "" : "s"}`;
-}
-
 // A plugin cannot reach the host's syntax style, so mirror the markdown
 // subset of the host's generator from the plugin-visible theme tokens.
-function createMarkdownSyntaxStyle(theme: TuiContext["theme"], owner?: unknown): SyntaxStyle {
+function createMarkdownSyntaxStyle(
+  theme: TuiContext["theme"],
+  owner: TuiContext["renderer"]["nativeScene"],
+): SyntaxStyle {
   const { markdown } = theme;
-  const fromTheme = SyntaxStyle.fromTheme as (
-    rules: Parameters<typeof SyntaxStyle.fromTheme>[0],
-    owner?: unknown,
-  ) => SyntaxStyle;
   const rules: Parameters<typeof SyntaxStyle.fromTheme>[0] = [
     {
       scope: [
@@ -121,55 +125,41 @@ function createMarkdownSyntaxStyle(theme: TuiContext["theme"], owner?: unknown):
     },
     { scope: ["markup.strikethrough"], style: { foreground: theme.text.muted } },
   ];
-  return fromTheme(rules, owner);
+  return SyntaxStyle.fromTheme(rules, owner);
 }
 
-function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Element {
+function RamWidget(props: {
+  context: TuiContext;
+  options: RamMonitorOptions;
+  deps: RamMonitorDeps;
+  onOpen: () => void;
+}): JSX.Element {
   const theme = () => readRamWidgetTheme(props.context.theme);
   const worktree = () => props.context.location?.directory ?? process.cwd();
-  const [ram, setRam] = createSignal<LightweightRamResult>({
-    thisDirect: 0,
-    thisWithTools: 0,
-    allDirect: 0,
-    allWithTools: 0,
-    count: 0,
-  });
+  const [sample, setSample] = createSignal<RamSample | null>(null);
   const [error, setError] = createSignal<string | null>(null);
-  const [configError, setConfigError] = createSignal<string | null>(null);
-  const [intervalMs, setIntervalMs] = createSignal<number>(getDefaultRefreshIntervalMs());
   const [tick, setTick] = createSignal(0);
-  const [warning, setWarning] = createSignal<string | null>(null);
+  const intervalMs = props.options.refreshIntervalMs;
+  const warnings = props.options.warnings;
 
   let disposed = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
 
-  const loadConfig = async () => {
-    const config = await loadRamMonitorWidgetConfig(worktree(), props.context.options);
-    setIntervalMs(config.intervalMs);
-    processSnapshotCache.setTtlMs(config.intervalMs);
-    setWarning(config.warning ? `Config warning: using ${config.intervalMs}ms fallback` : null);
-
-    if (!config.warning) return;
-    await debugLog("sidebar-config-fallback", {
-      appliedConfigPath: config.sourcePath || "unknown",
-      failedConfigPath: config.warningPath || "unknown",
-      error: config.warning,
-      fallbackIntervalMs: config.intervalMs,
-    });
-  };
-
   const poll = async () => {
     try {
-      const currentRam = await getLightweightRam();
+      const inspection = await props.deps.inspect(props.context.client);
       if (!disposed) {
-        setRam(currentRam);
+        setSample({
+          breakdown: measureRam(inspection.entries, inspection.layout, props.deps.selfRss()),
+          notice: inspection.notice,
+        });
         setError(null);
         setTick((t) => t + 1);
       }
     } catch (err: unknown) {
       await debugLog("sidebar-poll-failed", {
         worktree: worktree(),
-        intervalMs: intervalMs(),
+        intervalMs,
         error: getErrorMessage(err),
       });
       if (!disposed) {
@@ -178,46 +168,57 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
     }
 
     if (!disposed) {
-      timeout = setTimeout(poll, intervalMs());
+      timeout = setTimeout(poll, intervalMs);
     }
   };
 
   const statusColor = (fallback: RamWidgetToken): RamWidgetToken => {
-    if (error() || configError()) return theme().error;
-    if (warning()) return theme().warning;
+    if (error()) return theme().error;
+    if (warnings.length > 0 || sample()?.notice) return theme().warning;
     return fallback;
   };
 
-  const footerHint = (): string | null => {
-    if (configError()) return `Config error: ${configError()}`;
-    if (error()) return warning();
-    return null;
-  };
-
   onMount(() => {
-    void (async () => {
-      try {
-        await loadConfig();
-      } catch (err: unknown) {
-        await debugLog("sidebar-config-load-failed", {
-          worktree: worktree(),
-          error: getErrorMessage(err),
-        });
-        if (!disposed) {
-          setConfigError(getErrorMessage(err));
-        }
-      }
-
-      if (!disposed) {
-        void poll();
-      }
-    })();
+    void poll();
   });
 
   onCleanup(() => {
     disposed = true;
     if (timeout) clearTimeout(timeout);
   });
+
+  const flash = () => (tick() % 2 === 0 ? "●" : "○");
+
+  if (props.options.layout === "minimal") {
+    return createContainerNode(
+      "box",
+      {
+        flexDirection: "row",
+        gap: 1,
+        onMouseUp: () => {
+          props.onOpen();
+        },
+      },
+      [
+        createTextNode(
+          { fg: () => statusColor(theme().success), flexShrink: 0 },
+          () => `RAM ${flash()}`,
+        ),
+        createTextNode(
+          {
+            fg: () => (error() ? theme().error : statusColor(theme().text)),
+            wrapMode: "none",
+            truncate: true,
+          },
+          () => {
+            if (error()) return `Error: ${error()}`;
+            const current = sample();
+            return current ? formatMinimalLine(current.breakdown) : "…";
+          },
+        ),
+      ],
+    );
+  }
 
   return createContainerNode(
     "box",
@@ -242,53 +243,64 @@ function RamWidget(props: { context: TuiContext; onOpen: () => void }): JSX.Elem
             {
               fg: () => statusColor(theme().success),
             },
-            () => formatRamHeaderLeft(tick() % 2 === 0 ? "●" : "○"),
+            () => formatRamHeaderLeft(flash()),
           ),
           createTextNode(
             {
-              fg: () => theme().secondary,
+              fg: () => theme().text,
               flexShrink: 0,
               wrapMode: "none",
               truncate: true,
             },
-            () => formatRamHeaderRight(ram().count),
+            () => {
+              const current = sample();
+              return current ? formatBytes(current.breakdown.total) : "…";
+            },
           ),
         ],
       ),
       createTextNode(
         {
-          fg: () => theme().textMuted,
+          fg: () => (error() ? theme().error : theme().secondary),
+          wrapMode: "none",
+          truncate: true,
         },
-        () => "      direct      with tools",
+        () => {
+          if (error()) return `Error: ${error()}`;
+          const current = sample();
+          return current ? formatRoleRow(current.breakdown) : "Measuring…";
+        },
       ),
-      createTextNode({ fg: () => (error() ? theme().error : theme().text) }, () =>
-        error() ? `Error: ${error()}` : formatRamRow("This", ram().thisDirect, ram().thisWithTools),
-      ),
-      createTextNode({ fg: () => (error() ? theme().error : theme().secondary) }, () =>
-        !error() ? formatRamRow("All", ram().allDirect, ram().allWithTools) : null,
-      ),
+      ...warnings.map((warning) => createTextNode({ fg: () => theme().textMuted }, warning)),
       () => {
-        const hint = footerHint();
-        return hint ? createTextNode({ fg: () => theme().textMuted }, hint) : null;
+        const notice = sample()?.notice;
+        return notice ? createTextNode({ fg: () => theme().textMuted }, notice) : null;
       },
     ],
   );
 }
 
-function RamModal(props: { context: TuiContext }): JSX.Element {
+function RamModal(props: {
+  context: TuiContext;
+  options: RamMonitorOptions;
+  deps: RamMonitorDeps;
+}): JSX.Element {
   const theme = () => readRamWidgetTheme(props.context.theme);
   const syntaxStyle = createMarkdownSyntaxStyle(
     props.context.theme,
-    (props.context.renderer as { nativeScene?: unknown }).nativeScene,
+    props.context.renderer.nativeScene,
   );
   const [tree, setTree] = createSignal<string | null>(null);
   const [error, setError] = createSignal<string | null>(null);
 
   let disposed = false;
 
-  void getHeavyProcessTree()
-    .then((text) => {
-      if (!disposed) setTree(text);
+  void props.deps
+    .inspect(props.context.client)
+    .then((inspection) => {
+      if (!disposed) {
+        setTree(renderProcessTree(inspection, props.deps.selfRss(), props.options.warnings));
+      }
     })
     .catch((cause: unknown) => {
       if (!disposed) setError(getErrorMessage(cause));
@@ -354,72 +366,79 @@ function RamModal(props: { context: TuiContext }): JSX.Element {
   );
 }
 
-function openRamModal(context: TuiContext): void {
+function openRamModal(context: TuiContext, options: RamMonitorOptions, deps: RamMonitorDeps): void {
   const dialog = context.ui.dialog;
   // show() replaces the dialog stack, so clearing first keeps repeat opens
   // idempotent; set() must follow show() because show() resets the size.
   dialog.clear();
-  dialog.show(() => createComponent(RamModal, { context }));
+  dialog.show(() => createComponent(RamModal, { context, options, deps }));
   dialog.set({ size: "xlarge" });
 }
 
-export default Plugin.define({
-  id: "capybearista.opencode-ram-monitor",
-  setup(context) {
-    const unregisterSidebar = context.ui.slot({
-      // `append` renders inside `sidebar.content` in plugin enable order, so
-      // the widget follows the built-in Context/MCP panels yet precedes
-      // third-party plugins listed after this one. (An `after` claim would
-      // sit below every contribution regardless of order, and would survive
-      // a slot replacement — traded away here for ordering.)
-      append: "sidebar.content",
-      render() {
-        return createComponent(RamWidget, { context, onOpen: () => openRamModal(context) });
-      },
-    });
+export function createRamMonitorPlugin(deps: RamMonitorDeps = defaultDeps) {
+  return Plugin.define({
+    id: "capybearista.opencode-ram-monitor",
+    setup(context) {
+      const options = parseOptions(context.options);
+      const unregisterSidebar = context.ui.slot({
+        // `append` renders inside `sidebar.content` in plugin enable order, so
+        // the widget follows the built-in Context/MCP panels yet precedes
+        // third-party plugins listed after this one. (An `after` claim would
+        // sit below every contribution regardless of order, and would survive
+        // a slot replacement — traded away here for ordering.)
+        append: "sidebar.content",
+        render() {
+          return createComponent(RamWidget, {
+            context,
+            options,
+            deps,
+            onOpen: () => openRamModal(context, options, deps),
+          });
+        },
+      });
 
-    // Host contract: `keymap.layer()` returns void and the layer is owned by
-    // the calling component. @opencode/plugin 2.0.2 declares
-    // `layer(input: () => KeymapLayer): void` (dist/tui/context.d.ts), and the
-    // host maps it to Keymap.createLayer (packages/tui/src/plugin/api.tsx),
-    // which registers through @opentui/keymap/solid `useBindings` and is
-    // disposed with that component. So it cannot run in setup scope; the
-    // always-mounted "app" slot supplies that component. The flag keeps
-    // duplicate app mounts or repeated renders from stacking layers, and
-    // onCleanup lets a remount re-register.
-    let commandLayerRegistered = false;
+      // The layer is registered from the always-mounted "app" slot, as in the
+      // 2.0.x port, so it is owned by that component. OpenCode 2.1.x also
+      // accepts `keymap.layer()` from setup (packages/tui/src/plugin/api.tsx
+      // falls back to the host's owner); the slot is kept as a choice. The
+      // flag keeps duplicate app mounts or repeated renders from stacking
+      // layers, and onCleanup lets a remount re-register.
+      let commandLayerRegistered = false;
 
-    const unregisterCommand = context.ui.slot({
-      append: "app",
-      render() {
-        if (commandLayerRegistered) return null;
-        context.keymap.layer(() => ({
-          mode: "global",
-          commands: [
-            {
-              id: "ram.open",
-              title: "RAM usage",
-              description: "Open the RAM usage panel",
-              group: "RAM",
-              palette: true,
-              slash: { name: "ram", arguments: true },
-              run: () => {
-                openRamModal(context);
+      const unregisterCommand = context.ui.slot({
+        append: "app",
+        render() {
+          if (commandLayerRegistered) return null;
+          context.keymap.layer(() => ({
+            mode: "global",
+            commands: [
+              {
+                id: "ram.open",
+                title: "RAM usage",
+                description: "Open the RAM usage panel",
+                group: "RAM",
+                palette: true,
+                slash: { name: "ram", arguments: true },
+                run: () => {
+                  openRamModal(context, options, deps);
+                },
               },
-            },
-          ],
-        }));
-        commandLayerRegistered = true;
-        onCleanup(() => {
-          commandLayerRegistered = false;
-        });
-        return null;
-      },
-    });
+            ],
+          }));
+          commandLayerRegistered = true;
+          onCleanup(() => {
+            commandLayerRegistered = false;
+          });
+          return null;
+        },
+      });
 
-    return () => {
-      unregisterSidebar();
-      unregisterCommand();
-    };
-  },
-});
+      return () => {
+        unregisterSidebar();
+        unregisterCommand();
+      };
+    },
+  });
+}
+
+export default createRamMonitorPlugin();

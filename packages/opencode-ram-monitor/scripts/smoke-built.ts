@@ -1,4 +1,7 @@
 import "@opentui/solid/preload";
+import { basename } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolve } from "@opencode/plugin/host";
 import { createRoot } from "solid-js";
 
 type PluginDefinition = {
@@ -16,35 +19,19 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`smoke: ${message}`);
 }
 
-const server = (await import(new URL("../server.js", import.meta.url).href)) as {
-  default: PluginDefinition;
-};
-const tui = (await import(new URL("../tui.js", import.meta.url).href)) as {
-  default: PluginDefinition;
-};
+const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
+const entrypoints = resolve({ directory: packageDirectory });
+assert(entrypoints.server === undefined, `unexpected server entry: ${entrypoints.server}`);
+assert(entrypoints.tui, "no TUI entry resolves");
+const tuiUrl = entrypoints.tui.startsWith("file:")
+  ? entrypoints.tui
+  : pathToFileURL(entrypoints.tui).href;
+assert(basename(fileURLToPath(tuiUrl)) === "tui.js", `unexpected TUI entry: ${entrypoints.tui}`);
 
-assert(server.default.id === "capybearista.opencode-ram-monitor", "server id mismatch");
-assert(typeof server.default.setup === "function", "server setup is not a function");
+const tui = (await import(tuiUrl)) as { default: PluginDefinition };
+
 assert(tui.default.id === "capybearista.opencode-ram-monitor", "tui id mismatch");
 assert(typeof tui.default.setup === "function", "tui setup is not a function");
-
-const commandNames: string[] = [];
-await server.default.setup({
-  command: {
-    transform: async (
-      callback: (editor: { add: (definition: { name: string }) => void }) => void,
-    ) => {
-      callback({
-        add: (definition) => {
-          commandNames.push(definition.name);
-        },
-      });
-    },
-  },
-  session: { synthetic: async () => {} },
-});
-assert(commandNames.length === 1, `expected one command, got ${commandNames.length}`);
-assert(commandNames[0] === "ram", `unexpected command: ${commandNames[0]}`);
 
 const slots: SlotClaim[] = [];
 const layers: Array<() => unknown> = [];
@@ -84,4 +71,4 @@ const dispose = createRoot((dispose) => {
 dispose();
 assert(layers.length === 1, `expected one keymap layer, got ${layers.length}`);
 
-process.stdout.write("smoke: built server and TUI artifacts loaded\n");
+process.stdout.write("smoke: built TUI artifact loaded; no server entry resolves\n");

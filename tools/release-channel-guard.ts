@@ -46,7 +46,8 @@ const APPROVED_POLICY: Record<string, PolicyEntry> = {
   },
 };
 
-type ReleaseClass = "v1" | "v2";
+// A class names the OpenCode major its packages target; class vN publishes only major N.
+type ReleaseClass = `v${number}`;
 type ReleaseChannel = "noop" | "latest" | "opencode2";
 
 type PolicyEntry = {
@@ -69,7 +70,7 @@ export type RegistryClient = (name: string) => Promise<RegistrySnapshot>;
 export type ReleasePackage = {
   name: string;
   version: string;
-  releaseClass: "v1" | "v2";
+  releaseClass: ReleaseClass;
   channel: Exclude<ReleaseChannel, "noop">;
   published: boolean;
 };
@@ -162,10 +163,10 @@ export async function buildReleasePlan(options: BuildPlanOptions = {}): Promise<
     const policyEntry = policy.packages[item.name];
 
     const published = hasVersion(snapshot, item.version);
-    const major = majorVersion(item.version);
-    if (policyEntry.releaseClass === "v2" && !published && (major === undefined || major < 2)) {
+    const classMajorVersion = classMajor(policyEntry.releaseClass);
+    if (!published && majorVersion(item.version) !== classMajorVersion) {
       throw new ReleaseGuardError(
-        `${item.name} may only publish a stable package version >=2.0.0 from the V2 release class`,
+        `${item.name} may only publish major ${classMajorVersion} from the ${policyEntry.releaseClass} release class`,
       );
     }
 
@@ -220,6 +221,105 @@ export async function runReleaseGuard(options: ReleaseGuardOptions): Promise<Rel
     }
   }
   return plan;
+}
+
+export type ChangesetBump = "major" | "minor" | "patch" | "none";
+
+export type ClassMajorInput = {
+  name: string;
+  releaseClass: ReleaseClass;
+  version: string;
+  bump: ChangesetBump | undefined;
+};
+
+export type ChangesetCheck = {
+  files: number;
+  problems: string[];
+};
+
+/**
+ * Plugin majors track OpenCode majors: breaking changes inside one OpenCode major ship as
+ * minor. The only allowed major bump moves a package into a newer class (version major < N).
+ */
+export function checkClassMajor(input: ClassMajorInput): string | null {
+  const allowed = classMajor(input.releaseClass);
+  const major = majorVersion(input.version);
+  if (major === undefined) return null;
+  if (major > allowed) {
+    return `${input.name} is on major ${major}, above its ${input.releaseClass} release class (major ${allowed})`;
+  }
+  if (input.bump === "major" && major >= allowed) {
+    return `${input.name} cannot take a major bump: ${input.releaseClass} packages stay on major ${allowed}; ship breaking changes as minor`;
+  }
+  return null;
+}
+
+/** Local-only check for CI: no registry or npm configuration is read. */
+export async function checkPendingChangesets(
+  options: { cwd?: string } = {},
+): Promise<ChangesetCheck> {
+  const cwd = options.cwd ?? process.cwd();
+  const policy = await readPolicy(cwd);
+  validatePolicy(policy);
+  const workspace = await readWorkspace(cwd, policy);
+  const { files, bumps, unreadable } = await readChangesetBumps(path.join(cwd, ".changeset"));
+
+  const problems: string[] = [...unreadable];
+  for (const item of workspace) {
+    const releaseClass = policy.packages[item.name].releaseClass;
+    const packageBumps = bumps.get(item.name) ?? [undefined];
+    for (const bump of new Set(packageBumps)) {
+      const problem = checkClassMajor({
+        name: item.name,
+        releaseClass,
+        version: item.version,
+        bump,
+      });
+      if (problem) problems.push(problem);
+    }
+  }
+  if (problems.length > 0) throw new ReleaseGuardError(problems.join("\n"));
+  return { files, problems };
+}
+
+// Fails closed: a frontmatter line this reader cannot parse is reported, never skipped,
+// so a bump Changesets would apply cannot pass the check unread.
+const CHANGESET_ENTRY = /^(["']?)(.+?)\1\s*:\s*(["']?)(major|minor|patch|none)\3\s*(?:#.*)?$/;
+
+async function readChangesetBumps(directory: string): Promise<{
+  files: number;
+  bumps: Map<string, ChangesetBump[]>;
+  unreadable: string[];
+}> {
+  const bumps = new Map<string, ChangesetBump[]>();
+  const unreadable: string[] = [];
+  let entries: Dirent[];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return { files: 0, bumps, unreadable };
+  }
+  const changesets = entries.filter(
+    (entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== "README.md",
+  );
+  for (const entry of changesets) {
+    const text = await readFile(path.join(directory, entry.name), "utf8");
+    const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!frontmatter) continue;
+    for (const rawLine of frontmatter[1].split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (line === "" || line.startsWith("#")) continue;
+      const match = line.match(CHANGESET_ENTRY);
+      if (!match) {
+        unreadable.push(`${entry.name}: cannot read changeset entry "${line}"`);
+        continue;
+      }
+      const list = bumps.get(match[2]) ?? [];
+      list.push(match[4] as ChangesetBump);
+      bumps.set(match[2], list);
+    }
+  }
+  return { files: changesets.length, bumps, unreadable };
 }
 
 function printPlan(plan: ReleasePlan, output: (line: string) => void) {
@@ -685,6 +785,10 @@ function isVersion(value: unknown): value is string {
   );
 }
 
+function classMajor(releaseClass: ReleaseClass) {
+  return Number(releaseClass.slice(1));
+}
+
 function majorVersion(value: string) {
   return isStableVersion(value) ? Number(value.slice(0, value.indexOf("."))) : undefined;
 }
@@ -707,12 +811,19 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 
 async function main() {
   const args = process.argv.slice(2);
-  if (args.length !== 1 || !["--check", "--publish"].includes(args[0])) {
-    console.error("usage: bun tools/release-channel-guard.ts --check|--publish");
+  if (args.length !== 1 || !["--check", "--publish", "--changesets"].includes(args[0])) {
+    console.error("usage: bun tools/release-channel-guard.ts --check|--publish|--changesets");
     process.exitCode = 2;
     return;
   }
   try {
+    if (args[0] === "--changesets") {
+      const result = await checkPendingChangesets();
+      console.log(
+        `release-channel-guard: ${result.files} pending changeset(s) follow the class-major rule`,
+      );
+      return;
+    }
     await runReleaseGuard({ mode: args[0] === "--check" ? "check" : "publish" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "release channel guard failed";

@@ -17,6 +17,7 @@
     "check": "turbo run check",
     "changeset": "changeset",
     "release:check": "bun tools/release-channel-guard.ts --check",
+    "release:changesets": "bun tools/release-channel-guard.ts --changesets",
     "changeset:publish": "turbo run build && bun tools/release-channel-guard.ts --publish",
     "release:publish": "bun run changeset:publish",
     "prepare": "husky"

@@ -31,18 +31,24 @@ bun run build && bun run typecheck && bun run lint && bun run test
 
 ## Changesets and releases
 
-For changes intended for the next package release, add a changeset with `bun run changeset` and select the appropriate bump (patch, minor, major). Packages are independently versioned.
+For changes intended for the next package release, add a changeset with `bun run changeset` and select the bump. Packages are independently versioned.
+
+Plugin majors track OpenCode majors, not strict semver. A package in release class `vN` (see `tools/release-channels.json`) only ever publishes major N, so:
+
+- Use `patch` for fixes and `minor` for features **and for breaking changes** within the same OpenCode major. Say "Breaking" in the changeset text so it lands in the changelog.
+- Use `major` only to move a package to a new OpenCode major. Change its `releaseClass` in `tools/release-channels.json` and the guard's `APPROVED_POLICY` in the same PR.
+
+`bun run release:changesets` checks pending changesets and package manifests against this rule without touching the registry. The Changesets workflow runs it on pull requests.
 
 ### Release channels
 
-- The four V2 ports are published as `2.0.0` on `latest`.
+- The four V2 ports are published as `2.x` on `latest`.
 - The two V1-only packages (`opencode-agent-prompt-inheritance`, `opencode-output-styles`) continue to publish under `latest`. The loader and timeline V1 releases stay available at `1.0.0` and `1.0.1` by exact pin.
 - Keep V1 and V2 version/release batches separate. The guard checks **all unpublished public workspace versions**, not just the packages named in a changeset or Git diff. A mixed batch is rejected before publishing.
-- The initial V2 preparation contains exactly two major changesets, moving loader and timeline to `2.0.0`. It must not bump the other packages.
 
 Publishing is CI-only. The release workflow uses the `npm-publish` environment and npm trusted publishing, and runs `bun run changeset:publish` through the pinned Changesets Action. Version application and publication require maintainer authorization; do not run a real-registry publish locally.
 
-Run `bun run release:check` to inspect the complete unpublished set and selected channel. It queries public registry metadata but does not publish or create Git tags. It rejects unsupported package/version combinations, ambiguous batches, and failed or malformed registry responses.
+Run `bun run release:check` to inspect the complete unpublished set and selected channel. It queries public registry metadata but does not publish or create Git tags. It rejects unsupported package/version combinations (including a version outside its class major), ambiguous batches, and failed or malformed registry responses.
 
 ### Publication failures
 
@@ -94,7 +100,7 @@ Install and update instructions belong to the root README and the package README
 
 Husky installs a single **commit-msg** hook that enforces conventional commits via `commitlint`.
 
-**CI** runs typecheck, lint, and test on pushes and pull requests. Markdown, docs, and asset-only changes skip CI through path filters. Releases run separately in the `release` workflow, only from `main`.
+**CI** runs typecheck, lint, and test on pushes and pull requests. Markdown, docs, asset, and changeset-only changes skip CI through path filters. The **Changesets** workflow runs `bun run release:changesets` on pull requests that touch changesets, package manifests, or the release policy, so changeset-only PRs are still checked. Releases run separately in the `release` workflow, only from `main`.
 
 ## Monorepo Structure
 
