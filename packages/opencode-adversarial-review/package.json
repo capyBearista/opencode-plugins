@@ -39,6 +39,6 @@
     "@opencode/plugin": "2.0.2",
     "@tsconfig/node22": "^22.0.6",
     "@types/bun": "latest",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   }
 }
