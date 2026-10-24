@@ -45,7 +45,7 @@
 | [🐏 RAM Monitor](./packages/opencode-ram-monitor/) | See where OpenCode's memory goes. |
 | [⏱️ Double-Tap Timeline](./packages/opencode-double-tap-timeline/) | Open the session timeline with two Escape presses. |
 | [🛠️ Agents Loader](./packages/opencode-agents-loader/) | Reuse agents and commands across AI coding tools. |
-| [🗣️ Output Styles](./packages/opencode-output-styles/) | **V1 only:** Customize how your agents approach conversations. |
+| [🗣️ Output Styles](./packages/opencode-output-styles/) | Customize how your agents approach conversations. |
 | [💬 Agent Prompt Inheritance](./packages/opencode-agent-prompt-inheritance/) | **V1 only:** Preserve base model instructions when customizing agents. |
 
 ## Meet the Plugins
@@ -136,6 +136,18 @@ Extend OpenCode's agent and command discovery to the `.agents/` directory conven
 - **Native integration:** Managed symlinks expose files to OpenCode without rewriting their contents.
 - **Automatic synchronization:** Changes are reconciled while preserving native OpenCode configuration precedence.
 
+### 🗣️ Output Styles [[opencode-output-styles]](./packages/opencode-output-styles/)
+
+<p>
+  <img src=".github/assets/opencode-v2.svg" alt="OpenCode V2 compatible" height="20" />
+</p>
+
+**Choose how your agent responds, and keep it that way.**
+
+Switch between persistent response styles without repeating the same instructions throughout a conversation.
+
+Includes Claude Code's built-in `Proactive`, `Concise`, `Explanatory`, and `Learning` styles, plus custom project-local and global styles. Use `/output-style`, the picker, or the clickable sidebar line to switch; each session keeps its own style, with a global default.
+
 ## Quick Start (OpenCode V2)
 
 Install only the plugins you want by adding their npm packages to your OpenCode configuration.
@@ -151,10 +163,13 @@ Add your selected server plugins to `opencode.json` or `opencode.jsonc`:
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     "@capybearista/opencode-adversarial-review@latest",
-    "@capybearista/opencode-agents-loader@latest"
+    "@capybearista/opencode-agents-loader@latest",
+    "@capybearista/opencode-output-styles@latest"
   ]
 }
 ```
+
+**Output Styles** is a server + TUI plugin that needs OpenCode **2.0.23 or later**. This one entry is all it takes; its TUI half loads automatically, so it does not belong in `cli.json`.
 
 **Adversarial Review setup:** The target `commands/` directory must already exist and be writable before enabling the plugin. The plugin installs its two review command files there. See the [package installation guide](./packages/opencode-adversarial-review/#install).
 
@@ -187,8 +202,8 @@ The repository supports both OpenCode V2 and V1, but plugin availability and con
 | [Agents Loader](./packages/opencode-agents-loader/) | `@latest` · `opencode.json(c)` | `@1.0.0` · `opencode.json(c)` |
 | [Double-Tap Timeline](./packages/opencode-double-tap-timeline/) | `@latest` · `cli.json` | `@1.0.1` · `tui.json(c)` |
 | [RAM Monitor](./packages/opencode-ram-monitor/) | `@latest` · `cli.json` (2.1+) | `@1.1.0` · `opencode.json(c)` and `tui.json(c)` |
+| [Output Styles](./packages/opencode-output-styles/) | `@latest` · `opencode.json(c)` (2.0.23+, TUI half loads automatically) | `@1` · `opencode.json(c)` |
 | [Agent Prompt Inheritance](./packages/opencode-agent-prompt-inheritance/) | Not yet ported | `@latest` · `opencode.json(c)` |
-| [Output Styles](./packages/opencode-output-styles/) | Not planned | `@latest` · `opencode.json(c)` |
 
 **Using OpenCode V1?** See the [V1 Plugin Guide](./docs/v1-plugins.md) for installation, version pinning, and upgrade instructions.
 
@@ -222,17 +237,7 @@ Only mutable targets, such as `@latest`, receive updates. Exact version pins rem
 
 ## Legacy Plugins (OpenCode V1)
 
-These plugins remain available for OpenCode V1 but have not been ported to V2.
-
-### 🗣️ Output Styles [[opencode-output-styles]](./packages/opencode-output-styles/)
-
-<img src=".github/assets/opencode-v1.svg" alt="OpenCode V1 compatible" height="20" />
-
-**Choose how your agent responds, and keep it that way.**
-
-Switch between persistent response styles without repeating the same instructions throughout a conversation.
-
-Includes built-in `explanatory` and `learning` styles, with support for custom project-local and global styles.
+This plugin remains available for OpenCode V1 but has not been ported to V2.
 
 ### 💬 Agent Prompt Inheritance [[opencode-agent-prompt-inheritance]](./packages/opencode-agent-prompt-inheritance/)
 

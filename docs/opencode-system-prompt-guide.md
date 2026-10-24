@@ -52,7 +52,7 @@ Plan mode operates through **synthetic system reminders** rather than swapping t
 
 ## 6. Plugin Hook: `experimental.chat.system.transform`
 
-This is the primary entry point for plugins like `opencode-output-styles`. 
+This is the primary entry point for V1 plugins like `opencode-output-styles` 1.x. The V2 port instead uses `ctx.session.hook("context", …)`, mutating `event.system`, which runs on every agent request. 
 
 *   **Location:** `packages/opencode/src/session/llm.ts`.
 *   **Input:** The `sessionID` and the current `model` object.

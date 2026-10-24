@@ -19,7 +19,7 @@ Subdirectories contain specialized files that extend these rules.
 
 ### Plugin Development (MUST)
 
-Scope: V1 packages. The four V2 ports use the Promise API instead; see the V2 boundary below.
+Scope: V1 packages. The five V2 ports use the Promise API instead; see the V2 boundary below.
 
 - **MUST** keep server and TUI entrypoints split. If a plugin exposes both, publish separate `./server` and `./tui` exports instead of exporting both from one module.
 - **MUST** verify the real runtime path when testing local plugins. Check both the package build output and the harness config that OpenCode actually loads.
@@ -30,7 +30,7 @@ Scope: V1 packages. The four V2 ports use the Promise API instead; see the V2 bo
 
 ### V2 Boundary (MUST)
 
-Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
+Five packages have V2 ports; one remains V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
 
 | Package | V2 status |
 | --- | --- |
@@ -38,11 +38,11 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 | `opencode-double-tap-timeline` | Ported: TUI plugin, plural `plugins` in `cli.json`; `2.x` on `latest` |
 | `opencode-adversarial-review` | Ported: server plugin, plural `plugins` in `opencode.json`; `2.x` on `latest` |
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port TBD |
-| `opencode-output-styles` | V1 only; deprecated for V2 |
+| `opencode-output-styles` | Ported: combined server + TUI plugin, one plural `plugins` entry in `opencode.json` (TUI half loads automatically; requires OpenCode 2.0.23+); `2.x` on `latest`, V1 users pin `@1` |
 | `opencode-ram-monitor` | Ported: TUI plugin (TUI-only since `2.1.0`, requires OpenCode 2.1+), plural `plugins` in `cli.json`; `2.x` on `latest` |
 
 - **MUST** use the V2 Promise API in ports: `Plugin.define({ id, setup })` from `@opencode/plugin` 2.x. Do not carry V1 `server`/`config` hook signatures into a port.
-- **MUST** keep V2 entrypoints at the package root: `server.js` for server plugins (loader, adversarial-review), `tui.js` for TUI plugins (timeline, ram-monitor). Filesystem-local config points at the package directory, not the entry file.
+- **MUST** keep V2 entrypoints at the package root: `server.js` for server plugins (loader, adversarial-review, output-styles, which also ships `tui.js`), `tui.js` for TUI plugins (timeline, ram-monitor). Filesystem-local config points at the package directory, not the entry file.
 - **MUST** use the plural `"plugins"` key and split host config: server plugins in `opencode.json`, TUI plugins in `cli.json`. V1 keeps the singular `"plugin"` key in `opencode.json` / `tui.json`.
 - **MUST NOT** write `@v2` as a specifier — npm parses it as a semver range. Use `@latest` (or an exact `@2.0.0` pin for a fixed setup).
 - **MUST** keep V1 and V2 lines apart. The loader and timeline V1 releases are frozen but available by exact pin. Both lines may share the default config directory, so use separate profiles (`OPENCODE_CONFIG_DIR`) for side-by-side testing.
@@ -50,7 +50,7 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 - **MUST** keep plugin majors in step with OpenCode majors: a package in release class `vN` only ever publishes major N. Ship breaking changes within an OpenCode major as a `minor` changeset, never `major`. 3.x is reserved for OpenCode V3. `bun run release:changesets` (CI: Changesets workflow) and the publish guard enforce this.
 - When a package moves to a new OpenCode major, change its `releaseClass` in both `tools/release-channels.json` and the guard's `APPROVED_POLICY` in the same PR as its `major` changeset. That bump is the only `major` the guard allows.
 - Channel source of truth: [`tools/release-channels.json`](tools/release-channels.json), enforced by [`tools/release-channel-guard.ts`](tools/release-channel-guard.ts).
-- **MUST** keep `@opencode/plugin` a required peer in server plugins: the server only serves its own copy from OpenCode 2.0.25, and older hosts fail with `Cannot find package '@opencode/plugin'` when the plugin lacks one. TUI plugins mark it optional (`peerDependenciesMeta`) because every 2.x TUI serves `@opencode/plugin/tui` itself. Details: [`docs/opencode-v2-plugin-runtime.md`](docs/opencode-v2-plugin-runtime.md).
+- **MUST** keep `@opencode/plugin` a required peer in server plugins: the server only serves its own copy from OpenCode 2.0.25, and older hosts fail with `Cannot find package '@opencode/plugin'` when the plugin lacks one. TUI-only plugins mark it optional (`peerDependenciesMeta`) because every 2.x TUI serves `@opencode/plugin/tui` itself; a combined server + TUI package (output-styles) keeps it required. Details: [`docs/opencode-v2-plugin-runtime.md`](docs/opencode-v2-plugin-runtime.md).
 
 ### Bug Fix Workflow (MUST)
 - **MUST** identify and record the root cause before broad fixes; for bugs/regressions, use the `systematic-debugging` skill first and escalate to `five-whys` if the cause remains unclear or review findings keep shifting.
