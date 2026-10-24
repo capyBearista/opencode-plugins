@@ -397,15 +397,12 @@ export function createRamMonitorPlugin(deps: RamMonitorDeps = defaultDeps) {
         },
       });
 
-      // Host contract: `keymap.layer()` returns void and the layer is owned by
-      // the calling component. @opencode/plugin 2.0.2 declares
-      // `layer(input: () => KeymapLayer): void` (dist/tui/context.d.ts), and the
-      // host maps it to Keymap.createLayer (packages/tui/src/plugin/api.tsx),
-      // which registers through @opentui/keymap/solid `useBindings` and is
-      // disposed with that component. So it cannot run in setup scope; the
-      // always-mounted "app" slot supplies that component. The flag keeps
-      // duplicate app mounts or repeated renders from stacking layers, and
-      // onCleanup lets a remount re-register.
+      // The layer is registered from the always-mounted "app" slot, as in the
+      // 2.0.x port, so it is owned by that component. OpenCode 2.1.x also
+      // accepts `keymap.layer()` from setup (packages/tui/src/plugin/api.tsx
+      // falls back to the host's owner); the slot is kept as a choice. The
+      // flag keeps duplicate app mounts or repeated renders from stacking
+      // layers, and onCleanup lets a remount re-register.
       let commandLayerRegistered = false;
 
       const unregisterCommand = context.ui.slot({

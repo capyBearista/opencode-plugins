@@ -22,25 +22,28 @@ This package is a TUI-only plugin: a sidebar widget (full card or one-line minim
 ## Development Commands
 
 ### This Package
-`# From package directory
+```bash
+# From package directory
 bun run build
 bun test
 bun run typecheck
 bun run lint
 bun run smoke
-`
+```
 
 ### From Root
-`bun --filter @capybearista/opencode-ram-monitor build
+```bash
+bun --filter @capybearista/opencode-ram-monitor build
 bun --filter @capybearista/opencode-ram-monitor test
-`
+```
 
 ### Pre-PR Checklist
-`bun --filter @capybearista/opencode-ram-monitor typecheck && \
+```bash
+bun --filter @capybearista/opencode-ram-monitor typecheck && \
 bun --filter @capybearista/opencode-ram-monitor lint && \
 bun --filter @capybearista/opencode-ram-monitor test && \
 bun --filter @capybearista/opencode-ram-monitor smoke
-`
+```
 
 ## Code Style
 
@@ -52,7 +55,8 @@ bun --filter @capybearista/opencode-ram-monitor smoke
 ## Architecture
 
 ### Directory Structure
-`src/
+```text
+src/
 ├── tui.ts        # V2 TUI entry: sidebar widget (full/minimal), /ram modal, keymap command
 ├── options.ts    # Plugin options parsing (layout, refreshIntervalMs) with warnings
 ├── measure.ts    # Server pid lookup, process inspection, OpenCode/Tools attribution
@@ -62,7 +66,7 @@ bun --filter @capybearista/opencode-ram-monitor smoke
 ├── snapshot.ts   # ps/wmic process snapshot and parsers
 ├── theme.ts      # V2 theme-token adapter for widget and modal
 └── debug.ts      # File-backed debug logging and error messages
-`
+```
 
 ### Core (understand these first)
 - `src/tui.ts` — widget with recursive `setTimeout` polling and cleanup on unmount; dependencies (`inspect`, `selfRss`) are injectable through `createRamMonitorPlugin` for tests; the default export is the real plugin
@@ -81,9 +85,9 @@ bun --filter @capybearista/opencode-ram-monitor smoke
 - Do not introduce top-level async work in `src/tui.ts`; keep polling startup inside `onMount`.
 - Use recursive `setTimeout`, not `setInterval`, so RAM probes cannot overlap.
 - Rows must fit the sidebar: 33 columns inside the full card, 37 for the minimal line. `format.test.ts` asserts worst-case widths; keep `wrapMode: "none"` + `truncate` on row text.
-- Any change to process inspection should be validated on the target OS pattern documented in `docs/opencode-plugin-ipc-and-os-patterns.md`.
+- Process inspection is one `ps -A -o pid= -o ppid= -o rss= -o command=` snapshot per poll (`wmic process get ... /format:value` on Windows) in `src/snapshot.ts`. Validate changes on each OS; `docs/opencode-plugin-ipc-and-os-patterns.md` covers the platform hazards (wmic parsing, hidden windows, polling hygiene).
 - The modal opens with `dialog.clear()`, then `show()`, then `set({ size: "xlarge" })` — order matters because `show()` resets the size.
-- The `/ram` keymap layer must live inside the `app` slot render (host ownership rule); keep the dedupe guard.
+- The `/ram` keymap layer is registered inside the `app` slot render, kept from the 2.0.x port. OpenCode 2.1.x also allows `keymap.layer()` from `setup` (it falls back to the host's owner and is removed when the plugin deactivates), so this is a choice, not a host rule; if you keep it in the slot, keep the dedupe guard.
 - The OpenTUI preload must be registered under `[test]` in `bunfig.toml`; importing it from a test file runs too late and leaves `solid-js` on its server build, where `onMount` never fires.
 
 ## Testing Guidelines
