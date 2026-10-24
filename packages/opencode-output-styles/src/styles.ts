@@ -1,100 +1,110 @@
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as yaml from "yaml";
+import { parse } from "yaml";
 
-export interface OutputStyle {
-  id: string;
-  name: string;
-  description: string;
-  body: string;
+export type StyleSource = "built-in" | "global" | "project";
+
+export interface Style {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly prompt: string;
+  readonly keepCodingInstructions: boolean;
+  readonly turnReminder?: string;
+  readonly source: StyleSource;
 }
 
-function getBuiltinStylesDir(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "built-in-styles");
+export const DEFAULT_STYLE_ID = "default";
+
+const FRONTMATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)([\s\S]*)$/;
+
+export function configDir(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.OPENCODE_CONFIG_DIR) return env.OPENCODE_CONFIG_DIR;
+  return join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "opencode");
 }
 
-export async function parseStyleFile(filePath: string): Promise<OutputStyle | null> {
-  try {
-    const content = await fs.readFile(filePath, "utf-8");
-    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
-    if (!match) return null;
+function parseStyle(file: string, content: string, source: StyleSource): Style | undefined {
+  const id = basename(file).slice(0, -".md".length).toLowerCase();
+  if (id === DEFAULT_STYLE_ID) return undefined;
 
-    const frontmatter = yaml.parse(match[1]);
-    const body = match[2].trim();
-    const id = path.parse(filePath).name;
-
-    return {
-      id,
-      name: frontmatter.name || id,
-      description: frontmatter.description || "",
-      body,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export async function loadBuiltinStyles(): Promise<OutputStyle[]> {
-  const dir = getBuiltinStylesDir();
-  try {
-    const files = await fs.readdir(dir);
-    const styles: OutputStyle[] = [];
-    for (const file of files) {
-      if (file.endsWith(".md")) {
-        const style = await parseStyleFile(path.join(dir, file));
-        if (style) styles.push(style);
+  const match = FRONTMATTER.exec(content);
+  let data: Record<string, unknown> = {};
+  if (match) {
+    try {
+      const parsed: unknown = parse(match[1] ?? "");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        data = parsed as Record<string, unknown>;
       }
-    }
-    return styles;
+    } catch {}
+  }
+
+  const prompt = (match ? (match[2] ?? "") : content).trim();
+  if (!prompt) return undefined;
+
+  const text = (value: unknown) => (value == null ? "" : String(value));
+  const reminder = data["turn-reminder"];
+  const keep = data["keep-coding-instructions"];
+  return {
+    id,
+    name: text(data.name) || basename(file).slice(0, -".md".length),
+    description: text(data.description),
+    prompt,
+    keepCodingInstructions: keep !== false && keep !== "false",
+    ...(typeof reminder === "string" && reminder ? { turnReminder: reminder } : {}),
+    source,
+  };
+}
+
+async function loadDir(dir: string, source: StyleSource): Promise<Style[]> {
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
   } catch {
     return [];
   }
-}
 
-export async function isBuiltinStyle(id: string): Promise<boolean> {
-  const builtins = await loadBuiltinStyles();
-  return builtins.some((s) => s.id === id);
-}
-
-export async function discoverStyles(projectPath: string): Promise<OutputStyle[]> {
-  const globalPath = path.join(os.homedir(), ".config", "opencode", "output-styles");
-  const localPath = path.join(projectPath, ".opencode", "output-styles");
-  const styles = new Map<string, OutputStyle>();
-
-  for (const style of await loadBuiltinStyles()) {
-    styles.set(style.id, style);
-  }
-
-  for (const dir of [globalPath, localPath]) {
-    try {
-      const files = await fs.readdir(dir, { recursive: true });
-      for (const file of files) {
-        if (typeof file === "string" && file.endsWith(".md")) {
-          const style = await parseStyleFile(path.join(dir, file));
-          if (style) {
-            styles.set(style.id, style);
-          }
+  const styles = await Promise.all(
+    entries
+      .filter((entry) => entry.toLowerCase().endsWith(".md"))
+      .map(async (entry) => {
+        const file = join(dir, entry);
+        try {
+          if (!(await stat(file)).isFile()) return undefined;
+          return parseStyle(file, await readFile(file, "utf8"), source);
+        } catch {
+          return undefined;
         }
-      }
-    } catch {
-      // Directory might not exist, ignore
-    }
-  }
-
-  return Array.from(styles.values());
+      }),
+  );
+  return styles.filter((style) => style !== undefined);
 }
 
-export async function findStyleById(projectPath: string, id: string): Promise<OutputStyle | null> {
-  const localPath = path.join(projectPath, ".opencode", "output-styles", `${id}.md`);
-  const localStyle = await parseStyleFile(localPath);
-  if (localStyle) return localStyle;
+export async function discoverStyles(options: {
+  readonly project: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly builtinDir?: string;
+}): Promise<Map<string, Style>> {
+  const builtinDir =
+    options.builtinDir ?? fileURLToPath(new URL("../built-in-styles", import.meta.url));
+  const sources: Array<[string, StyleSource]> = [
+    [builtinDir, "built-in"],
+    [join(configDir(options.env), "output-styles"), "global"],
+    [join(options.project, ".opencode", "output-styles"), "project"],
+  ];
 
-  const globalPath = path.join(os.homedir(), ".config", "opencode", "output-styles", `${id}.md`);
-  const globalStyle = await parseStyleFile(globalPath);
-  if (globalStyle) return globalStyle;
+  const styles = new Map<string, Style>();
+  for (const [dir, source] of sources) {
+    for (const style of await loadDir(dir, source)) styles.set(style.id, style);
+  }
+  return styles;
+}
 
-  const builtins = await loadBuiltinStyles();
-  return builtins.find((s) => s.id === id) || null;
+export function findStyle(styles: ReadonlyMap<string, Style>, query: string): Style | undefined {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return undefined;
+  const byId = styles.get(needle);
+  if (byId) return byId;
+  return [...styles.values()].find((style) => style.name.trim().toLowerCase() === needle);
 }
