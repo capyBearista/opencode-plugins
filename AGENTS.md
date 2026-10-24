@@ -50,6 +50,7 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 - **MUST** keep plugin majors in step with OpenCode majors: a package in release class `vN` only ever publishes major N. Ship breaking changes within an OpenCode major as a `minor` changeset, never `major`. 3.x is reserved for OpenCode V3. `bun run release:changesets` (CI: Changesets workflow) and the publish guard enforce this.
 - When a package moves to a new OpenCode major, change its `releaseClass` in both `tools/release-channels.json` and the guard's `APPROVED_POLICY` in the same PR as its `major` changeset. That bump is the only `major` the guard allows.
 - Channel source of truth: [`tools/release-channels.json`](tools/release-channels.json), enforced by [`tools/release-channel-guard.ts`](tools/release-channel-guard.ts).
+- **MUST** keep `@opencode/plugin` a required peer in server plugins: the server only serves its own copy from OpenCode 2.0.25, and older hosts fail with `Cannot find package '@opencode/plugin'` when the plugin lacks one. TUI plugins mark it optional (`peerDependenciesMeta`) because every 2.x TUI serves `@opencode/plugin/tui` itself. Details: [`docs/opencode-v2-plugin-runtime.md`](docs/opencode-v2-plugin-runtime.md).
 
 ### Bug Fix Workflow (MUST)
 - **MUST** identify and record the root cause before broad fixes; for bugs/regressions, use the `systematic-debugging` skill first and escalate to `five-whys` if the cause remains unclear or review findings keep shifting.
@@ -61,6 +62,7 @@ Four packages have V2 ports; two remain V1-only. [`docs/v1-plugins.md`](docs/v1-
 - If local OpenCode config files are involved in testing (V1: `opencode.json` / `tui.json`; V2: `opencode.json` / `cli.json`), **MUST** verify they reference the package root or published plugin name, not a stale `dist/*` artifact path.
 - For TUI/plugin regressions, **MUST** verify both the server path and the TUI path independently when the symptoms can split across them.
 - For TUI plugins, **MUST NOT** block startup with top-level async initialization. Defer async work to mounted components and always register cleanup for polling/timers.
+- For live install tests of a packed release candidate, **MUST** install through a local registry (e.g. verdaccio), not a `file:` spec: on 2.1.4 a `file:` install loads the plugin's own `@opentui/solid` and TUI panels crash with "No renderer found"; on 2.0.0 it fails with "OPENTUI_FORCE_UNICODE already registered". Published packages fail the same way, so it says nothing about the change.
 
 ### Best Practices (SHOULD)
 - **SHOULD** use `biome` for linting and formatting
@@ -137,12 +139,16 @@ rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
 - Start commit subjects lowercase (`feat(x): …`) — the commitlint hook rejects capitalized subjects
 - After publishing, verify via direct registry curl — `npm view` can lag the CDN by ~60s
 - PRs require: typecheck, lint, test, build
-- Merge PRs with a merge commit, not squash or rebase: preserve the feature branch's commits in `main` so the local branch can be removed with `git branch -d`.
+- Merge PRs with a merge commit or a squash; never rebase. After a squash the local branch is no longer an ancestor of `main`, so `git branch -d` refuses it: confirm the PR merged, then remove it on its own with `git branch -D <branch>`.
 - Keep the remote feature branch after merging (disable automatic branch deletion on GitHub); delete only the local branch unless the user explicitly asks to remove the remote one.
 - Safety-net-blocked git forms have recoverable equivalents: `git stash -u` before `worktree remove` (never `--force`), `git update-ref` for pointer-only moves on verified-identical trees, `git merge --ff-only` where ancestry allows, `git branch -d` (never `-D` in chained commands)
 - Merge commits also need conventional messages — the commitlint hook rejects empty subject/type on merges too
 - `git log --all -- <path>` also lists merges that deleted the path; prove artifact absence with `git rev-list --objects --all --reflog` plus `git cat-file -e <blob>`, not log output
 - Release-channel policy edits never move npm dist-tags (guard returns `noop` for published versions); promotion is an authenticated `npm dist-tag` op — E401 in unattended sessions means handing exact commands to an operator
+- The "Version Packages" PR is opened by `github-actions[bot]`, so its CI runs sit at "action_required" until a maintainer clicks "Approve and run workflows" on the PR.
+- Changesets CLI 3.x and `changesets/action` v2 move together (action v2 rejects CLI v2; its input is `publish-script`, not `publish`). The CLI version is also pinned as `CHANGESETS_VERSION` in `tools/release-channel-guard.ts` and in its test fixture marker — bump all three in one change.
+- Changesets v3 only detects the Bun workspace when `bun.lock` exists; without it, publish finds no packages and still exits 0, so release-guard fixtures must write a `bun.lock`. Those tests run the real CLI under system `node`, so `ci.yml` must keep Node ≥22.11.
+- Dependabot uses one `bun` entry for `/`, so it picks a single target version per dependency across every workspace and can downgrade a package (seen: OpenTUI 0.6.8→0.6.6, `@opencode/plugin` 2.1.4→2.1.2) — keep shared dev pins identical. It also rewrites any peer string identical to the dev pin, so keep peer ranges distinct from dev pins. Pushing to a Dependabot branch stops its auto-rebase; `@dependabot recreate` rebuilds the PR from `main`.
 
 ## Testing Requirements
 - **Unit tests**: colocated (bun test)
