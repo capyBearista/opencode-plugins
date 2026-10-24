@@ -48,11 +48,20 @@ Plugin majors track OpenCode majors, not strict semver. A package in release cla
 
 Publishing is CI-only. The release workflow uses the `npm-publish` environment and npm trusted publishing, and runs `bun run changeset:publish` through the pinned Changesets Action. Version application and publication require maintainer authorization; do not run a real-registry publish locally.
 
+The release flow on `main`:
+
+1. Merge a PR that carries a changeset. The Release workflow opens (or updates) a **Version Packages** PR with the version bumps and changelog entries.
+2. That PR is opened by `github-actions[bot]`, so its checks wait at "action_required". Click **Approve and run workflows** on the PR, then merge it once they pass.
+3. The Release workflow publishes the unpublished versions with provenance, then pushes `name@version` tags and creates a GitHub release per package.
+4. Verify on the registry with a direct curl (for example `curl -s https://registry.npmjs.org/@capybearista%2F<name>`); `npm view` can lag.
+
+The toolchain is Changesets CLI 3.x with `changesets/action` v2. They are upgraded together: action v2 rejects CLI v2. The guard pins the CLI version as well (see [AGENTS.md](./AGENTS.md)).
+
 Run `bun run release:check` to inspect the complete unpublished set and selected channel. It queries public registry metadata but does not publish or create Git tags. It rejects unsupported package/version combinations (including a version outside its class major), ambiguous batches, and failed or malformed registry responses.
 
 ### Publication failures
 
-npm publication is not atomic across packages. If a job fails, inspect registry versions, dist-tags, and CI output before retrying. A retry can publish the remaining packages in a homogeneous batch, but Git tags or GitHub releases from a partially completed job may need separate reconciliation. Do not bypass the guard or move a `latest` tag to recover a failed release.
+npm publication is not atomic across packages. If a job fails, inspect registry versions, dist-tags, and CI output before retrying. Changesets v3 reports failures per package and still creates Git tags for the packages that did publish, so a partial job leaves tags for what reached the registry. Re-running the Release workflow publishes only the versions still missing from the registry. Check that each published version also has its GitHub release; create any missing one from its tag. Do not bypass the guard or move a `latest` tag to recover a failed release.
 
 ## Commit Messages
 
