@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="104" height="24" viewBox="0 0 104 24" role="img" aria-label="OpenCode V1 compatible">
+  <rect x="0.5" y="0.5" width="103" height="23" rx="12" fill="#1e74c1" stroke="#1e74c1"/>
+  <rect x="0.5" y="0.5" width="76" height="23" rx="12" fill="#0b1220" stroke="#1e74c1"/>
+  <text x="10" y="15"
+      fill="#e2e8f0"
+      font-family="'Jetbrains Mono', monospace"
+      font-size="12"
+      font-weight="600">OpenCode</text>
+  <text x="81" y="15"
+      fill="#ffffff"
+      font-family="'Jetbrains Mono', monospace"
+      font-size="12"
+      font-weight="700">V2</text>
+</svg>
