@@ -41,11 +41,21 @@ Every plugin in this repository addresses a specific friction point in OpenCode,
 
 ## Meet the Plugins
 
-### OpenCode V2
-
-#### 🐏 [RAM Monitor](./packages/opencode-ram-monitor/)
+### 🐏 RAM Monitor [[opencode-ram-monitor]](./packages/opencode-ram-monitor/)
 
 **See where OpenCode's memory goes.**
+
+<table>
+  <tr>
+    <td width="50%" align="center"><img src=".github/assets/ram-monitor-full.png" alt="RAM Monitor Full view" /><br /><strong>Full view</strong></td>
+    <td width="50%" align="center"><img src=".github/assets/ram-monitor-minimal.png" alt="RAM Monitor Minimal view" /><br /><strong>Minimal view</strong></td>
+  </tr>
+</table>
+<table>
+  <tr>
+    <td width="100%" align="center"><img src=".github/assets/ram-monitor-popup.png" alt="RAM Monitor Popup view" /><br /><strong>Process tree</strong></td>
+  </tr>
+</table>
 
 A live sidebar widget shows memory usage split between OpenCode itself and the tools it runs, including MCP servers, language servers, and terminal processes.
 
@@ -55,31 +65,7 @@ A live sidebar widget shows memory usage split between OpenCode itself and the t
 
 *OpenCode V2.1+ · TUI plugin*
 
-<p align="center">
-  <a href="./packages/opencode-ram-monitor/">
-    <img src=".github/assets/ram-monitor-sidebar.webp" alt="RAM Monitor showing OpenCode and tool memory usage in the sidebar" width="560">
-  </a>
-</p>
-
-#### ⏱️ [Double-Tap Timeline](./packages/opencode-double-tap-timeline/)
-
-**Navigate your session without reaching for a command.**
-
-Inspired by Claude Code's double-Escape interaction. Double-tap `Esc` to open OpenCode's session timeline instantly, without typing `/timeline` or using the mouse.
-
-- **Instant access:** Two quick Escape presses open the timeline.
-- **Native behavior preserved:** A single Escape continues to work normally.
-- **No configuration:** Install the plugin and use the shortcut.
-
-*OpenCode V2 · TUI plugin*
-
-<p align="center">
-  <a href="./packages/opencode-double-tap-timeline/">
-    <img src=".github/assets/timeline-TUI.png" alt="OpenCode session timeline modal" width="560">
-  </a>
-</p>
-
-#### 🤺 [Adversarial Review](./packages/opencode-adversarial-review/)
+### 🤺 Adversarial Review [[opencode-adversarial-review]](./packages/opencode-adversarial-review/)
 
 **Challenge your code before shipping it.**
 
@@ -92,7 +78,25 @@ Both reviewers gather their own evidence, support working-tree changes, commits,
 
 *Inspired by Codex · OpenCode V2 · Server plugin*
 
-#### 🛠️ [Agents Loader](./packages/opencode-agents-loader/)
+### ⏱️ Double-Tap Timeline [[opencode-double-tap-timeline]](./packages/opencode-double-tap-timeline/)
+
+**Navigate your session without reaching for a command.**
+
+Inspired by Claude Code's double-Escape interaction. Double-tap `Esc` to open OpenCode's session timeline instantly, without typing `/timeline` or using the mouse.
+
+- **Instant access:** Two quick Escape presses open the timeline.
+- **Native behavior preserved:** A single Escape continues to work normally.
+- **No configuration:** Install the plugin and use the shortcut.
+
+*OpenCode V2 · TUI plugin*
+
+<table>
+  <tr>
+    <td width="50%" align="center"><img src=".github/assets/timeline-TUI.png" alt="OpenCode session timeline modal" /><br /><strong>OpenCode's Session Timeline</strong></td>
+  </tr>
+</table>
+
+### 🛠️ Agents Loader [[opencode-agents-loader]](./packages/opencode-agents-loader/)
 
 **Keep your agents and commands portable.**
 
@@ -108,7 +112,7 @@ Extend OpenCode's agent and command discovery to the `.agents/` directory conven
 
 These plugins remain available for OpenCode V1 but have not been ported to V2.
 
-#### 💬 [Agent Prompt Inheritance](./packages/opencode-agent-prompt-inheritance/)
+#### 💬 Agent Prompt Inheritance [[opencode-agent-prompt-inheritance]](./packages/opencode-agent-prompt-inheritance/)
 
 **Keep base model instructions when customizing agents.**
 
@@ -118,7 +122,7 @@ Supports configurable prompt ordering through agent frontmatter.
 
 *OpenCode V1 only · V2 port TBD*
 
-#### 🗣️ [Output Styles](./packages/opencode-output-styles/)
+#### 🗣️ Output Styles [[opencode-output-styles]](./packages/opencode-output-styles/)
 
 **Choose how your agent responds, and keep it that way.**
 
