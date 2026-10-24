@@ -33,7 +33,7 @@ const APPROVED_POLICY: Record<string, PolicyEntry> = {
     channel: "latest",
   },
   "@capybearista/opencode-output-styles": {
-    releaseClass: "v1",
+    releaseClass: "v2",
     channel: "latest",
   },
   "@capybearista/opencode-ram-monitor": {
