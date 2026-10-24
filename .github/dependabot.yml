@@ -22,6 +22,11 @@ updates:
       major-updates:
         update-types:
           - "major"
+    ignore:
+      # Plugin majors follow OpenCode majors; moving a package to a new SDK major is a
+      # deliberate port (release class, major changeset), never a routine bump.
+      - dependency-name: "@opencode/plugin"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
