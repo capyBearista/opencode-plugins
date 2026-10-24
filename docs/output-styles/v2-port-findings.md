@@ -22,6 +22,7 @@ What we verified about Claude Code output styles and OpenCode V2 while porting `
 | Learning | true | none (fallback) |
 
 - Each prompt opens with `You are an interactive CLI tool that helps users with software engineering tasks.` and a `# <Name> Style Active` heading. The plugin's `built-in-styles/*.md` are those prompts, with template variables filled in.
+- The plugin's descriptions drop Claude Code's leading "Claude" ("Claude explains…" becomes "Explains…"), because OpenCode runs any model. The prompts are unchanged.
 - Proactive's body is the same text as Claude Code's auto-mode prompt. It also has a `waitingTurnReminder`, used while a background task is running. The port does not use it.
 - The icons in the prompts are `★` (Insight) and `●` (Learn by Doing).
 - Extract prompts from the binary **bytes**, not from `strings` output. `strings` drops lines shorter than 8 characters, which removes the blank lines.
