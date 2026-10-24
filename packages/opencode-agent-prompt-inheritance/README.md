@@ -50,7 +50,7 @@ Add it under the `"plugin"` key in `opencode.json(c)`:
 
 ```json
 {
-  "plugin": ["@capybearista/opencode-agent-prompt-inheritance@1.0.0"]
+  "plugin": ["@capybearista/opencode-agent-prompt-inheritance@latest"]
 }
 ```
 

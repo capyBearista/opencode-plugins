@@ -11,8 +11,8 @@ The package READMEs for `opencode-agents-loader`, `opencode-double-tap-timeline`
 | `opencode-agents-loader` | 1.0.0, frozen | V2 `2.x` is on `latest`. No further 1.x from this line. |
 | `opencode-double-tap-timeline` | 1.0.1, frozen | V2 `2.x` is on `latest`. No further 1.x from this line. |
 | `opencode-adversarial-review` | 1.0.0 | V1 `latest` is superseded: V2 `2.x` uses `latest`. Pin `1.0.0` for OpenCode V1. |
-| `opencode-agent-prompt-inheritance` | 1.0.0 | Active V1 releases use `latest`; upstream prompt sync remains enabled. No V2 release yet; a V2 port is TBD. |
-| `opencode-output-styles` | 1.0.1 | Active V1 releases use `latest`. Deprecated for V2; no V2 maintenance planned. |
+| `opencode-agent-prompt-inheritance` | `latest` | Active V1 releases use `latest`; upstream prompt sync remains enabled. No V2 release yet; a V2 port is TBD. |
+| `opencode-output-styles` | `latest` | Active V1 releases use `latest`. Deprecated for V2; no V2 maintenance planned. |
 | `opencode-ram-monitor` | 1.1.0 | V1 `latest` is superseded: V2 `2.x` uses `latest`. Pin `1.1.0` for OpenCode V1. |
 
 The loader and timeline V1 releases are frozen and remain available by exact pin. Their `latest` tags now point at V2 `2.x`, as do `opencode-adversarial-review` and `opencode-ram-monitor`.
@@ -21,20 +21,22 @@ The loader and timeline V1 releases are frozen and remain available by exact pin
 
 Use OpenCode V1. These releases use the `@opencode-ai/plugin` SDK; consult the installed package version's manifest for its exact peer range. An SDK peer range does not pin the OpenCode binary or select a registry channel.
 
+The current V1-only releases (`opencode-agent-prompt-inheritance` 1.0.1+, `opencode-output-styles` 1.0.2+) declare `@opencode-ai/plugin` `>=1.19.3 <2`. On an older 1.x SDK, pin `opencode-agent-prompt-inheritance@1.0.0` or `opencode-output-styles@1.0.1`, which declare `>=1.15.3`.
+
 ## Install
 
 Server plugins go in `opencode.json` / `opencode.jsonc` under the `"plugin"` key. TUI plugins go in `tui.json` / `tui.jsonc` under the same `"plugin"` key. `opencode-ram-monitor` is both, so register it in each file. The keys are singular in V1; V2 uses a different key (see below).
 
 ```json
 {
-  "plugin": ["@capybearista/opencode-output-styles@1.0.1"]
+  "plugin": ["@capybearista/opencode-output-styles@latest"]
 }
 ```
 
 Through the V1 CLI:
 
 ```bash
-opencode plugin @capybearista/opencode-output-styles@1.0.1
+opencode plugin @capybearista/opencode-output-styles@latest
 ```
 
 For the frozen loader, use `@capybearista/opencode-agents-loader@1.0.0` in the V1 server config. For the frozen timeline, use `@capybearista/opencode-double-tap-timeline@1.0.1` in the V1 TUI config. The two V1-only package READMEs (`opencode-agent-prompt-inheritance`, `opencode-output-styles`) retain their V1 usage instructions; see the root [README](../README.md) for every package and its V1 pin.

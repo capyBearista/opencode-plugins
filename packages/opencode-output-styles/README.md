@@ -51,7 +51,7 @@ Add it under the `"plugin"` key in `opencode.json(c)`:
 
 ```json
 {
-  "plugin": ["@capybearista/opencode-output-styles@1.0.1"]
+  "plugin": ["@capybearista/opencode-output-styles@latest"]
 }
 ```
 
