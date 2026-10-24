@@ -33,10 +33,10 @@
       "name": "@capybearista/opencode-agent-prompt-inheritance",
       "version": "1.0.0",
       "devDependencies": {
-        "@opencode-ai/plugin": ">=1.19.3",
+        "@opencode-ai/plugin": ">=1.19.3 <2",
       },
       "peerDependencies": {
-        "@opencode-ai/plugin": ">=1.19.3",
+        "@opencode-ai/plugin": ">=1.19.3 <2",
       },
     },
     "packages/opencode-agents-loader": {
@@ -76,10 +76,10 @@
         "yaml": "^2.9.0",
       },
       "devDependencies": {
-        "@opencode-ai/plugin": ">=1.19.3",
+        "@opencode-ai/plugin": ">=1.19.3 <2",
       },
       "peerDependencies": {
-        "@opencode-ai/plugin": ">=1.19.3",
+        "@opencode-ai/plugin": ">=1.19.3 <2",
       },
     },
     "packages/opencode-ram-monitor": {
