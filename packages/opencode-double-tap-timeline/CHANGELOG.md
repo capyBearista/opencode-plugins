@@ -1,5 +1,11 @@
 # @capybearista/opencode-double-tap-timeline
 
+## 2.0.1
+
+### Patch Changes
+
+- a078704: Declare `@opencode/plugin` as an optional peer (`>=2.0.0 <3`) instead of a pinned `2.0.0` dependency. OpenCode serves `@opencode/plugin/tui` from its own runtime, so installs no longer download an unused copy of the SDK.
+
 ## 2.0.0
 
 ### Major Changes

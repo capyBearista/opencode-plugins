@@ -1,5 +1,11 @@
 # @capybearista/opencode-ram-monitor
 
+## 2.1.1
+
+### Patch Changes
+
+- a078704: Mark the `@opencode/plugin` peer optional. OpenCode serves `@opencode/plugin/tui` from its own runtime, so installs no longer download an unused copy of the SDK.
+
 ## 2.1.0
 
 ### Minor Changes
