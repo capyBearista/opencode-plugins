@@ -13,7 +13,7 @@ import { promisify } from "node:util";
  * npm publication can partially succeed, so recovery remains an explicit operator concern.
  */
 export const PUBLIC_REGISTRY = "https://registry.npmjs.org/";
-const CHANGESETS_VERSION = "2.31.0";
+const CHANGESETS_VERSION = "3.0.3";
 const REGISTRY_TIMEOUT_MS = 10_000;
 const MAX_PACKUMENT_BYTES = 2_000_000;
 const NPM_CONFIG_TIMEOUT_MS = 10_000;
