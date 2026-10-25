@@ -12,12 +12,11 @@ type Command = {
   run: (input?: string) => unknown;
 };
 type Layer = { mode: string; commands: Command[] };
-type Action = { bind: string; title: string; onTrigger: (value: string) => unknown };
 type SelectOptions = {
   title: string;
   current?: string;
   options: Array<{ title: string; value: string; description?: string; footer?: string }>;
-  actions?: Action[];
+  actions?: unknown[];
 };
 type Route = { type: "home" } | { type: "session"; sessionID: string };
 type SlotClaim = { append?: string; render: (input: { sessionID: string }) => unknown };
@@ -45,7 +44,6 @@ function createHarness(
       { metadata?: Record<string, unknown>; parentID?: string; location?: { directory: string } }
     >;
     picked?: string;
-    hold?: boolean;
     location?: { directory: string };
   } = {},
 ) {
@@ -55,7 +53,6 @@ function createHarness(
   const slots: SlotClaim[] = [];
   const handlers = new Map<string, (event: unknown) => void>();
   const selects: SelectOptions[] = [];
-  const settle: Array<(value: string | undefined) => void> = [];
   const unsubscribe = mock(() => {});
   const unregisterSlot = mock(() => {});
 
@@ -87,7 +84,6 @@ function createHarness(
   };
   const toast = mock((_toast: { message: string; variant?: string }) => {});
   const dispatch = mock((_id: string) => {});
-  const clear = mock(() => {});
   const context = {
     client: { rpc: () => rpc },
     keymap: { layer: (factory: () => Layer) => layers.push(factory), dispatch },
@@ -96,10 +92,8 @@ function createHarness(
       dialog: {
         select: async (select: SelectOptions) => {
           selects.push(select);
-          if (options.hold) return new Promise<string | undefined>((done) => settle.push(done));
           return options.picked;
         },
-        clear,
       },
       toast: { show: toast },
       slot: (claim: SlotClaim) => {
@@ -123,9 +117,7 @@ function createHarness(
     rpc,
     toast,
     dispatch,
-    clear,
     selects,
-    settle,
     slots,
     unsubscribe,
     unregisterSlot,
@@ -198,7 +190,7 @@ describe("project routing", () => {
     const h = createHarness({ location: { directory: "/work/project-b" } });
     await h.start();
     await h.command().run("concise");
-    await h.command().run("follow");
+    await h.command().run("global");
     h.setRoute({ type: "home" });
     await h.command().run("concise");
     await h.command().run();
@@ -222,7 +214,7 @@ describe("project routing", () => {
     });
     await h.start();
     await h.command().run("concise");
-    await h.command().run("follow");
+    await h.command().run("global");
     await h.command().run();
     const sessionLocation = { location: { directory: "/work/project-a" } };
     expect(h.rpc.setSessionStyle.mock.calls[0]?.[1]).toEqual(sessionLocation);
@@ -255,7 +247,7 @@ describe("slash command with an argument", () => {
     expect(h.toast).toHaveBeenCalledWith({ message: "Output style: Pirate", variant: "success" });
   });
 
-  test("on the home route sets the default for new sessions", async () => {
+  test("on the home route sets the global style", async () => {
     const h = createHarness({ route: { type: "home" } });
     await h.start();
     await h.command().run("concise");
@@ -263,16 +255,27 @@ describe("slash command with an argument", () => {
     expect(h.rpc.setDefaultStyle).toHaveBeenCalledWith({ style: "concise" }, expect.anything());
     expect(h.rpc.setSessionStyle).not.toHaveBeenCalled();
     expect(h.toast).toHaveBeenCalledWith({
-      message: "Output style: Concise (default)",
+      message: "Global output style: Concise",
       variant: "success",
     });
   });
 
-  test("names the built-in default style 'Default'", async () => {
+  test("names the built-in default style 'None'", async () => {
     const h = createHarness();
     await h.start();
     await h.command().run("default");
-    expect(h.toast).toHaveBeenCalledWith({ message: "Output style: Default", variant: "success" });
+    expect(h.toast).toHaveBeenCalledWith({ message: "Output style: None", variant: "success" });
+  });
+
+  test("/output-style none sets the session to the default style id", async () => {
+    const h = createHarness();
+    await h.start();
+    await h.command().run(" None ");
+    expect(h.rpc.setSessionStyle).toHaveBeenCalledWith(
+      { sessionID: "s-1", style: "default" },
+      expect.anything(),
+    );
+    expect(h.toast).toHaveBeenCalledWith({ message: "Output style: None", variant: "success" });
   });
 
   test("an unknown style raises a warning toast", async () => {
@@ -294,27 +297,27 @@ describe("slash command with an argument", () => {
   });
 });
 
-describe("follow and subagent sessions", () => {
-  test("/output-style follow clears the session style, case-insensitively", async () => {
+describe("global and subagent sessions", () => {
+  test("/output-style global clears the session style, case-insensitively", async () => {
     const h = createHarness();
     await h.start();
-    await h.command().run(" Follow ");
+    await h.command().run(" Global ");
     expect(h.rpc.clearSessionStyle).toHaveBeenCalledWith({ sessionID: "s-1" }, expect.anything());
     expect(h.rpc.setSessionStyle).not.toHaveBeenCalled();
     expect(h.toast).toHaveBeenCalledWith({
-      message: "Output style: follows global default (Default)",
+      message: "Output style: uses global (None)",
       variant: "success",
     });
   });
 
-  test("/output-style follow on home warns without calling the server", async () => {
+  test("/output-style global on home warns without calling the server", async () => {
     const h = createHarness({ route: { type: "home" } });
     await h.start();
-    await h.command().run("follow");
+    await h.command().run("global");
     expect(h.rpc.clearSessionStyle).not.toHaveBeenCalled();
     expect(h.rpc.setDefaultStyle).not.toHaveBeenCalled();
     expect(h.toast).toHaveBeenCalledWith({
-      message: "Open a session to follow the global default",
+      message: "Open a session to use the global output style",
       variant: "warning",
     });
   });
@@ -351,7 +354,7 @@ describe("follow and subagent sessions", () => {
     h.rpc.setSessionStyle.mockRejectedValueOnce({ type: "subagent_session", message: "x" });
     await h.command().run("pirate");
     h.rpc.clearSessionStyle.mockRejectedValueOnce({ type: "subagent_session", message: "x" });
-    await h.command().run("follow");
+    await h.command().run("global");
     const warnings = h.toast.mock.calls.filter(
       ([t]) => t.message === "Subagent sessions don't use output styles",
     );
@@ -360,47 +363,77 @@ describe("follow and subagent sessions", () => {
 });
 
 describe("picker", () => {
-  test("lists Default first, then styles, marking the global default", async () => {
+  test("lists None first, then styles, marking the global setting", async () => {
     const h = createHarness({ state: { defaultStyle: "concise", sessionStyle: "pirate" } });
     await h.start();
     await h.command().run();
 
     expect(h.rpc.state).toHaveBeenLastCalledWith({ sessionID: "s-1" }, expect.anything());
     const select = h.selects[0];
-    expect(select?.title).toBe("Output style");
+    expect(select?.title).toBe("Output style · this session");
     expect(select?.current).toBe("pirate");
     expect(select?.options).toEqual([
-      { title: "Default", value: "default", description: "No output style" },
-      { title: "Follow global default", value: "/follow", description: "Uses Concise" },
+      { title: "None", value: "default", description: "No output style" },
+      {
+        title: "Use global (Concise)",
+        value: "/global",
+        description: "Follow the global setting",
+      },
       {
         title: "Concise",
         value: "concise",
         description: "Short answers",
-        footer: "built-in (default)",
+        footer: "built-in · global setting",
       },
       { title: "Pirate", value: "pirate", description: "Arr", footer: "project" },
     ]);
   });
 
-  test("current is Follow when the session has no stored style", async () => {
+  test("the picker passes no actions in a session or on home", async () => {
+    const session = createHarness();
+    await session.start();
+    await session.command().run();
+    expect(session.selects).toHaveLength(1);
+    expect(session.selects[0]?.actions).toBeUndefined();
+
+    const home = createHarness({ route: { type: "home" } });
+    await home.start();
+    await home.command().run();
+    expect(home.selects).toHaveLength(1);
+    expect(home.selects[0]?.actions).toBeUndefined();
+  });
+
+  test("the picker title says whether it edits the session or the global setting", async () => {
+    const session = createHarness();
+    await session.start();
+    await session.command().run();
+    expect(session.selects[0]?.title).toBe("Output style · this session");
+
+    const home = createHarness({ route: { type: "home" } });
+    await home.start();
+    await home.command().run();
+    expect(home.selects[0]?.title).toBe("Output style · global");
+  });
+
+  test("current is Use global when the session has no stored style", async () => {
     const h = createHarness({ state: { defaultStyle: "concise" } });
     await h.start();
     await h.command().run();
-    expect(h.selects[0]?.current).toBe("/follow");
+    expect(h.selects[0]?.current).toBe("/global");
   });
 
-  test("Follow describes a missing global default", async () => {
+  test("Use global names None when no global style is set", async () => {
     const h = createHarness();
     await h.start();
     await h.command().run();
     expect(h.selects[0]?.options[1]).toEqual({
-      title: "Follow global default",
-      value: "/follow",
-      description: "No global default set",
+      title: "Use global (None)",
+      value: "/global",
+      description: "Follow the global setting",
     });
   });
 
-  test("on home current falls back to the global default, then 'default', with no Follow", async () => {
+  test("on home current falls back to the global style, then 'default', with no Use global", async () => {
     const withDefault = createHarness({
       route: { type: "home" },
       state: { defaultStyle: "concise" },
@@ -420,24 +453,24 @@ describe("picker", () => {
     expect(plain.selects[0]?.current).toBe("default");
   });
 
-  test("picking Follow clears the session style and the sidebar shows the global default", async () => {
+  test("picking Use global clears the session style and the sidebar shows the global style", async () => {
     const h = createHarness({
-      picked: "/follow",
+      picked: "/global",
       state: { defaultStyle: "concise", sessionStyle: "pirate" },
       sessions: { "s-1": { metadata: { outputStyle: "pirate" } } },
     });
     await h.start();
     const { setup, frame } = await mountSidebar(h);
-    expect(await frame()).toContain("Style: Pirate");
+    expect(await frame()).toContain("Output Style: Pirate");
 
     await h.command().run();
     expect(h.rpc.clearSessionStyle).toHaveBeenCalledWith({ sessionID: "s-1" }, expect.anything());
     expect(h.rpc.setSessionStyle).not.toHaveBeenCalled();
     expect(h.toast).toHaveBeenCalledWith({
-      message: "Output style: follows global default (Concise)",
+      message: "Output style: uses global (Concise)",
       variant: "success",
     });
-    expect(await frame()).toContain("Style: Concise");
+    expect(await frame()).toContain("Output Style: Concise");
     setup.renderer.destroy();
   });
 
@@ -489,68 +522,6 @@ describe("picker", () => {
     expect(h.rpc.setDefaultStyle).not.toHaveBeenCalled();
   });
 
-  test("ctrl+d sets the highlighted style as the default", async () => {
-    const h = createHarness({ hold: true });
-    await h.start();
-    void h.command().run();
-    await Bun.sleep(0);
-
-    const action = h.selects[0]?.actions?.[0];
-    expect(action?.bind).toBe("ctrl+d");
-    expect(action?.title).toBe("Set as default");
-    void action?.onTrigger("concise");
-    await Bun.sleep(5);
-
-    expect(h.rpc.setDefaultStyle).toHaveBeenCalledWith({ style: "concise" }, expect.anything());
-    expect(h.rpc.setSessionStyle).not.toHaveBeenCalled();
-    expect(h.toast).toHaveBeenCalledWith({ message: "Output style: Concise", variant: "success" });
-
-    // The picker reopens so the "(default)" marker moves to the new default.
-    expect(h.clear).toHaveBeenCalledTimes(1);
-    expect(h.selects).toHaveLength(2);
-    const concise = h.selects[1]?.options.find((option) => option.value === "concise");
-    expect(concise?.footer).toBe("built-in (default)");
-  });
-
-  test("ctrl+d does not reopen a picker that closed while the save was pending", async () => {
-    const h = createHarness({ hold: true });
-    await h.start();
-    void h.command().run();
-    await Bun.sleep(0);
-
-    let release: () => void = () => {};
-    h.rpc.setDefaultStyle.mockImplementationOnce(async () => {
-      await new Promise<void>((done) => {
-        release = done;
-      });
-      return { style: "concise" };
-    });
-    const saving = h.selects[0]?.actions?.[0]?.onTrigger("concise");
-    h.settle[0]?.(undefined);
-    await Bun.sleep(0);
-    release();
-    await saving;
-
-    expect(h.toast).toHaveBeenCalledWith({ message: "Output style: Concise", variant: "success" });
-    expect(h.clear).not.toHaveBeenCalled();
-    expect(h.selects).toHaveLength(1);
-  });
-
-  test("a failed ctrl+d save keeps the picker as it is", async () => {
-    const h = createHarness({ hold: true });
-    await h.start();
-    void h.command().run();
-    await Bun.sleep(0);
-    await h.selects[0]?.actions?.[0]?.onTrigger("nope");
-
-    expect(h.toast).toHaveBeenCalledWith({
-      message: 'Unknown output style "nope"',
-      variant: "warning",
-    });
-    expect(h.clear).not.toHaveBeenCalled();
-    expect(h.selects).toHaveLength(1);
-  });
-
   test("a failed state fetch toasts the error and opens no dialog", async () => {
     const h = createHarness();
     await h.start();
@@ -566,7 +537,7 @@ describe("sidebar", () => {
     const h = createHarness({ sessions: { "s-1": { metadata: { outputStyle: "pirate" } } } });
     await h.start();
     const { setup, frame } = await mountSidebar(h);
-    expect(await frame()).toContain("Style: Pirate");
+    expect(await frame()).toContain("Output Style: Pirate");
     setup.renderer.destroy();
   });
 
@@ -574,38 +545,38 @@ describe("sidebar", () => {
     const h = createHarness({ sessions: { "s-1": { metadata: { outputStyle: "pirate" } } } });
     await h.start();
     const { setup, frame } = await mountSidebar(h);
-    expect(await frame()).toContain("Style: Pirate");
+    expect(await frame()).toContain("Output Style: Pirate");
 
     h.emitMetadata("s-1", { outputStyle: "concise" });
-    expect(await frame()).toContain("Style: Concise");
+    expect(await frame()).toContain("Output Style: Concise");
 
     h.emitMetadata("other", { outputStyle: "pirate" });
-    expect(await frame()).toContain("Style: Concise");
+    expect(await frame()).toContain("Output Style: Concise");
     setup.renderer.destroy();
   });
 
-  test("falls back to the global default, then to Default", async () => {
+  test("falls back to the global style, then to None", async () => {
     const withDefault = createHarness({ state: { defaultStyle: "concise" } });
     await withDefault.start();
     const first = await mountSidebar(withDefault);
-    expect(await first.frame()).toContain("Style: Concise");
+    expect(await first.frame()).toContain("Output Style: Concise");
     first.setup.renderer.destroy();
 
     const plain = createHarness();
     await plain.start();
     const second = await mountSidebar(plain);
-    expect(await second.frame()).toContain("Style: Default");
+    expect(await second.frame()).toContain("Output Style: None");
     second.setup.renderer.destroy();
   });
 
-  test("shows Default when the stored style is not in the style list", async () => {
+  test("shows None when the stored style is not in the style list", async () => {
     const h = createHarness({
       state: { defaultStyle: "concise" },
       sessions: { "s-1": { metadata: { outputStyle: "gone" } } },
     });
     await h.start();
     const { setup, frame } = await mountSidebar(h);
-    expect(await frame()).toContain("Style: Default");
+    expect(await frame()).toContain("Output Style: None");
     setup.renderer.destroy();
   });
 
@@ -614,16 +585,24 @@ describe("sidebar", () => {
     await h.start();
     const { setup, frame } = await mountSidebar(h);
     await h.command().run("pirate");
-    expect(await frame()).toContain("Style: Pirate");
+    expect(await frame()).toContain("Output Style: Pirate");
     setup.renderer.destroy();
   });
 
-  test("an explicit Default on the session overrides the global default", async () => {
+  test("an explicit None on the session overrides the global style", async () => {
     const h = createHarness({ state: { defaultStyle: "concise" } });
     await h.start();
     const { setup, frame } = await mountSidebar(h);
     await h.command().run("default");
-    expect(await frame()).toContain("Style: Default");
+    expect(await frame()).toContain("Output Style: None");
+    setup.renderer.destroy();
+  });
+
+  test("shows Output Style: None when nothing applies", async () => {
+    const h = createHarness();
+    await h.start();
+    const { setup, frame } = await mountSidebar(h);
+    expect(await frame()).toContain("Output Style: None");
     setup.renderer.destroy();
   });
 
