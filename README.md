@@ -106,6 +106,10 @@ Monitor OpenCode's memory usage directly in the sidebar, including MCP servers, 
 
 **Navigate your session without reaching for a command.**
 
+<p>
+  <img src=".github/assets/double-tap-timeline.svg" alt="OpenCode double-tap timeline flow" />
+</p>
+
 Inspired by Claude Code's double-Escape interaction. Double-tap `Esc` to open OpenCode's session timeline instantly, without typing `/timeline` or using the mouse.
 
 Single-Escape behavior remains unchanged, and no additional configuration is required.
@@ -149,6 +153,12 @@ Switch between persistent response styles without repeating the same instruction
 Includes Claude Code's built-in `Proactive`, `Concise`, `Explanatory`, and `Learning` styles, plus custom project-local and global styles. Use `/output-style`, the picker, or the clickable sidebar line to switch; each session keeps its own style, with a global setting for the rest.
 
 ## Quick Start (OpenCode V2)
+
+<!--
+<p>
+  <img src=".github/assets/opencode-v2-plugin-architecture.svg" alt="OpenCode V2 plugin architecture" />
+</p>
+-->
 
 Install only the plugins you want by adding their npm packages to your OpenCode configuration.
 
