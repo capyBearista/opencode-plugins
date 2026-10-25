@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="500" viewBox="0 0 1280 500" role="img" aria-labelledby="diagram-title diagram-desc">
+  <title id="diagram-title">Output Styles — choose once, stay in style</title>
+  <desc id="diagram-desc">Choose an output style with the OpenCode TUI command, picker, or sidebar. Built-in and custom styles are available. A session-specific choice takes precedence over the global default. On each primary-agent model request, the server adds style instructions to the system prompt and a reminder to real user messages. Subagent prompts are not modified.</desc>
+
+  <defs>
+    <marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 1 L9 5 L0 9 Z" fill="#fab283"/>
+    </marker>
+    <style>
+      text { font-family: "JetBrains Mono"; font-weight: 500; }
+      .title { font-size: 29px; font-weight: 750; letter-spacing: -0.6px; }
+      .subtitle { font-size: 14px; fill: #808080; }
+      .section { font-size: 17px; font-weight: 750; }
+      .body { font-size: 14px; fill: #eeeeee; }
+      .muted { font-size: 13px; fill: #b5b5b5; }
+      .small { font-size: 12px; fill: #808080; }
+      .micro { font-size: 11px; fill: #808080; }
+      .tag { font-size: 13px; font-weight: 650; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="500" fill="#0a0a0a"/>
+  <text x="640" y="46" text-anchor="middle" class="title" fill="#eeeeee">Output Styles · choose once, stay in style</text>
+  <text x="640" y="75" text-anchor="middle" class="subtitle">Persistent response instructions without repeating yourself every turn.</text>
+
+  <!-- Step 1: User-facing controls and source styles -->
+  <rect x="26" y="108" width="382" height="339" fill="#141414" stroke="#fab283" stroke-width="1.5"/>
+  <text x="47" y="145" class="section" fill="#fab283">01  CHOOSE A STYLE</text>
+  <text x="47" y="175" class="muted">Command, picker, or sidebar</text>
+  <rect x="47" y="187" width="340" height="35" fill="#1e1e1e" stroke="#484848"/>
+  <text x="62" y="210" class="body">/output-style</text>
+  <text x="47" y="251" class="small">BUILT-IN STYLES</text>
+  <rect x="47" y="262" width="164" height="34" fill="#1e1e1e" stroke="#484848"/>
+  <text x="60" y="284" class="tag" fill="#fab283">Proactive</text>
+  <rect x="223" y="262" width="164" height="34" fill="#1e1e1e" stroke="#484848"/>
+  <text x="236" y="284" class="tag" fill="#5c9cf5">Concise</text>
+  <rect x="47" y="306" width="164" height="34" fill="#1e1e1e" stroke="#484848"/>
+  <text x="60" y="328" class="tag" fill="#7fd88f">Explanatory</text>
+  <rect x="223" y="306" width="164" height="34" fill="#1e1e1e" stroke="#484848"/>
+  <text x="236" y="328" class="tag" fill="#9d7cd8">Learning</text>
+  <path d="M47 355 H387" stroke="#484848"/>
+  <text x="47" y="377" class="muted">+ Custom Markdown styles</text>
+  <text x="47" y="399" class="small">Project &gt; global &gt; built-in</text>
+  <text x="47" y="426" class="micro">None disables the output style.</text>
+
+  <!-- Step 2: Per-session selection overrides global default -->
+  <rect x="449" y="108" width="382" height="339" fill="#141414" stroke="#5c9cf5" stroke-width="1.5"/>
+  <text x="470" y="145" class="section" fill="#5c9cf5">02  KEEP THE CHOICE</text>
+  <text x="470" y="175" class="muted">Session choice takes priority</text>
+
+  <rect x="470" y="196" width="340" height="91" fill="#1e1e1e" stroke="#5c9cf5" stroke-width="1"/>
+  <text x="488" y="225" class="body">THIS SESSION</text>
+  <text x="488" y="250" class="muted">Selected style persists</text>
+  <text x="488" y="272" class="small">until changed or cleared</text>
+
+  <text x="640" y="311" class="small" text-anchor="middle">↓ fallback ↓</text>
+
+  <rect x="470" y="323" width="340" height="87" fill="#1e1e1e" stroke="#484848" stroke-width="1"/>
+  <text x="488" y="351" class="body">GLOBAL DEFAULT</text>
+  <text x="488" y="375" class="muted">Fallback for new sessions</text>
+  <text x="488" y="397" class="small">Use global clears the override</text>
+  <text x="470" y="430" class="micro">A session may explicitly select None.</text>
+
+  <!-- Step 3: Prompt integration at each request -->
+  <rect x="872" y="108" width="382" height="339" fill="#141414" stroke="#9d7cd8" stroke-width="1.5"/>
+  <text x="893" y="145" class="section" fill="#9d7cd8">03  APPLY ON REQUEST</text>
+  <text x="893" y="175" class="muted">Primary-agent sessions only</text>
+
+  <rect x="893" y="196" width="340" height="91" fill="#1e1e1e" stroke="#484848"/>
+  <text x="909" y="222" class="tag" fill="#fab283">SYSTEM PROMPT</text>
+  <text x="909" y="249" class="body">OpenCode's own prompt</text>
+  <text x="909" y="271" class="muted">+ active style instructions</text>
+
+  <rect x="893" y="299" width="340" height="91" fill="#1e1e1e" stroke="#484848"/>
+  <text x="909" y="325" class="tag" fill="#7fd88f">USER MESSAGES</text>
+  <text x="909" y="352" class="body">Active-style reminder</text>
+  <text x="909" y="374" class="muted">added in request, not saved</text>
+
+  <text x="893" y="424" class="small">Subagent prompts are unchanged.</text>
+
+  <!-- Flow connectors -->
+  <path d="M409 274 H444" stroke="#fab283" stroke-width="2" marker-end="url(#flow-arrow)"/>
+  <path d="M833 274 H867" stroke="#fab283" stroke-width="2" marker-end="url(#flow-arrow)"/>
+
+  <text x="640" y="483" class="small" text-anchor="middle">One opencode.json(c) entry installs the server and automatically loads its TUI controls.</text>
+</svg>
