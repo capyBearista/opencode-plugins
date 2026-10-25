@@ -120,6 +120,17 @@ describe("filesystem handling", () => {
     expect(styles.has("folder")).toBe(false);
   });
 
+  test.skipIf(process.platform === "win32")(
+    "skips a FIFO named *.md without blocking",
+    async () => {
+      await mkdir(globalDir(), { recursive: true });
+      expect(Bun.spawnSync(["mkfifo", join(globalDir(), "pipe.md")]).exitCode).toBe(0);
+      const styles = await discoverStyles({ project, env });
+      expect(styles.has("pipe")).toBe(false);
+      expect(styles.size).toBe(4);
+    },
+  );
+
   test("only .md files, case-insensitive; id is lowercased", async () => {
     await put(globalDir(), "Mixed.MD", "body");
     await put(globalDir(), "notes.txt", "body");

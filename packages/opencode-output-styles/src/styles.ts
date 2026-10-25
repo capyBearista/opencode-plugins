@@ -1,4 +1,5 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { type FileHandle, open, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,11 +71,16 @@ async function loadDir(dir: string, source: StyleSource): Promise<Style[]> {
       .filter((entry) => entry.toLowerCase().endsWith(".md"))
       .map(async (entry) => {
         const file = join(dir, entry);
+        let handle: FileHandle | undefined;
         try {
-          if (!(await stat(file)).isFile()) return undefined;
-          return parseStyle(file, await readFile(file, "utf8"), source);
+          // Check and read through one handle; O_NONBLOCK keeps a FIFO from blocking the open.
+          handle = await open(file, constants.O_RDONLY | constants.O_NONBLOCK);
+          if (!(await handle.stat()).isFile()) return undefined;
+          return parseStyle(file, await handle.readFile("utf8"), source);
         } catch {
           return undefined;
+        } finally {
+          await handle?.close();
         }
       }),
   );
