@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="450" viewBox="0 0 1280 450" role="img" aria-labelledby="diagram-title diagram-desc">
+  <title id="diagram-title">OpenCode V2 plugin architecture</title>
+  <desc id="diagram-desc">Server plugin packages belong in opencode.json or opencode.jsonc; TUI plugins belong in cli.json. Each can be installed independently.</desc>
+  <defs>
+    <marker id="arr-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1 L9 5 L0 9 Z" fill="#fab283"/></marker>
+    <marker id="arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1 L9 5 L0 9 Z" fill="#5c9cf5"/></marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1 L9 5 L0 9 Z" fill="#7fd88f"/></marker>
+    <marker id="arr-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1 L9 5 L0 9 Z" fill="#808080"/></marker>
+    <style>
+      text {font-family:"JetBrains Mono";font-weight:500;}
+      .title {font-size:30px;font-weight:750;letter-spacing:-.6px;}
+      .subtitle {font-size:14px;fill:#808080;}
+      .section {font-size:22px;font-weight:750;}
+      .label {font-size:16px;font-weight:700;}
+      .body {font-size:14px;fill:#b5b5b5;}
+      .small {font-size:12px;fill:#808080;}
+      .tiny {font-size:11px;fill:#808080;}
+      .code {font-size:13px;fill:#eeeeee;}
+    </style>
+  </defs>
+  <rect width="1280" height="450" fill="#0a0a0a"/>
+
+  <text x="640" y="48" class="title" fill="#eeeeee" text-anchor="middle">OpenCode V2 plugin architecture</text>
+  <text x="640" y="76" class="subtitle" text-anchor="middle">Server plugins and TUI plugins live in different config files.</text>
+  <rect x="24" y="98" width="608" height="325" fill="#141414" stroke="#fab283" stroke-width="1.5"/>
+  <text x="46" y="132" class="section" fill="#fab283">SERVER</text>
+  <rect x="46" y="146" width="147" height="24" fill="#1e1e1e" stroke="#484848" stroke-width="1"/>
+  <text x="57" y="163" class="code" fill="#eeeeee">opencode.json(c)</text>
+  <text x="46" y="191" class="body">Background server extensions</text>
+  <rect x="648" y="98" width="608" height="325" fill="#141414" stroke="#5c9cf5" stroke-width="1.5"/>
+  <text x="670" y="132" class="section" fill="#5c9cf5">TUI</text>
+  <rect x="670" y="146" width="85" height="24" fill="#1e1e1e" stroke="#484848" stroke-width="1"/>
+  <text x="681" y="163" class="code" fill="#eeeeee">cli.json</text>
+  <text x="670" y="191" class="body">Interactive terminal UI extensions</text>
+  <rect x="45" y="209" width="566" height="94" fill="#1e1e1e" stroke="#484848" stroke-width="1"/>
+  <rect x="63" y="232" width="48" height="48" fill="#0a0a0a" stroke="#fab283" stroke-width="1.5"/>
+  <path d="M77 241 H90 L97 248 V267 H77 Z" fill="none" stroke="#fab283" stroke-width="2" stroke-linejoin="miter"/>
+  <path d="M90 241 V248 H97 M82 255 H92 M82 260 H92" fill="none" stroke="#fab283" stroke-width="1.5" stroke-linejoin="miter"/>
+  <path d="M129 227 V286" fill="none" stroke="#484848" stroke-width="1" stroke-linejoin="miter"/>
+  <text x="150" y="238" class="label" fill="#eeeeee">Adversarial Review</text>
+  <text x="150" y="262" fill="#5c9cf5" font-size="13">@capybearista/opencode-adversarial-review</text>
+  <text x="150" y="285" class="small">Clean-context review commands</text>
+  <rect x="45" y="317" width="566" height="94" fill="#1e1e1e" stroke="#484848" stroke-width="1"/>
+  <rect x="63" y="340" width="48" height="48" fill="#0a0a0a" stroke="#fab283" stroke-width="1.5"/>
+  <path d="M86 353 L77 368 L95 368 Z" fill="none" stroke="#fab283" stroke-width="1.8" stroke-linejoin="miter"/>
+  <circle cx="86" cy="353" r="3.3" fill="#fab283"/>
+  <circle cx="77" cy="368" r="3.3" fill="#fab283"/>
+  <circle cx="95" cy="368" r="3.3" fill="#fab283"/>
+  <path d="M129 335 V394" fill="none" stroke="#484848" stroke-width="1" stroke-linejoin="miter"/>
+  <text x="150" y="346" class="label" fill="#eeeeee">Agents Loader</text>
+  <text x="150" y="370" fill="#5c9cf5" font-size="13">@capybearista/opencode-agents-loader</text>
+  <text x="150" y="393" class="small">Bridges .agents/ commands and agents</text>
+  <rect x="669" y="209" width="566" height="94" fill="#1e1e1e" stroke="#484848" stroke-width="1"/>
+  <rect x="687" y="232" width="48" height="48" fill="#0a0a0a" stroke="#5c9cf5" stroke-width="1.5"/>
+  <rect x="699" y="257" width="5" height="11" fill="#5c9cf5"/>
+  <rect x="707" y="249" width="5" height="19" fill="#5c9cf5"/>
+  <rect x="715" y="240" width="5" height="28" fill="#5c9cf5"/>
+  <path d="M753 227 V286" fill="none" stroke="#484848" stroke-width="1" stroke-linejoin="miter"/>
+  <text x="774" y="238" class="label" fill="#eeeeee">RAM Monitor</text>
+  <text x="774" y="262" fill="#5c9cf5" font-size="13">@capybearista/opencode-ram-monitor</text>
+  <text x="774" y="285" class="small">Sidebar widget + /ram modal</text>
+  <rect x="669" y="317" width="566" height="94" fill="#1e1e1e" stroke="#484848" stroke-width="1"/>
+  <rect x="687" y="340" width="48" height="48" fill="#0a0a0a" stroke="#5c9cf5" stroke-width="1.5"/>
+  <circle cx="710" cy="362" r="13" fill="none" stroke="#5c9cf5" stroke-width="2"/>
+  <path d="M710 353 V363 L717 363" fill="none" stroke="#5c9cf5" stroke-width="2" stroke-linejoin="miter"/>
+  <path d="M753 335 V394" fill="none" stroke="#484848" stroke-width="1" stroke-linejoin="miter"/>
+  <text x="774" y="346" class="label" fill="#eeeeee">Double-Tap Timeline</text>
+  <text x="774" y="370" fill="#5c9cf5" font-size="13">@capybearista/opencode-double-tap-timeline</text>
+  <text x="774" y="393" class="small">Open timeline on double Esc</text>
+  <text x="640" y="442" class="small" text-anchor="middle">Choose only the plugins you want.</text>
+</svg>

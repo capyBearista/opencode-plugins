@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="450" viewBox="0 0 1280 450" role="img" aria-labelledby="diagram-title diagram-desc">
+  <title id="diagram-title">Double-Tap Timeline</title>
+  <desc id="diagram-desc">Press Escape twice within 800 milliseconds in an OpenCode session to open the timeline modal. A single Escape press keeps native behavior.</desc>
+  <defs>
+    <marker id="arr-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1 L9 5 L0 9 Z" fill="#fab283"/></marker>
+    <marker id="arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1 L9 5 L0 9 Z" fill="#5c9cf5"/></marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1 L9 5 L0 9 Z" fill="#7fd88f"/></marker>
+    <marker id="arr-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1 L9 5 L0 9 Z" fill="#808080"/></marker>
+    <style>
+      text {font-family:"JetBrains Mono";font-weight:500;}
+      .title {font-size:30px;font-weight:750;letter-spacing:-.6px;}
+      .subtitle {font-size:18px;fill:#808080;}
+      .section {font-size:22px;font-weight:750;}
+      .label {font-size:16px;font-weight:700;}
+      .body {font-size:14px;fill:#b5b5b5;}
+      .small {font-size:12px;fill:#808080;}
+      .tiny {font-size:11px;fill:#808080;}
+      .code {font-size:13px;fill:#eeeeee;}
+    </style>
+  </defs>
+  <rect width="1280" height="450" fill="#0a0a0a"/>
+
+  <text x="640" y="47" class="title" fill="#eeeeee" text-anchor="middle">Double-Tap Timeline</text>
+  <text x="640" y="74" class="subtitle" text-anchor="middle">Open the session timeline with two quick Escape presses.</text>
+  <rect x="24" y="151" width="411" height="143" fill="#141414" stroke="#fab283" stroke-width="1.6"/>
+  <rect x="48" y="187" width="64" height="64" fill="#0a0a0a" stroke="#fab283" stroke-width="1.5"/>
+  <path d="M67 209 L75 217 L67 225 M79 226 H90" fill="none" stroke="#fab283" stroke-width="2.5" stroke-linejoin="miter"/>
+  <text x="131" y="201" class="label" fill="#eeeeee">In an OpenCode session</text>
+  <text x="131" y="230" class="body">Running commands, chatting,</text>
+  <text x="131" y="252" class="body">or working on a task.</text>
+  <rect x="534" y="176" width="76" height="72" fill="#1e1e1e" stroke="#fab283" stroke-width="1.7"/>
+  <text x="572" y="220" fill="#fab283" text-anchor="middle" font-size="23" font-weight="700">Esc</text>
+  <rect x="675" y="176" width="76" height="72" fill="#1e1e1e" stroke="#fab283" stroke-width="1.7"/>
+  <text x="713" y="220" fill="#fab283" text-anchor="middle" font-size="23" font-weight="700">Esc</text>
+  <text x="642" y="134" class="subtitle" text-anchor="middle">within 800 ms</text>
+  <path d="M534 160 V149 H751 V160" fill="none" stroke="#fab283" stroke-width="1.8" stroke-linejoin="miter" stroke-dasharray="6 5"/>
+  <rect x="847" y="151" width="410" height="143" fill="#141414" stroke="#5c9cf5" stroke-width="1.6"/>
+  <rect x="871" y="187" width="64" height="64" fill="#0a0a0a" stroke="#5c9cf5" stroke-width="1.5"/>
+  <rect x="891" y="219" width="5" height="11" fill="#5c9cf5"/>
+  <rect x="899" y="211" width="5" height="19" fill="#5c9cf5"/>
+  <rect x="907" y="202" width="5" height="28" fill="#5c9cf5"/>
+  <text x="952" y="201" class="label" fill="#eeeeee">Timeline modal</text>
+  <text x="952" y="232" class="body">Session history opens</text>
+  <text x="952" y="255" class="body">instantly.</text>
+  <path d="M435 222 H530" fill="none" stroke="#fab283" stroke-width="2.3" stroke-linejoin="miter" marker-end="url(#arr-orange)"/>
+  <path d="M610 212 H670" fill="none" stroke="#fab283" stroke-width="2.3" stroke-linejoin="miter" marker-end="url(#arr-orange)"/>
+  <path d="M751 212 H843" fill="none" stroke="#fab283" stroke-width="2.3" stroke-linejoin="miter" marker-end="url(#arr-orange)"/>
+  <path d="M230 294 V366 H380" fill="none" stroke="#808080" stroke-width="1.7" stroke-linejoin="miter" marker-end="url(#arr-muted)" stroke-dasharray="6 5"/>
+  <rect x="385" y="332" width="260" height="79" fill="#141414" stroke="#484848" stroke-width="1.4"/>
+  <rect x="402" y="346" width="52" height="49" fill="#0a0a0a" stroke="#808080" stroke-width="1"/>
+  <text x="428" y="376" fill="#808080" text-anchor="middle" font-size="15">Esc</text>
+  <text x="470" y="360" class="label" fill="#eeeeee">Single Esc</text>
+  <text x="470" y="385" class="small">Just one press.</text>
+  <path d="M645 371 H710" fill="none" stroke="#808080" stroke-width="1.7" stroke-linejoin="miter" marker-end="url(#arr-muted)"/>
+  <rect x="716" y="332" width="541" height="79" fill="#141414" stroke="#484848" stroke-width="1.4"/>
+  <rect x="734" y="346" width="51" height="49" fill="#0a0a0a" stroke="#808080" stroke-width="1"/>
+  <path d="M747 360 L755 368 L747 376 M759 377 H770" fill="none" stroke="#808080" stroke-width="2.5" stroke-linejoin="miter"/>
+  <text x="801" y="360" class="label" fill="#eeeeee">Normal Escape behavior</text>
+  <text x="801" y="386" class="small">Works as usual: cancel, close, or go back.</text>
+  <text x="640" y="441" class="small" text-anchor="middle">No extra configuration required.</text>
+</svg>
