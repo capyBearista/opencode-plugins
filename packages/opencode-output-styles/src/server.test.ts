@@ -46,6 +46,8 @@ interface Setup {
   options?: Record<string, unknown>;
   agent?: Any;
   sessionGetThrows?: boolean;
+  context?: Any[];
+  contextThrows?: boolean;
 }
 
 async function start(config: Setup = {}) {
@@ -75,6 +77,15 @@ async function start(config: Setup = {}) {
         const session = sessions[sessionID];
         if (!session) throw new Error("not found");
         return session;
+      },
+      context: async () => {
+        if (config.contextThrows) throw new Error("no context");
+        return (
+          config.context ?? [
+            { id: "m1", type: "user" },
+            { id: "m3", type: "user" },
+          ]
+        );
       },
       update: async (input: Any) => {
         updates.push(input);
@@ -108,9 +119,9 @@ async function start(config: Setup = {}) {
       agent: "build",
       system: [{ type: "text", text: CODING }],
       messages: [
-        { role: "user", content: [{ type: "text", text: "hi" }] },
-        { role: "assistant", content: [{ type: "text", text: "hello" }] },
-        { role: "user", content: [{ type: "text", text: "again" }] },
+        { role: "user", id: "m1", content: [{ type: "text", text: "hi" }] },
+        { role: "assistant", id: "m2", content: [{ type: "text", text: "hello" }] },
+        { role: "user", id: "m3", content: [{ type: "text", text: "again" }] },
       ],
       ...event,
     };
@@ -128,7 +139,7 @@ describe("context hook", () => {
     expect({ system: e.system, messages: e.messages }).toEqual(before);
   });
 
-  test("applies the session style to system and every user message", async () => {
+  test("applies the session style to system and every real prompt", async () => {
     const t = await start({ sessions: { s1: { metadata: { outputStyle: "terse" } } } });
     const { e, before, done } = t.run();
     await done;
@@ -170,6 +181,34 @@ describe("context hook", () => {
     const { e, before, done } = t.run();
     await done;
     expect({ system: e.system, messages: e.messages }).toEqual(before);
+  });
+
+  test("reminds only real prompts, not synthetic, skill or compaction user messages", async () => {
+    const t = await start({
+      sessions: { s1: { metadata: { outputStyle: "terse" } } },
+      context: [
+        { id: "m1", type: "user" },
+        { id: "syn", type: "synthetic" },
+        { id: "sk", type: "skill" },
+        { id: "cp", type: "compaction" },
+      ],
+    });
+    const user = (id?: string) => ({ role: "user", id, content: [{ type: "text", text: id }] });
+    const messages = [user("m1"), user("syn"), user("sk"), user("cp"), user()];
+    await t.run({ messages }).done;
+    const reminded = messages.map((m) => m.content.length > 1);
+    expect(reminded).toEqual([true, false, false, false, false]);
+  });
+
+  test("still applies the system style when session.context throws", async () => {
+    const t = await start({
+      sessions: { s1: { metadata: { outputStyle: "terse" } } },
+      contextThrows: true,
+    });
+    const { e, before, done } = t.run();
+    await done;
+    expect(e.system.at(-1).text).toBe("Be terse.");
+    expect(e.messages).toEqual(before.messages);
   });
 
   test("strips coding sections when the agent has no own system prompt", async () => {
@@ -245,6 +284,32 @@ describe("rpc setSessionStyle", () => {
   });
 });
 
+describe("subagent sessions", () => {
+  test("setSessionStyle refuses child sessions without writing", async () => {
+    const t = await start({ sessions: { c1: { parentID: "p" } } });
+    const result = await t.call("setSessionStyle", { sessionID: "c1", style: "terse" });
+    expect(result).toMatchObject({ code: "subagent_session", data: { sessionID: "c1" } });
+    expect(t.updates).toEqual([]);
+  });
+
+  test("clearSessionStyle refuses child sessions without writing", async () => {
+    const t = await start({ sessions: { c1: { parentID: "p", metadata: { outputStyle: "x" } } } });
+    const result = await t.call("clearSessionStyle", { sessionID: "c1" });
+    expect(result).toMatchObject({ code: "subagent_session", data: { sessionID: "c1" } });
+    expect(t.updates).toEqual([]);
+  });
+});
+
+describe("rpc clearSessionStyle", () => {
+  test("removes only the output style key", async () => {
+    const t = await start({
+      sessions: { s1: { metadata: { foreign: 1, outputStyle: "terse" } } },
+    });
+    expect(await t.call("clearSessionStyle", { sessionID: "s1" })).toEqual({ sessionID: "s1" });
+    expect(t.updates).toEqual([{ sessionID: "s1", metadata: { foreign: 1 } }]);
+  });
+});
+
 describe("rpc setDefaultStyle", () => {
   test("sets, removes and rejects", async () => {
     const t = await start();
@@ -272,6 +337,13 @@ describe("rpc state", () => {
     );
   });
 
+  test("reports whether the session is a subagent session", async () => {
+    const t = await start({ sessions: { c1: { parentID: "p" }, s1: {} } });
+    expect((await t.call("state", { sessionID: "c1" })).subagent).toBe(true);
+    expect((await t.call("state", { sessionID: "s1" })).subagent).toBe(false);
+    expect((await t.call("state", {})).subagent).toBe(false);
+  });
+
   test("reports default and session styles", async () => {
     const t = await start({
       sessions: { s1: { metadata: { outputStyle: "terse" } } },
@@ -283,6 +355,18 @@ describe("rpc state", () => {
     const none = await (await start()).call("state", { sessionID: "missing" });
     expect(none).toMatchObject({ defaultStyle: null, sessionStyle: null });
     expect(await (await start()).call("state", {})).toMatchObject({ sessionStyle: null });
+  });
+
+  test("defaultStyle resolves to the canonical id or null", async () => {
+    const ghost = await start({ stored: { "default-style": "ghost" } });
+    expect((await ghost.call("state", {})).defaultStyle).toBeNull();
+    const byName = await start({ stored: { "default-style": "Terse" } });
+    expect((await byName.call("state", {})).defaultStyle).toBe("terse");
+  });
+
+  test("sessionStyle stays raw even when it does not resolve", async () => {
+    const t = await start({ sessions: { s1: { metadata: { outputStyle: "ghost" } } } });
+    expect((await t.call("state", { sessionID: "s1" })).sessionStyle).toBe("ghost");
   });
 
   test("lists built-ins first, then others alphabetically, with sources", async () => {

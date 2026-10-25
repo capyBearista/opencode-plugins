@@ -1,5 +1,10 @@
 import { Rpc } from "@opencode/plugin/rpc";
 
+/** Style id meaning "no style" (Claude Code's `default`). */
+export const DEFAULT_STYLE_ID = "default";
+/** Session metadata key holding the session's own style id. */
+export const METADATA_KEY = "outputStyle";
+
 /** Style summary the TUI needs for the picker and sidebar. */
 export interface StyleSummary {
   readonly id: string;
@@ -10,12 +15,17 @@ export interface StyleSummary {
 
 export interface StateOutput {
   readonly styles: readonly StyleSummary[];
-  /** Global default style id, or null when none is set. */
+  /** Global default style id, or null when none is set or it doesn't resolve in this project. */
   readonly defaultStyle: string | null;
-  /** Style id stored on the session, or null when the session follows the default. */
+  /**
+   * Style id stored on the session (`"default"` = explicitly none), or null when the session
+   * follows the global default. A stored id that doesn't resolve here means no style is applied.
+   */
   readonly sessionStyle: string | null;
   /** Whether the TUI shows the sidebar line (server `sidebar` option, default true). */
   readonly sidebar: boolean;
+  /** True when the given session is a subagent session, which never gets a style. */
+  readonly subagent: boolean;
 }
 
 const string = { type: "string" } as const;
@@ -31,6 +41,21 @@ const unknownStyle = {
     type: "object",
     properties: { style: string },
     required: ["style"],
+    additionalProperties: false,
+  },
+} as const;
+const sessionOnly = {
+  type: "object",
+  properties: { sessionID: string },
+  required: ["sessionID"],
+  additionalProperties: false,
+} as const;
+// Subagent sessions inherit metadata but never get a style, so writing one there is refused.
+const subagentSession = {
+  subagent_session: {
+    type: "object",
+    properties: { sessionID: string },
+    required: ["sessionID"],
     additionalProperties: false,
   },
 } as const;
@@ -64,8 +89,9 @@ export const OutputStylesRpc = Rpc.define({
           defaultStyle: nullableString,
           sessionStyle: nullableString,
           sidebar: { type: "boolean" },
+          subagent: { type: "boolean" },
         },
-        required: ["styles", "defaultStyle", "sessionStyle", "sidebar"],
+        required: ["styles", "defaultStyle", "sessionStyle", "sidebar", "subagent"],
       },
     },
     setSessionStyle: {
@@ -76,7 +102,12 @@ export const OutputStylesRpc = Rpc.define({
         additionalProperties: false,
       },
       output: styleOnly,
-      errors: unknownStyle,
+      errors: { ...unknownStyle, ...subagentSession },
+    },
+    clearSessionStyle: {
+      input: sessionOnly,
+      output: sessionOnly,
+      errors: subagentSession,
     },
     setDefaultStyle: {
       input: styleOnly,

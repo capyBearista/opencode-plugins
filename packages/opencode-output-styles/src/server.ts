@@ -1,9 +1,8 @@
 import { Plugin } from "@opencode/plugin";
 import { appendReminders, applyStyle, reminderText } from "./prompt.js";
-import { OutputStylesRpc, type StyleSummary } from "./rpc.js";
-import { DEFAULT_STYLE_ID, discoverStyles, findStyle } from "./styles.js";
+import { DEFAULT_STYLE_ID, METADATA_KEY, OutputStylesRpc, type StyleSummary } from "./rpc.js";
+import { discoverStyles, findStyle } from "./styles.js";
 
-const METADATA_KEY = "outputStyle";
 const STORAGE_KEY = "default-style";
 
 const isDefault = (style: string) => style.trim().toLowerCase() === DEFAULT_STYLE_ID;
@@ -22,7 +21,8 @@ export default Plugin.define({
     const rpc = await ctx.rpc.register(OutputStylesRpc, {
       async state(input) {
         const { sessionID } = input as { sessionID?: string };
-        const styles = [...(await discoverStyles({ project })).values()]
+        const discovered = await discoverStyles({ project });
+        const styles = [...discovered.values()]
           .sort(
             (a, b) =>
               Number(b.source === "built-in") - Number(a.source === "built-in") ||
@@ -38,16 +38,22 @@ export default Plugin.define({
           );
 
         let sessionStyle: string | null = null;
+        let subagent = false;
         if (sessionID) {
           try {
-            sessionStyle = sessionStyleOf(await ctx.session.get({ sessionID })) ?? null;
+            const session = await ctx.session.get({ sessionID });
+            sessionStyle = sessionStyleOf(session) ?? null;
+            subagent = Boolean(session.parentID);
           } catch {}
         }
+        const storedDefault = asString(await ctx.storage.get(STORAGE_KEY));
+        const defaultStyle = storedDefault ? findStyle(discovered, storedDefault) : undefined;
         return {
           styles,
-          defaultStyle: asString(await ctx.storage.get(STORAGE_KEY)) ?? null,
+          defaultStyle: defaultStyle?.id ?? null,
           sessionStyle,
           sidebar,
+          subagent,
         };
       },
 
@@ -60,9 +66,28 @@ export default Plugin.define({
           stored = found.id;
         }
         const session = await ctx.session.get({ sessionID });
+        if (session.parentID) {
+          return error("subagent_session", "Subagent sessions don't use output styles", {
+            sessionID,
+          });
+        }
         const metadata = { ...session.metadata, [METADATA_KEY]: stored };
         await ctx.session.update({ sessionID, metadata });
         return { style: stored };
+      },
+
+      async clearSessionStyle(input, { error }) {
+        const { sessionID } = input as { sessionID: string };
+        const session = await ctx.session.get({ sessionID });
+        if (session.parentID) {
+          return error("subagent_session", "Subagent sessions don't use output styles", {
+            sessionID,
+          });
+        }
+        const metadata = { ...session.metadata };
+        delete metadata[METADATA_KEY];
+        await ctx.session.update({ sessionID, metadata });
+        return { sessionID };
       },
 
       async setDefaultStyle(input, { error }) {
@@ -80,10 +105,14 @@ export default Plugin.define({
 
     const hook = await ctx.session.hook("context", async (event) => {
       try {
-        const session = await ctx.session.get({ sessionID: event.sessionID });
+        const [session, storedDefault, context] = await Promise.all([
+          ctx.session.get({ sessionID: event.sessionID }),
+          ctx.storage.get(STORAGE_KEY),
+          ctx.session.context({ sessionID: event.sessionID }).catch(() => []),
+        ]);
         if (session.parentID) return;
 
-        const id = sessionStyleOf(session) ?? asString(await ctx.storage.get(STORAGE_KEY));
+        const id = sessionStyleOf(session) ?? asString(storedDefault);
         if (!id || isDefault(id)) return;
 
         const style = findStyle(await discoverStyles({ project }), id);
@@ -98,7 +127,12 @@ export default Plugin.define({
           } catch {}
         }
         applyStyle(event.system, style, agentHasOwnSystem);
-        appendReminders(event.messages, reminderText(style));
+        const prompts = new Set(context.filter((m) => m.type === "user").map((m) => m.id));
+        appendReminders(
+          event.messages,
+          reminderText(style),
+          (m) => m.id !== undefined && prompts.has(m.id),
+        );
       } catch {
         // Styling is best-effort: never fail the user's request.
       }

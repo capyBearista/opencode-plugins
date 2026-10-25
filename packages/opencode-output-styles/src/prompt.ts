@@ -45,14 +45,16 @@ export function applyStyle(
   system.push({ type: "text", text: style.prompt });
 }
 
-// Tool results are role "tool" messages in OpenCode, so every user message is a real user turn.
+// Only real prompts get the reminder: OpenCode also sends harness text (synthetic, skill, shell,
+// compaction) as role "user", so the caller says which messages are prompts.
 export function appendReminders(
-  messages: Array<{ role: string; content: unknown }>,
+  messages: Array<{ role: string; id?: string; content: unknown }>,
   text: string,
+  isPrompt: (message: { role: string; id?: string; content: unknown }) => boolean,
 ): number {
   let modified = 0;
   for (const message of messages) {
-    if (message.role !== "user" || !Array.isArray(message.content)) continue;
+    if (message.role !== "user" || !Array.isArray(message.content) || !isPrompt(message)) continue;
     const parts: Array<{ type?: unknown; text?: unknown }> = message.content;
     if (parts.some((part) => part.type === "text" && part.text === text)) continue;
     parts.push({ type: "text", text });

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
+import { DEFAULT_STYLE_ID } from "./rpc.js";
 
 export type StyleSource = "built-in" | "global" | "project";
 
@@ -17,7 +18,7 @@ export interface Style {
   readonly source: StyleSource;
 }
 
-export const DEFAULT_STYLE_ID = "default";
+export { DEFAULT_STYLE_ID };
 
 const FRONTMATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)([\s\S]*)$/;
 
@@ -26,10 +27,12 @@ export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "opencode");
 }
 
-function parseStyle(file: string, content: string, source: StyleSource): Style | undefined {
+function parseStyle(file: string, raw: string, source: StyleSource): Style | undefined {
   const id = basename(file).slice(0, -".md".length).toLowerCase();
   if (id === DEFAULT_STYLE_ID) return undefined;
 
+  // Editors on Windows often save a UTF-8 BOM, which would hide the frontmatter.
+  const content = raw.replace(/^\uFEFF/, "");
   const match = FRONTMATTER.exec(content);
   let data: Record<string, unknown> = {};
   if (match) {
@@ -100,10 +103,10 @@ export async function discoverStyles(options: {
     [join(options.project, ".opencode", "output-styles"), "project"],
   ];
 
+  // Read in parallel, then apply in source order so later sources still win.
+  const loaded = await Promise.all(sources.map(([dir, source]) => loadDir(dir, source)));
   const styles = new Map<string, Style>();
-  for (const [dir, source] of sources) {
-    for (const style of await loadDir(dir, source)) styles.set(style.id, style);
-  }
+  for (const style of loaded.flat()) styles.set(style.id, style);
   return styles;
 }
 

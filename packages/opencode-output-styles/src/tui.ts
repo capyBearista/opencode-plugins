@@ -2,10 +2,12 @@ import { Plugin } from "@opencode/plugin/tui";
 import type { JSX } from "@opentui/solid";
 import { createElement, insert, spread } from "@opentui/solid";
 import { createSignal } from "solid-js";
-import { OutputStylesRpc, type StateOutput } from "./rpc.js";
+import { DEFAULT_STYLE_ID, METADATA_KEY, OutputStylesRpc, type StateOutput } from "./rpc.js";
 
 const PICK_COMMAND = "output-styles.pick";
-const DEFAULT_STYLE = "default";
+// Style ids are filenames, which can't contain "/", so this never collides with one.
+const FOLLOW = "/follow";
+const SUBAGENT_MESSAGE = "Subagent sessions don't use output styles";
 
 interface Info {
   readonly styles: StateOutput["styles"];
@@ -14,10 +16,17 @@ interface Info {
 }
 
 // The JSON-schema RPC definition carries no static output types.
-interface Client {
-  state(input: { sessionID?: string }): Promise<StateOutput>;
-  setSessionStyle(input: { sessionID: string; style: string }): Promise<{ style: string }>;
-  setDefaultStyle(input: { style: string }): Promise<{ style: string }>;
+interface Client<Options = undefined> {
+  state(input: { sessionID?: string }, options?: Options): Promise<StateOutput>;
+  setSessionStyle(
+    input: { sessionID: string; style: string },
+    options?: Options,
+  ): Promise<{ style: string }>;
+  clearSessionStyle(
+    input: { sessionID: string },
+    options?: Options,
+  ): Promise<{ sessionID: string }>;
+  setDefaultStyle(input: { style: string }, options?: Options): Promise<{ style: string }>;
 }
 
 function errorType(error: unknown): string | undefined {
@@ -31,21 +40,40 @@ function errorMessage(error: unknown): string {
 }
 
 function storedStyle(metadata: unknown): string | null {
-  const style = (metadata as { outputStyle?: unknown } | null | undefined)?.outputStyle;
+  const style = (metadata as Record<string, unknown> | null | undefined)?.[METADATA_KEY];
   return typeof style === "string" ? style : null;
 }
 
 export default Plugin.define({
   id: "capybearista.opencode-output-styles.tui",
   setup(context) {
-    const rpc = context.client.rpc(OutputStylesRpc) as unknown as Client;
+    const client = context.client.rpc(OutputStylesRpc) as unknown as Client<{
+      location: typeof context.location;
+    }>;
+    // A shared server runs one plugin instance per project. Without a location, calls reach
+    // the server's default project, so route each one to the session's project (the one its
+    // requests are styled in), else this TUI's.
+    const at = (sessionID?: string) => ({
+      location:
+        (sessionID ? context.data.session.get(sessionID)?.location : undefined) ??
+        context.location ??
+        context.data.location.default(),
+    });
+    const rpc: Client = {
+      state: (input) => client.state(input, at(input.sessionID)),
+      setSessionStyle: (input) => client.setSessionStyle(input, at(input.sessionID)),
+      clearSessionStyle: (input) => client.clearSessionStyle(input, at(input.sessionID)),
+      setDefaultStyle: (input) => client.setDefaultStyle(input, at()),
+    };
     const toast = context.ui.toast;
     const [info, setInfo] = createSignal<Info>({ styles: [], defaultStyle: null, sidebar: false });
     // Per-session style from events and our own writes; null means "no stored style".
     const [live, setLive] = createSignal<Record<string, string | null>>({});
 
+    const isChild = (sessionID: string) => Boolean(context.data.session.get(sessionID)?.parentID);
+
     const nameOf = (id: string) =>
-      id === DEFAULT_STYLE ? "Default" : (info().styles.find((s) => s.id === id)?.name ?? id);
+      id === DEFAULT_STYLE_ID ? "Default" : (info().styles.find((s) => s.id === id)?.name ?? id);
 
     const effective = (sessionID: string) => {
       const known = live();
@@ -53,7 +81,11 @@ export default Plugin.define({
         sessionID in known
           ? known[sessionID]
           : storedStyle(context.data.session.get(sessionID)?.metadata);
-      return own ?? info().defaultStyle ?? DEFAULT_STYLE;
+      const id = own ?? info().defaultStyle ?? DEFAULT_STYLE_ID;
+      // The server applies no style for an id that doesn't resolve.
+      return id === DEFAULT_STYLE_ID || info().styles.some((s) => s.id === id)
+        ? id
+        : DEFAULT_STYLE_ID;
     };
 
     const remember = (state: StateOutput) =>
@@ -62,6 +94,8 @@ export default Plugin.define({
     const report = (error: unknown, style: string) => {
       if (errorType(error) === "unknown_style") {
         toast.show({ message: `Unknown output style "${style}"`, variant: "warning" });
+      } else if (errorType(error) === "subagent_session") {
+        toast.show({ message: SUBAGENT_MESSAGE, variant: "warning" });
       } else {
         toast.show({ message: errorMessage(error), variant: "error" });
       }
@@ -77,12 +111,26 @@ export default Plugin.define({
       }
     };
 
-    const setDefault = async (style: string, forNewSessions: boolean) => {
+    const follow = async (sessionID: string) => {
+      try {
+        await rpc.clearSessionStyle({ sessionID });
+        setLive((known) => ({ ...known, [sessionID]: null }));
+        const name = nameOf(info().defaultStyle ?? DEFAULT_STYLE_ID);
+        toast.show({
+          message: `Output style: follows global default (${name})`,
+          variant: "success",
+        });
+      } catch (error) {
+        report(error, FOLLOW);
+      }
+    };
+
+    const setDefault = async (style: string, withSuffix: boolean) => {
       try {
         const result = await rpc.setDefaultStyle({ style });
-        const defaultStyle = result.style === DEFAULT_STYLE ? null : result.style;
+        const defaultStyle = result.style === DEFAULT_STYLE_ID ? null : result.style;
         setInfo((current) => ({ ...current, defaultStyle }));
-        const suffix = forNewSessions ? " (default for new sessions)" : "";
+        const suffix = withSuffix ? " (default)" : "";
         toast.show({
           message: `Output style: ${nameOf(result.style)}${suffix}`,
           variant: "success",
@@ -95,7 +143,14 @@ export default Plugin.define({
     };
 
     const apply = async (sessionID: string | undefined, style: string) => {
-      if (sessionID) await setSession(sessionID, style);
+      if (style === FOLLOW) {
+        if (sessionID) await follow(sessionID);
+        else
+          toast.show({
+            message: "Open a session to follow the global default",
+            variant: "warning",
+          });
+      } else if (sessionID) await setSession(sessionID, style);
       else await setDefault(style, true);
     };
 
@@ -108,33 +163,56 @@ export default Plugin.define({
         return;
       }
       remember(state);
-      const current =
-        (sessionID ? state.sessionStyle : null) ?? state.defaultStyle ?? DEFAULT_STYLE;
-      const picked = await context.ui.dialog.select<string>({
-        title: "Output style",
-        current,
-        options: [
-          { title: "Default", value: DEFAULT_STYLE, description: "No output style" },
-          ...state.styles.map((style) => ({
-            title: style.name,
-            value: style.id,
-            description: style.description,
-            footer: style.id === state.defaultStyle ? `${style.source} (default)` : style.source,
-          })),
-        ],
-        actions: [
-          {
-            bind: "ctrl+d",
-            title: "Set as default",
-            // The open dialog keeps its labels, so reopen it to move the "(default)" marker.
-            onTrigger: async (value) => {
-              if (!(await setDefault(value, false))) return;
-              context.ui.dialog.clear();
-              await pick(sessionID);
+      // The TUI's session cache may not hold subagent sessions, so ask the server.
+      if (state.subagent) {
+        toast.show({ message: SUBAGENT_MESSAGE, variant: "warning" });
+        return;
+      }
+      const followsDefault = sessionID !== undefined && state.sessionStyle === null;
+      const current = followsDefault
+        ? FOLLOW
+        : ((sessionID ? state.sessionStyle : null) ?? state.defaultStyle ?? DEFAULT_STYLE_ID);
+      let closed = false;
+      const picked = await context.ui.dialog
+        .select<string>({
+          title: "Output style",
+          current,
+          options: [
+            { title: "Default", value: DEFAULT_STYLE_ID, description: "No output style" },
+            ...(sessionID
+              ? [
+                  {
+                    title: "Follow global default",
+                    value: FOLLOW,
+                    description: state.defaultStyle
+                      ? `Uses ${nameOf(state.defaultStyle)}`
+                      : "No global default set",
+                  },
+                ]
+              : []),
+            ...state.styles.map((style) => ({
+              title: style.name,
+              value: style.id,
+              description: style.description,
+              footer: style.id === state.defaultStyle ? `${style.source} (default)` : style.source,
+            })),
+          ],
+          actions: [
+            {
+              bind: "ctrl+d",
+              title: "Set as default",
+              // The open dialog keeps its labels, so reopen it to move the "(default)" marker.
+              onTrigger: async (value) => {
+                if (!(await setDefault(value, false)) || closed) return;
+                context.ui.dialog.clear();
+                await pick(sessionID);
+              },
             },
-          },
-        ],
-      });
+          ],
+        })
+        .finally(() => {
+          closed = true;
+        });
       if (picked !== undefined) await apply(sessionID, picked);
     };
 
@@ -151,7 +229,12 @@ export default Plugin.define({
             const arg = input?.trim();
             const route = context.ui.router.current();
             const sessionID = route.type === "session" ? route.sessionID : undefined;
-            return arg ? apply(sessionID, arg) : pick(sessionID);
+            if (sessionID && isChild(sessionID)) {
+              toast.show({ message: SUBAGENT_MESSAGE, variant: "warning" });
+              return;
+            }
+            if (!arg) return pick(sessionID);
+            return apply(sessionID, arg.toLowerCase() === "follow" ? FOLLOW : arg);
           },
         },
       ],
@@ -182,7 +265,7 @@ export default Plugin.define({
 
         const box = createElement("box");
         spread(box, { onMouseUp: () => context.keymap.dispatch(PICK_COMMAND) }, true);
-        insert(box, () => (info().sidebar ? line : null));
+        insert(box, () => (info().sidebar && !isChild(input.sessionID) ? line : null));
         return box as unknown as JSX.Element;
       },
     });

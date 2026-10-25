@@ -70,7 +70,11 @@ await tui.setup({
     toast: { show: () => {} },
   },
   keymap: { layer: (input: unknown) => layers.push(input) },
-  data: { on: () => () => {}, session: { get: () => undefined } },
+  data: {
+    on: () => () => {},
+    session: { get: () => undefined },
+    location: { default: () => ({ directory: packageDirectory }) },
+  },
   theme: { text: {} },
 });
 assert(slots.length === 1 && slots[0]?.append === "sidebar.content", "expected one sidebar slot");

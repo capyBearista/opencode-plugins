@@ -89,6 +89,20 @@ describe("configDir", () => {
 });
 
 describe("filesystem handling", () => {
+  test("reads frontmatter from a file saved with a UTF-8 BOM", async () => {
+    await put(
+      globalDir(),
+      "bom.md",
+      "\uFEFF---\nname: With BOM\nkeep-coding-instructions: false\n---\nbody",
+    );
+    const style = (await discoverStyles({ project, env })).get("bom");
+    expect(style).toMatchObject({
+      name: "With BOM",
+      prompt: "body",
+      keepCodingInstructions: false,
+    });
+  });
+
   test("follows a symlinked source directory and symlinked files", async () => {
     const real = join(root, "real");
     await put(real, "linked-dir.md", "from linked dir");

@@ -121,42 +121,42 @@ describe("applyStyle", () => {
 describe("appendReminders", () => {
   const text = "<system-reminder>r</system-reminder>";
   const make = () => [
-    { role: "user", content: [{ type: "text", text: "hello" }] },
-    { role: "assistant", content: [{ type: "text", text: "hi" }] },
-    { role: "tool", content: [{ type: "tool-result", id: "1" }] },
-    { role: "user", content: [{ type: "text", text: "again" }] },
+    { role: "user", id: "u1", content: [{ type: "text", text: "hello" }] },
+    { role: "assistant", id: "a1", content: [{ type: "text", text: "hi" }] },
+    { role: "tool", id: "t1", content: [{ type: "tool-result", id: "1" }] },
+    { role: "user", id: "syn", content: [{ type: "text", text: "harness" }] },
+    { role: "user", content: [{ type: "text", text: "no id" }] },
   ];
+  const isPrompt = (m: { id?: string }) => m.id === "u1";
 
-  test("appends a text part to every user message and returns the count", () => {
+  test("appends only to user messages the predicate accepts and returns the count", () => {
     const messages = make();
-    expect(appendReminders(messages, text)).toBe(2);
+    expect(appendReminders(messages, text, isPrompt)).toBe(1);
     expect(messages[0]?.content).toEqual([
       { type: "text", text: "hello" },
       { type: "text", text },
     ]);
-    expect(messages[3]?.content).toEqual([
-      { type: "text", text: "again" },
-      { type: "text", text },
-    ]);
+    expect(messages[3]?.content).toEqual([{ type: "text", text: "harness" }]);
+    expect(messages[4]?.content).toEqual([{ type: "text", text: "no id" }]);
   });
 
-  test("leaves assistant and tool messages untouched", () => {
+  test("leaves assistant and tool messages untouched even if accepted", () => {
     const messages = make();
-    appendReminders(messages, text);
+    appendReminders(messages, text, () => true);
     expect(messages[1]?.content).toEqual([{ type: "text", text: "hi" }]);
     expect(messages[2]?.content).toEqual([{ type: "tool-result", id: "1" }]);
   });
 
   test("is idempotent", () => {
     const messages = make();
-    appendReminders(messages, text);
-    expect(appendReminders(messages, text)).toBe(0);
+    appendReminders(messages, text, isPrompt);
+    expect(appendReminders(messages, text, isPrompt)).toBe(0);
     expect(messages[0]?.content).toHaveLength(2);
   });
 
   test("ignores string content", () => {
-    const messages = [{ role: "user", content: "plain" }];
-    expect(appendReminders(messages, text)).toBe(0);
+    const messages = [{ role: "user", id: "u1", content: "plain" }];
+    expect(appendReminders(messages, text, () => true)).toBe(0);
     expect(messages[0]?.content).toBe("plain");
   });
 });
