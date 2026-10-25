@@ -154,11 +154,9 @@ Includes Claude Code's built-in `Proactive`, `Concise`, `Explanatory`, and `Lear
 
 ## Quick Start (OpenCode V2)
 
-<!--
 <p>
   <img src=".github/assets/opencode-v2-plugin-architecture.svg" alt="OpenCode V2 plugin architecture" />
 </p>
--->
 
 Install only the plugins you want by adding their npm packages to your OpenCode configuration.
 
