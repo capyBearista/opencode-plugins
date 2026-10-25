@@ -87,13 +87,17 @@ export default Plugin.define({
           message: `Output style: ${nameOf(result.style)}${suffix}`,
           variant: "success",
         });
+        return true;
       } catch (error) {
         report(error, style);
+        return false;
       }
     };
 
-    const apply = (sessionID: string | undefined, style: string) =>
-      sessionID ? setSession(sessionID, style) : setDefault(style, true);
+    const apply = async (sessionID: string | undefined, style: string) => {
+      if (sessionID) await setSession(sessionID, style);
+      else await setDefault(style, true);
+    };
 
     const pick = async (sessionID: string | undefined) => {
       let state: StateOutput;
@@ -122,7 +126,12 @@ export default Plugin.define({
           {
             bind: "ctrl+d",
             title: "Set as default",
-            onTrigger: (value) => setDefault(value, false),
+            // The open dialog keeps its labels, so reopen it to move the "(default)" marker.
+            onTrigger: async (value) => {
+              if (!(await setDefault(value, false))) return;
+              context.ui.dialog.clear();
+              await pick(sessionID);
+            },
           },
         ],
       });

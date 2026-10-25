@@ -58,18 +58,24 @@ function createHarness(
     if (!found) throw { type: "unknown_style", message: `unknown ${style}`, data: { style } };
     return found.id;
   };
+  let defaultStyle = state.defaultStyle;
   const rpc = {
     state: mock(async (_input: unknown) => {
       if (options.stateError) throw options.stateError;
-      return state;
+      return { ...state, defaultStyle };
     }),
     setSessionStyle: mock(async (input: { sessionID: string; style: string }) => ({
       style: resolve(input.style),
     })),
-    setDefaultStyle: mock(async (input: { style: string }) => ({ style: resolve(input.style) })),
+    setDefaultStyle: mock(async (input: { style: string }) => {
+      const style = resolve(input.style);
+      defaultStyle = style === "default" ? null : style;
+      return { style };
+    }),
   };
   const toast = mock((_toast: { message: string; variant?: string }) => {});
   const dispatch = mock((_id: string) => {});
+  const clear = mock(() => {});
   const context = {
     client: { rpc: () => rpc },
     keymap: { layer: (factory: () => Layer) => layers.push(factory), dispatch },
@@ -80,6 +86,7 @@ function createHarness(
           selects.push(select);
           return options.picked;
         },
+        clear,
       },
       toast: { show: toast },
       slot: (claim: SlotClaim) => {
@@ -101,6 +108,7 @@ function createHarness(
     rpc,
     toast,
     dispatch,
+    clear,
     selects,
     slots,
     unsubscribe,
@@ -300,6 +308,26 @@ describe("picker", () => {
     expect(h.rpc.setDefaultStyle).toHaveBeenCalledWith({ style: "concise" });
     expect(h.rpc.setSessionStyle).not.toHaveBeenCalled();
     expect(h.toast).toHaveBeenCalledWith({ message: "Output style: Concise", variant: "success" });
+
+    // The picker reopens so the "(default)" marker moves to the new default.
+    expect(h.clear).toHaveBeenCalledTimes(1);
+    expect(h.selects).toHaveLength(2);
+    const concise = h.selects[1]?.options.find((option) => option.value === "concise");
+    expect(concise?.footer).toBe("built-in (default)");
+  });
+
+  test("a failed ctrl+d save keeps the picker as it is", async () => {
+    const h = createHarness();
+    await h.start();
+    await h.command().run();
+    await h.selects[0]?.actions?.[0]?.onTrigger("nope");
+
+    expect(h.toast).toHaveBeenCalledWith({
+      message: 'Unknown output style "nope"',
+      variant: "warning",
+    });
+    expect(h.clear).not.toHaveBeenCalled();
+    expect(h.selects).toHaveLength(1);
   });
 
   test("a failed state fetch toasts the error and opens no dialog", async () => {
