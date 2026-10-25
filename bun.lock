@@ -73,7 +73,7 @@
     },
     "packages/opencode-output-styles": {
       "name": "@capybearista/opencode-output-styles",
-      "version": "1.0.2",
+      "version": "2.0.0",
       "dependencies": {
         "yaml": "^2.9.1",
       },
