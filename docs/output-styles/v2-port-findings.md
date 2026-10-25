@@ -68,6 +68,10 @@ Anything a plugin pushes comes after these.
 - Callbacks run in registration order (`core/src/plugin/hooks.ts:88-94`). Built-in plugins register first, so an external plugin's hook sees `system[0]` after `optimize` has rewritten or extended it. With a `claude*` model id, `system[0]` grew by the 302-character `# Code comments` append before our hook ran.
 - Appending a text part to each user message in the hook kept requests byte-identical in prefix across turns (with `cache_control` ignored).
 - Tool results did not show up as plain user text messages. Only real user prompts got the appended part.
+- Real prompts are not the only `role: "user"` messages, though (`core/src/session/runner/to-llm-message.ts:240-310`, source).
+  - Synthetic messages (plan-mode and agent-switch reminders, nested `AGENTS.md`), skill text, user shell output, compaction summaries and location switches are all sent as `role: "user"`.
+  - Each carries its session message `id`, and harness-spliced messages such as plan mode's carry none.
+  - To target only prompts, match ids against `ctx.session.context({ sessionID })` entries with `type: "user"`. That call exists from 2.0.23 and returned in about 6 ms on a small session (verified).
 - `ctx.agent.get({ agentID }).data.system` tells you whether the agent has its own prompt. Built-in `optimize` uses the same check.
 - Base-prompt sections differ by model family (`core/src/plugin/system-prompt/*.txt`, source):
   - Default: `# Harness`, `# Communication`, `# Working in codebases`.
@@ -89,6 +93,11 @@ Anything a plugin pushes comes after these.
 - That TUI half receives `context.options = {}`. Options exist only on the server, so a server-side RPC is the way to hand them over.
 - RPC calls go through `context.client.rpc(Def)` in the TUI, or `POST /api/rpc/:id/:method` with body `{ "input": … }` over HTTP.
 - Every call needs an object input. A missing input fails with `rpc.invalid_input: Expected object`, and on the TUI client that surfaced as `[object Object]`.
+- **RPC calls are routed by location.** A shared server runs one plugin instance per project location, and a call without `location` reaches the server's default project.
+  - A TUI viewing another project then reads and writes that default project's styles (verified).
+  - Pass `{ location }` as the second argument. Use the session's own `location` for session-scoped calls, else `context.location ?? context.data.location.default()`. That fallback is the pattern OpenCode's own TUI plugins use.
+  - `session.create` takes its location from the body `location`, not from the `x-opencode-directory` header (verified).
+- **Viewing a subagent session keeps the route on the parent.** `ui.router.current()` reports the parent's `sessionID`, so a command run there targets the parent (verified with a probe). The child view has no prompt box and no sidebar.
 - Sidebar click pattern: an element in `ui.slot({ append: "sidebar.content" })` with `onMouseUp → context.keymap.dispatch("<command id>")` runs the plugin's own command. The TUI's home footer does the same.
 - `dialog.select` `actions` stay open when triggered.
 

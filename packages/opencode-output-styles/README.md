@@ -88,7 +88,9 @@ Remove the entry from `"plugins"`. Session choices live in session metadata and 
 | `/output-style` or click the sidebar line | Opens the picker. Enter applies the style to this session; `ctrl+d` makes it the default for new sessions. |
 | `/output-style <name>` | Applies a style to this session by id or name (case-insensitive). |
 | `/output-style default` | Turns styles off for this session, even if a default is set. |
+| `/output-style follow` | Clears this session's own style so it follows the global default again. Also the picker's "Follow global default" entry. |
 | From the home screen | The picker and `/output-style <name>` set the default instead. |
+| Subagent sessions | Get no style. While you view one, the command and picker act on its parent session. |
 
 A switch applies from your next message.
 

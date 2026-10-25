@@ -46,6 +46,8 @@ bun --filter @capybearista/opencode-output-styles test && \
 - **Subagent sessions inherit metadata.** Skip sessions with `parentID`.
 - **The TUI's cached session does not re-render on metadata changes.** The sidebar is driven by a signal fed from `session.metadata.updated`.
 - **RPC inputs must be objects.** Pass `{}` when a method takes nothing.
+- **Every TUI RPC call carries a `location`.** The shared server runs one plugin instance per project; use the session's location for session calls, else the TUI's.
+- **Only real prompts get the reminder.** Synthetic, skill, shell and compaction messages are also `role: "user"`; the hook matches ids against `session.context` entries with `type: "user"`.
 - **The `context` hook must never throw into the user's request.** Failures are swallowed.
 - **Built-in prompts come from Claude Code 2.1.310.** They were extracted from the binary bytes (`strings` drops short lines). See [the findings doc](../../docs/output-styles/v2-port-findings.md) before refreshing them.
 
