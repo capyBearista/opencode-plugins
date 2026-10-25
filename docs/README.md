@@ -13,6 +13,7 @@ The root [README](../README.md) and package READMEs describe current installatio
 | [opencode-v2-plugin-runtime.md](./opencode-v2-plugin-runtime.md) | Plugin-author reference | What a V2 plugin can rely on: process model, `context.client` and options, the host-served SDK (and why server plugins keep a required peer before OpenCode 2.0.25), the `cli.json` tuple trap, entry resolution, and OpenTUI test setup. Verified live or source-checked against OpenCode 2.1.4. |
 | [opencode-plugin-ipc-and-os-patterns.md](./opencode-plugin-ipc-and-os-patterns.md) | Plugin-author reference | IPC and cross-platform patterns learned from building these plugins, with V1 and V2 startup examples. |
 | [output-styles/claude-output-styles.md](./output-styles/claude-output-styles.md) | Upstream reference | Snapshot of Claude Code output-style docs. Background for the output-styles plugin, not a statement of this repo's behavior. |
+| [output-styles/v2-port-findings.md](./output-styles/v2-port-findings.md) | Package note | What we verified about Claude Code output styles and OpenCode V2 while porting output-styles. |
 | [ram-monitor/post-mortem-v1.0.0.md](./ram-monitor/post-mortem-v1.0.0.md) | Historical package note | What broke and what fixed it during ram-monitor 1.0.0 stabilization (V1; the config and session-discovery approach it describes was replaced in 2.1.0). |
 | [adversarial-review/codex-comparison.md](./adversarial-review/codex-comparison.md) | Package note | Prompt-structure comparison between the official Codex plugin and this repo's review plugin. |
 

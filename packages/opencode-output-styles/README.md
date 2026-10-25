@@ -1,6 +1,6 @@
 # opencode-output-styles
 
-<p align="center">Reusable response styles for OpenCode sessions</p>
+<p align="center">Claude Code-style output styles for OpenCode sessions</p>
 <p align="center">
   <a href="https://www.npmjs.com/package/@capybearista/opencode-output-styles"><img alt="npm" src="https://img.shields.io/npm/v/@capybearista/opencode-output-styles?style=flat-square&color=8d60e6" /></a>
   <a href="https://www.npmjs.com/package/@capybearista/opencode-output-styles"><img alt="npm" src="https://img.shields.io/npm/dm/@capybearista/opencode-output-styles?style=flat-square&color=6067e6" /></a>
@@ -10,136 +10,139 @@
 
 ---
 
-> [!IMPORTANT] V2
-> A V2 port is not planned at this time. The V1 output-style capability remains enabled.
-
 ## Why?
 
-> I often find myself telling my agent to adopt an explanatory style or focus on teaching rather than implementing. I really needed a way to add persistent voice, review stance, or response structure without re-prompting every turn. This plugin keeps a chosen style active and appends it to the system prompt so response formatting stays consistent across the session.
+> I often find myself telling my agent to adopt an explanatory style or focus on teaching rather than implementing. I really needed a way to add persistent voice, review stance, or response structure without re-prompting every turn. This plugin keeps a chosen style active for the whole session, the way [Claude Code's output styles](https://code.claude.com/docs/en/output-styles) do.
 
 ## Philosophy: Extending OpenCode
 
-OpenCode is designed to be extensible through plugins. This plugin takes the narrowest useful path: it does not rewrite the base OpenCode prompt, and it does not try to change model behavior outside the style block. It simply discovers styles, persists the active selection, and injects the chosen style wrapped in `<output-style>` tags into the system prompt.
+An output style is a set of instructions that applies to every response in a session. The plugin keeps OpenCode's own prompt and adds the style next to it. It does not touch an agent's own prompt.
+
+- **Durable:** the style is added to the system prompt on every model request, including the steps after tool calls.
+- **Reminded:** a short `<system-reminder>` naming the active style is attached to each of your messages in the request. It is never saved to the session.
+- **Primary agents only:** subagents run their own prompts and get no style, as in Claude Code.
 
 ### Architecture
 
 ```text
 src/
-├── index.ts           # Plugin entry point
-├── styles.ts          # Style parsing, discovery, built-in loading
-└── built-in-styles/   # Shipped output styles
-    ├── explanatory.md
-    └── learning.md
+├── server.ts      # Server entry: RPC + system-prompt hook
+├── tui.ts         # TUI entry: /output-style, picker, sidebar line
+├── rpc.ts         # Server ↔ TUI contract
+├── styles.ts      # Discovery and frontmatter parsing
+└── prompt.ts      # Prompt and reminder composition
+built-in-styles/   # Proactive, Concise, Explanatory, Learning
 ```
+
+The server owns the style files, the session choice, and the global default. The TUI asks it over RPC, because a TUI loaded this way gets no plugin options of its own.
 
 ## Features
 
-- **Built-in styles**: ships `explanatory` and `learning`, *inspired* by Claude Code.
-- **Global discovery**: reads styles from `~/.config/opencode/output-styles/`.
-- **Project-local discovery**: reads styles from `.opencode/output-styles/`.
-- **Activation**: switches the active style with `/output-style <id>`.
-- **Persistence**: keeps the active style in `.opencode/active-style.json`.
-- **Prompt injection**: injects the selected style, wrapped in `<output-style>` tags, into the system prompt.
-- **Built-in labeling**: marks built-in styles with `[Built-in]` in the style listing.
-- **Overriding**: user styles take precedence over built-in styles with the same id.
+- **Built-in styles** from Claude Code 2.1.310: Proactive, Concise, Explanatory, Learning. `default` means no style.
+- **Per-session style**, with a global default for sessions that have not picked one.
+- **`/output-style [name]`**, a picker, and a clickable `Style: <Name>` line in the sidebar.
+- **Custom styles** from your global config dir and the project, which can override built-ins.
 
 ## Install
 
-### OpenCode V1
+### OpenCode V2
 
-Add it under the `"plugin"` key in `opencode.json(c)`:
+Requires OpenCode **2.0.23** or later. Add one entry under `"plugins"` in `opencode.json(c)`:
 
 ```json
 {
-  "plugin": ["@capybearista/opencode-output-styles@latest"]
+  "plugins": ["@capybearista/opencode-output-styles@latest"]
 }
 ```
 
-Server entry only, so `tui.json(c)` needs no entry.
+The TUI half loads automatically, so `cli.json` needs no entry. To hide the sidebar line, use the object form:
 
-See the [V1 plugin guide](../../docs/v1-plugins.md) for details.
+```json
+{
+  "plugins": [
+    { "package": "@capybearista/opencode-output-styles@latest", "options": { "sidebar": false } }
+  ]
+}
+```
+
+### OpenCode V1
+
+Stay on the 1.x line, which is frozen at 1.0.2:
+
+```json
+{
+  "plugin": ["@capybearista/opencode-output-styles@1"]
+}
+```
+
+See the [V1 plugin guide](../../docs/v1-plugins.md).
 
 ### Uninstall
 
-Remove the plugin from `"plugin(s)"` from the respective config files they were added to.
+Remove the entry from `"plugins"`. Session choices live in session metadata and the default in OpenCode's plugin storage, so nothing is left in your project.
 
 ## Usage
 
+| Action | What it does |
+| --- | --- |
+| `/output-style` or click the sidebar line | Opens the picker. Enter applies the style to this session; `ctrl+d` makes it the default for new sessions. |
+| `/output-style <name>` | Applies a style to this session by id or name (case-insensitive). |
+| `/output-style default` | Turns styles off for this session, even if a default is set. |
+| `/output-style follow` | Clears this session's own style so it follows the global default again. Also the picker's "Follow global default" entry. |
+| From the home screen | The picker and `/output-style <name>` set the default instead. |
+| Subagent sessions | Get no style. While you view one, the command and picker act on its parent session. |
+
+A switch applies from your next message.
+
 ### Built-in styles
 
-The plugin ships with two built-in styles that are available immediately:
-
-| Id | Name | Description |
-| --- | --- | --- |
-| `explanatory` | explanatory | Provides educational insights while helping with tasks |
-| `learning` | learning | Interactive learning mode for CS students |
-
-Use them like any other style:
-
-```text
-/output-style explanatory
-/output-style learning
-```
+| Id | What changes |
+| --- | --- |
+| `proactive` | Starts work right away and makes reasonable assumptions instead of asking about routine decisions. Still checks before deleting data or touching shared or production systems. |
+| `concise` | Leads with the result and leaves out preamble, narration, and recaps. |
+| `explanatory` | Adds short `★ Insight` blocks explaining the choices behind the code. |
+| `learning` | Adds Insights and leaves small `TODO(human)` pieces for you to write. |
 
 ### Custom styles
 
-Create a markdown file in `~/.config/opencode/output-styles/` or `<project-root>/.opencode/output-styles/` with YAML frontmatter:
+A style is a markdown file: frontmatter, then the instructions. Put it in either directory:
+
+- Global: `~/.config/opencode/output-styles/` (or `$XDG_CONFIG_HOME/opencode/output-styles/`, or `$OPENCODE_CONFIG_DIR/output-styles/`)
+- Project: `<project-root>/.opencode/output-styles/`
 
 ```md
 ---
-name: "Pirate"
-description: "Talks like a pirate"
+name: Diagrams first
+description: Lead every explanation with a diagram
 ---
-# Pirate
-You must respond like a swashbuckling pirate.
+
+When explaining code, architecture, or data flow, start with a Mermaid diagram, then explain in prose.
 ```
+
+The id is the filename without `.md`. Only files directly in those directories count, and symlinked files and directories are followed. Changes apply on the next message, with no restart.
+
+| Frontmatter | Default | Description |
+| --- | --- | --- |
+| `name` | filename | Shown in the picker and sidebar. |
+| `description` | empty | Shown in the picker. |
+| `keep-coding-instructions` | `true` | Set to `false` for a style that isn't about coding. It drops the `# Working in codebases` and `# Code comments` sections from OpenCode's base prompt. It never changes an agent's own prompt. |
+| `turn-reminder` | none | Text for the per-message reminder. Without it, the reminder says "Remember to follow the specific guidelines for this style." |
 
 ### Overriding built-in styles
 
-To replace a built-in style with your own version, create a markdown file with the **same id** (same filename without `.md`) in one of the user style directories. Your version takes precedence over the built-in.
-
-For example, to override `explanatory` with a custom version, create `~/.config/opencode/output-styles/explanatory.md` or `<project-root>/.opencode/output-styles/explanatory.md`.
-
-### Commands
-
-| Command | Description |
-| --- | --- |
-| `/output-style` | Lists all available styles (built-in and user) |
-| `/output-style <id>` | Activates the specified style |
-| `/output-style clear` | Removes the active style |
-
-### Contract
-
-Style files support the following frontmatter:
-
-| Property | Type | Description |
-| --- | --- | --- |
-| `name` | `string` | Display name shown in the `/output-style` list. Defaults to the filename. |
-| `description` | `string` | Short summary shown in the `/output-style` list. Defaults to empty. |
-
-The active style's body is wrapped in `<output-style>` tags and appended to the system prompt:
-
-```text
-<output-style>
-...style body...
-</output-style>
-```
-
-The plugin also writes one project-local state file:
-
-| File | Purpose |
-| --- | --- |
-| `.opencode/active-style.json` | Stores the currently selected style id for the project. |
+A file with the same id replaces the built-in completely: project over global over built-in. Fields are not merged, so to keep a built-in's reminder, copy its `turn-reminder` line into your file.
 
 ## Configuration
 
-This plugin requires no manual configuration.
+| Option | Default | Description |
+| --- | --- | --- |
+| `sidebar` | `true` | Show the `Style: <Name>` line in the session sidebar. |
 
 ## Troubleshooting
 
-- If `/output-style` shows no results, confirm your style files end in `.md` and include YAML frontmatter.
-- If two styles share the same filename, the project-local version takes precedence over the global one, which takes precedence over the built-in.
-- The `/output-style` command is handled by the plugin directly; there is no command file to edit.
+- **No sidebar line and an "Output styles: server plugin not reachable" toast:** the package is in `cli.json` instead of `opencode.json(c)`. Move it.
+- **A style does nothing:** check the file ends in `.md`, sits directly in one of the style directories, and has instructions after the frontmatter.
+- **The plugin fails to load on an older OpenCode:** upgrade to 2.0.23 or later.
 
 ## Contributing
 
@@ -147,10 +150,10 @@ This package lives in the `opencode-plugins` monorepo.
 
 See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
 
-- From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`,`bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test` as the workspace check.
-- For a focused run, `bun test` is supported from this package directory; its tests include the real local-directory resolver regression.
+- From the monorepo root, run `bun run build`, `bun run typecheck`, `bun run lint`, and `bun run test`. Do not use bare root `bun test` as the workspace check.
+- From this package directory, `bun test` runs the unit tests and `bun run smoke` checks the built package.
 - `bun run check` writes Biome changes; use it only when formatting changes are intended.
-- Prefer small, direct changes.
+- The built-in styles are Claude Code's prompts. When refreshing them, see [the findings doc](../../docs/output-styles/v2-port-findings.md) for how they were extracted.
 
 Please open an issue or check for existing ones before creating a pull request.
 
