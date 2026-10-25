@@ -1,6 +1,6 @@
 # OpenCode V2 Plugin Runtime Notes
 
-What a V2 plugin can rely on at runtime: which process it runs in, where options come from, how entries resolve, and how OpenCode's own processes are laid out. Written while porting `opencode-ram-monitor` to OpenCode 2.1.
+What a V2 plugin can rely on at runtime: which process it runs in, where options come from, how entries resolve, and how OpenCode's own processes are laid out. Written while porting `opencode-ram-monitor` to OpenCode 2.1, with the combined server + TUI section added from the `opencode-output-styles` port.
 
 **Sources.** File references point at the OpenCode `v2.1.4` tag (`anomalyco/opencode`). Each claim is marked:
 

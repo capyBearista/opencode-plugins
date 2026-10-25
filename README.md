@@ -146,7 +146,7 @@ Extend OpenCode's agent and command discovery to the `.agents/` directory conven
 
 Switch between persistent response styles without repeating the same instructions throughout a conversation.
 
-Includes Claude Code's built-in `Proactive`, `Concise`, `Explanatory`, and `Learning` styles, plus custom project-local and global styles. Use `/output-style`, the picker, or the clickable sidebar line to switch; each session keeps its own style, with a global default.
+Includes Claude Code's built-in `Proactive`, `Concise`, `Explanatory`, and `Learning` styles, plus custom project-local and global styles. Use `/output-style`, the picker, or the clickable sidebar line to switch; each session keeps its own style, with a global setting for the rest.
 
 ## Quick Start (OpenCode V2)
 

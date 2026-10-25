@@ -29,6 +29,24 @@ bun run build && bun run typecheck && bun run lint && bun run test
 
 `bun run check` runs `biome check --write` in every package, so it edits files. `bun run lint` checks release tooling and packages without writing fixes. `bun run typecheck` likewise covers both surfaces.
 
+## Testing in OpenCode
+
+Unit tests and smoke scripts don't run a real OpenCode. To try a change in your own setup before it is released:
+
+1. Run `bun run build`.
+2. In your config, replace the package's npm entry with the absolute path to its directory. Server plugins go in `opencode.json(c)`; TUI-only plugins go in `cli.json`.
+
+   ```json
+   {
+     "plugins": ["/path/to/opencode-plugins/packages/opencode-output-styles"]
+   }
+   ```
+
+3. Run `opencode service restart`, then reopen the TUI. Do the same after every rebuild.
+4. When you're done, put the npm entry back and run `opencode plugin update`.
+
+Each V2 package ships root `server.js` / `tui.js` files that re-export `dist/`, which is what a directory entry loads. A combined server + TUI package such as output-styles loads both halves from the one entry.
+
 ## Changesets and releases
 
 For changes intended for the next package release, add a changeset with `bun run changeset` and select the bump. Packages are independently versioned.

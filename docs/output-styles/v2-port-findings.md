@@ -1,6 +1,6 @@
 # Output Styles V2 Port: Findings
 
-What we verified about Claude Code output styles and OpenCode V2 while porting `opencode-output-styles` to 2.0.0. Use it to re-check behavior after an OpenCode or Claude Code upgrade.
+What we verified about Claude Code output styles and OpenCode V2 while porting `opencode-output-styles` to 2.0.0 and refining it in 2.1.0. Use it to re-check behavior after an OpenCode or Claude Code upgrade.
 
 **Sources.** Each claim is marked:
 
@@ -90,6 +90,7 @@ Anything a plugin pushes comes after these.
 ### Server ↔ TUI (verified)
 
 - A package listed only in `opencode.jsonc` gets its `./tui` entry loaded by the TUI automatically (`features.tui`).
+- An absolute path to a built package directory in `plugins` loads both halves the same way (verified on 2.1.4).
 - That TUI half receives `context.options = {}`. Options exist only on the server, so a server-side RPC is the way to hand them over.
 - RPC calls go through `context.client.rpc(Def)` in the TUI, or `POST /api/rpc/:id/:method` with body `{ "input": … }` over HTTP.
 - Every call needs an object input. A missing input fails with `rpc.invalid_input: Expected object`, and on the TUI client that surfaced as `[object Object]`.
@@ -103,7 +104,7 @@ Anything a plugin pushes comes after these.
 
 ### Versions and packaging (verified)
 
-- `dialog.select` `actions` first appear in **2.0.23**. Everything else the plugin needs exists from 2.0.0, and `session.update` gained `metadata` in 2.0.15.
+- The 2.0.23 floor comes from `ctx.session.context`, which the reminder needs to find real prompts (see above). `session.update` gained `metadata` in 2.0.15, and everything else the plugin uses exists from 2.0.0. `dialog.select` `actions` also first appear in 2.0.23, but the plugin stopped using them in 2.1.0.
 - Up to 2.0.24 the **server** does not serve `@opencode/plugin` as a virtual module. A server entry fails with `Cannot find package '@opencode/plugin'` unless the SDK is a **required** peer, which npm then installs.
 - A required peer also works on 2.1.4, where the host module wins.
 - Plugin installs use npm config through `@npmcli/config`, so `NPM_CONFIG_USERCONFIG` overrides `~/.npmrc` when testing against a local registry.
@@ -122,7 +123,7 @@ Anything a plugin pushes comes after these.
 
 ## Re-verifying
 
-The sandbox recipe:
+For a quick check in your own setup, use [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode). To re-check the claims above in isolation, use the sandbox recipe:
 
 - Install `@opencode/cli-linux-x64@<version>` with `--ignore-scripts` and point `HOME` and every `XDG_*` variable at a scratch dir.
 - Set `NPM_CONFIG_USERCONFIG` to a scratch `.npmrc` that points at a local verdaccio.

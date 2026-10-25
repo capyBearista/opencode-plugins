@@ -85,14 +85,16 @@ Remove the entry from `"plugins"`. Session choices live in session metadata and 
 
 | Action | What it does |
 | --- | --- |
-| `/output-style` or click the sidebar line | Opens the picker for this session. |
+| `/output-style`, "Output style" in the command palette, or click the sidebar line | Opens the picker for this session. |
 | `/output-style <name>` | Applies a style to this session by id or name (case-insensitive). |
 | `/output-style none` | Turns styles off for this session, even if a global style is set. Also the picker's "None" entry. |
 | `/output-style global` | Clears this session's own choice so it uses the global setting again. Also the picker's "Use global" entry. |
-| From the home screen | The picker, `/output-style <name>` and `/output-style none` change the global setting instead. |
+| From the home screen | The picker, `/output-style <name>` and `/output-style none` change the global setting instead. `/output-style global` needs a session and does nothing here. |
 | Subagent sessions | Get no style. While you view one, the command and picker act on its parent session. |
 
 A switch applies from your next message.
+
+`none` and `global` are command words, so a custom style whose id or name is `none` or `global` can only be picked from the picker.
 
 ### Built-in styles
 
@@ -152,6 +154,7 @@ See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull r
 
 - From the monorepo root, run `bun run build`, `bun run typecheck`, `bun run lint`, and `bun run test`. Do not use bare root `bun test` as the workspace check.
 - From this package directory, `bun test` runs the unit tests and `bun run smoke` checks the built package.
+- To try a change in your own OpenCode, point `plugins` at this directory; see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
 - `bun run check` writes Biome changes; use it only when formatting changes are intended.
 - The built-in styles are Claude Code's prompts. When refreshing them, see [the findings doc](../../docs/output-styles/v2-port-findings.md) for how they were extracted.
 
