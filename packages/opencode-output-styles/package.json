@@ -1,6 +1,6 @@
 {
   "name": "@capybearista/opencode-output-styles",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "description": "Claude Code-style output styles for OpenCode: pick a response style per session from a picker, slash command, or the sidebar.",
   "type": "module",
   "license": "MPL-2.0",
