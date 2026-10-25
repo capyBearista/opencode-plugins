@@ -113,7 +113,8 @@ Anything a plugin pushes comes after these.
 
 | Topic | Claude Code | This plugin |
 |---|---|---|
-| Where the choice lives | `outputStyle` in settings files | Per-session `metadata.outputStyle`, plus a global default in plugin storage |
+| Where the choice lives | `outputStyle` in settings files | Per-session `metadata.outputStyle`, plus a global setting in plugin storage, changed from the home screen |
+| Name for "no style" | `Default` | `None` ("default" was ambiguous next to the global setting) |
 | Reminder timing | Every user prompt and after every tool batch, persisted | Appended to every user message in each outgoing request, not persisted |
 | Custom reminder | Not possible | Optional `turn-reminder` frontmatter |
 | `keep-coding-instructions: false` | Drops Claude Code's software-engineering section | Drops `# Working in codebases` and `# Code comments` from OpenCode's base prompt, never from an agent's own prompt |

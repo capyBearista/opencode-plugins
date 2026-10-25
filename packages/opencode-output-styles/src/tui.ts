@@ -6,7 +6,7 @@ import { DEFAULT_STYLE_ID, METADATA_KEY, OutputStylesRpc, type StateOutput } fro
 
 const PICK_COMMAND = "output-styles.pick";
 // Style ids are filenames, which can't contain "/", so this never collides with one.
-const FOLLOW = "/follow";
+const GLOBAL = "/global";
 const SUBAGENT_MESSAGE = "Subagent sessions don't use output styles";
 
 interface Info {
@@ -73,7 +73,7 @@ export default Plugin.define({
     const isChild = (sessionID: string) => Boolean(context.data.session.get(sessionID)?.parentID);
 
     const nameOf = (id: string) =>
-      id === DEFAULT_STYLE_ID ? "Default" : (info().styles.find((s) => s.id === id)?.name ?? id);
+      id === DEFAULT_STYLE_ID ? "None" : (info().styles.find((s) => s.id === id)?.name ?? id);
 
     const effective = (sessionID: string) => {
       const known = live();
@@ -111,47 +111,42 @@ export default Plugin.define({
       }
     };
 
-    const follow = async (sessionID: string) => {
+    const useGlobal = async (sessionID: string) => {
       try {
         await rpc.clearSessionStyle({ sessionID });
         setLive((known) => ({ ...known, [sessionID]: null }));
         const name = nameOf(info().defaultStyle ?? DEFAULT_STYLE_ID);
-        toast.show({
-          message: `Output style: follows global default (${name})`,
-          variant: "success",
-        });
+        toast.show({ message: `Output style: uses global (${name})`, variant: "success" });
       } catch (error) {
-        report(error, FOLLOW);
+        report(error, GLOBAL);
       }
     };
 
-    const setDefault = async (style: string, withSuffix: boolean) => {
+    const setGlobal = async (style: string) => {
       try {
         const result = await rpc.setDefaultStyle({ style });
         const defaultStyle = result.style === DEFAULT_STYLE_ID ? null : result.style;
         setInfo((current) => ({ ...current, defaultStyle }));
-        const suffix = withSuffix ? " (default)" : "";
         toast.show({
-          message: `Output style: ${nameOf(result.style)}${suffix}`,
+          message: `Global output style: ${nameOf(result.style)}`,
           variant: "success",
         });
-        return true;
       } catch (error) {
         report(error, style);
-        return false;
       }
     };
 
+    // In a session the picker and command edit that session; on the home screen, the global setting.
     const apply = async (sessionID: string | undefined, style: string) => {
-      if (style === FOLLOW) {
-        if (sessionID) await follow(sessionID);
+      if (style === GLOBAL) {
+        if (sessionID) await useGlobal(sessionID);
         else
           toast.show({
-            message: "Open a session to follow the global default",
+            message: "Open a session to use the global output style",
             variant: "warning",
           });
       } else if (sessionID) await setSession(sessionID, style);
-      else await setDefault(style, true);
+      else await setGlobal(style);
     };
 
     const pick = async (sessionID: string | undefined) => {
@@ -168,51 +163,32 @@ export default Plugin.define({
         toast.show({ message: SUBAGENT_MESSAGE, variant: "warning" });
         return;
       }
-      const followsDefault = sessionID !== undefined && state.sessionStyle === null;
-      const current = followsDefault
-        ? FOLLOW
-        : ((sessionID ? state.sessionStyle : null) ?? state.defaultStyle ?? DEFAULT_STYLE_ID);
-      let closed = false;
-      const picked = await context.ui.dialog
-        .select<string>({
-          title: "Output style",
-          current,
-          options: [
-            { title: "Default", value: DEFAULT_STYLE_ID, description: "No output style" },
-            ...(sessionID
-              ? [
-                  {
-                    title: "Follow global default",
-                    value: FOLLOW,
-                    description: state.defaultStyle
-                      ? `Uses ${nameOf(state.defaultStyle)}`
-                      : "No global default set",
-                  },
-                ]
-              : []),
-            ...state.styles.map((style) => ({
-              title: style.name,
-              value: style.id,
-              description: style.description,
-              footer: style.id === state.defaultStyle ? `${style.source} (default)` : style.source,
-            })),
-          ],
-          actions: [
-            {
-              bind: "ctrl+d",
-              title: "Set as default",
-              // The open dialog keeps its labels, so reopen it to move the "(default)" marker.
-              onTrigger: async (value) => {
-                if (!(await setDefault(value, false)) || closed) return;
-                context.ui.dialog.clear();
-                await pick(sessionID);
-              },
-            },
-          ],
-        })
-        .finally(() => {
-          closed = true;
-        });
+      const current = sessionID
+        ? (state.sessionStyle ?? GLOBAL)
+        : (state.defaultStyle ?? DEFAULT_STYLE_ID);
+      const picked = await context.ui.dialog.select<string>({
+        title: sessionID ? "Output style · this session" : "Output style · global",
+        current,
+        options: [
+          { title: "None", value: DEFAULT_STYLE_ID, description: "No output style" },
+          ...(sessionID
+            ? [
+                {
+                  title: `Use global (${nameOf(state.defaultStyle ?? DEFAULT_STYLE_ID)})`,
+                  value: GLOBAL,
+                  description: "Follow the global setting",
+                },
+              ]
+            : []),
+          ...state.styles.map((style) => ({
+            title: style.name,
+            value: style.id,
+            description: style.description,
+            footer:
+              style.id === state.defaultStyle ? `${style.source} · global setting` : style.source,
+          })),
+        ],
+      });
       if (picked !== undefined) await apply(sessionID, picked);
     };
 
@@ -234,7 +210,11 @@ export default Plugin.define({
               return;
             }
             if (!arg) return pick(sessionID);
-            return apply(sessionID, arg.toLowerCase() === "follow" ? FOLLOW : arg);
+            const word = arg.toLowerCase();
+            return apply(
+              sessionID,
+              word === "global" ? GLOBAL : word === "none" ? DEFAULT_STYLE_ID : arg,
+            );
           },
         },
       ],
@@ -261,7 +241,7 @@ export default Plugin.define({
           },
           true,
         );
-        insert(line, () => `Style: ${nameOf(effective(input.sessionID))}`);
+        insert(line, () => `Output Style: ${nameOf(effective(input.sessionID))}`);
 
         const box = createElement("box");
         spread(box, { onMouseUp: () => context.keymap.dispatch(PICK_COMMAND) }, true);

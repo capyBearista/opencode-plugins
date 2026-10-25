@@ -34,13 +34,13 @@ src/
 built-in-styles/   # Proactive, Concise, Explanatory, Learning
 ```
 
-The server owns the style files, the session choice, and the global default. The TUI asks it over RPC, because a TUI loaded this way gets no plugin options of its own.
+The server owns the style files, the session choice, and the global setting. The TUI asks it over RPC, because a TUI loaded this way gets no plugin options of its own.
 
 ## Features
 
-- **Built-in styles** from Claude Code 2.1.310: Proactive, Concise, Explanatory, Learning. `default` means no style.
-- **Per-session style**, with a global default for sessions that have not picked one.
-- **`/output-style [name]`**, a picker, and a clickable `Style: <Name>` line in the sidebar.
+- **Built-in styles** from Claude Code 2.1.310: Proactive, Concise, Explanatory, Learning. `None` means no style (Claude Code calls it "Default").
+- **Per-session style**, with a global setting for sessions that have not picked one.
+- **`/output-style [name]`**, a picker, and a clickable `Output Style: <Name>` line in the sidebar.
 - **Custom styles** from your global config dir and the project, which can override built-ins.
 
 ## Install
@@ -79,17 +79,17 @@ See the [V1 plugin guide](../../docs/v1-plugins.md).
 
 ### Uninstall
 
-Remove the entry from `"plugins"`. Session choices live in session metadata and the default in OpenCode's plugin storage, so nothing is left in your project.
+Remove the entry from `"plugins"`. Session choices live in session metadata and the global setting in OpenCode's plugin storage, so nothing is left in your project.
 
 ## Usage
 
 | Action | What it does |
 | --- | --- |
-| `/output-style` or click the sidebar line | Opens the picker. Enter applies the style to this session; `ctrl+d` makes it the default for new sessions. |
+| `/output-style` or click the sidebar line | Opens the picker for this session. |
 | `/output-style <name>` | Applies a style to this session by id or name (case-insensitive). |
-| `/output-style default` | Turns styles off for this session, even if a default is set. |
-| `/output-style follow` | Clears this session's own style so it follows the global default again. Also the picker's "Follow global default" entry. |
-| From the home screen | The picker and `/output-style <name>` set the default instead. |
+| `/output-style none` | Turns styles off for this session, even if a global style is set. Also the picker's "None" entry. |
+| `/output-style global` | Clears this session's own choice so it uses the global setting again. Also the picker's "Use global" entry. |
+| From the home screen | The picker, `/output-style <name>` and `/output-style none` change the global setting instead. |
 | Subagent sessions | Get no style. While you view one, the command and picker act on its parent session. |
 
 A switch applies from your next message.
@@ -136,7 +136,7 @@ A file with the same id replaces the built-in completely: project over global ov
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `sidebar` | `true` | Show the `Style: <Name>` line in the session sidebar. |
+| `sidebar` | `true` | Show the `Output Style: <Name>` line in the session sidebar. |
 
 ## Troubleshooting
 
