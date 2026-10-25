@@ -43,9 +43,9 @@ For the frozen loader, use `@capybearista/opencode-agents-loader@1.0.0` in the V
 
 ## Pinning and updates
 
-Pin an exact version for a fixed setup. For loader and timeline, `@latest` is V2 `2.x`; pin the exact V1 versions above (or `@1` for output-styles) for OpenCode V1. For the other package, it selects the current V1 release when first resolved. Bare names and `@latest` normalize to the same V1 target; switching between them is not an upgrade.
+Pin an exact version for a fixed setup. For every package except `opencode-agent-prompt-inheritance`, `@latest` is V2 `2.x`; on OpenCode V1, pin the versions in the table above (or `@1` for output-styles). For `opencode-agent-prompt-inheritance`, `@latest` selects the current V1 release when first resolved. Bare names and `@latest` normalize to the same V1 target; switching between them is not an upgrade.
 
-Restarting OpenCode does not fetch a newer release for an already cached target. To move an actively maintained V1 plugin to another release, stop active sessions, select a different exact version, and use `opencode plugin --force <package>@<version>` to replace the configured entry. `--force` does not refresh cached files for the same `@latest` specifier. Loader and timeline have no further V1 releases planned. Do not delete cache directories or plugin-managed files as routine update maintenance.
+Restarting OpenCode does not fetch a newer release for an already cached target. To move an actively maintained V1 plugin to another release, stop active sessions, select a different exact version, and use `opencode plugin --force <package>@<version>` to replace the configured entry. `--force` does not refresh cached files for the same `@latest` specifier. Loader, timeline, and output-styles have no further V1 releases planned. Do not delete cache directories or plugin-managed files as routine update maintenance.
 
 ## V2 boundary
 

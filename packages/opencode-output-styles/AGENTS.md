@@ -55,7 +55,7 @@ bun --filter @capybearista/opencode-output-styles test && \
 
 - Location: colocated. Framework: `bun test`, with `bunfig.toml` preloading `@opentui/solid/preload` for the TUI tests.
 - Tests must not read the real `HOME`: pass `env` to `discoverStyles` or set `OPENCODE_CONFIG_DIR` to a temp dir.
-- Runtime changes (hooks, RPC, TUI wiring) need a live check against a packaged build. The sandbox recipe is in the findings doc.
+- Runtime changes (hooks, RPC, TUI wiring) need a live check against a built package: point `plugins` at this directory ([Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode)). The isolated sandbox recipe is in the findings doc.
 
 ## License
 

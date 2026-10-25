@@ -1,6 +1,4 @@
-> ## Documentation Index
-> Fetch the complete documentation index at: https://code.claude.com/docs/llms.txt
-> Use this file to discover all available pages before exploring further.
+> Upstream snapshot of <https://code.claude.com/docs/en/output-styles>, taken during the output-styles 2.0.0 port against Claude Code 2.1.310 (exact date not recorded). It describes Claude Code, not this plugin; see [v2-port-findings.md](./v2-port-findings.md) for where the plugin differs.
 
 # Output styles
 
