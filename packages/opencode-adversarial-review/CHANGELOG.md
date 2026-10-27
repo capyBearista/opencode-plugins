@@ -1,5 +1,11 @@
 # @capybearista/opencode-adversarial-review
 
+## 2.0.2
+
+### Patch Changes
+
+- 9bd58a9: Create the `commands/` directory on setup when it is missing. Before, a config directory without `commands/` made setup fail and neither reviewer agent was registered.
+
 ## 2.0.1
 
 ### Patch Changes
