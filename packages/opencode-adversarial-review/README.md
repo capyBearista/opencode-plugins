@@ -88,7 +88,7 @@ Server entry only, so `tui.json(c)` needs no entry.
 
 See the [V1 plugin guide](../../docs/v1-plugins.md) for details.
 
-On setup, both command files install at `~/.config/opencode/commands/{adversarial-review.md,constructive-review.md}`. The directory **must already** exist; if a file cannot install, setup fails loudly and **neither** agent is registered.
+On setup, both command files install at `~/.config/opencode/commands/{adversarial-review.md,constructive-review.md}`. A missing `commands/` directory is created; the config directory itself must exist. If a file cannot install, setup fails loudly and **neither** agent is registered.
 
 ### Uninstall
 

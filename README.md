@@ -183,7 +183,7 @@ Add your selected server plugins to `opencode.json` or `opencode.jsonc`:
 
 **Output Styles** is a server + TUI plugin that needs OpenCode **2.0.23 or later**. This one entry is all it takes; its TUI half loads automatically, so it does not belong in `cli.json`.
 
-**Adversarial Review setup:** The target `commands/` directory must already exist and be writable before enabling the plugin. The plugin installs its two review command files there. See the [package installation guide](./packages/opencode-adversarial-review/#install).
+**Adversarial Review setup:** The plugin installs its two review command files into `commands/` in your OpenCode config directory, creating `commands/` if it is missing. See the [package installation guide](./packages/opencode-adversarial-review/#install).
 
 ### 2. TUI plugins
 

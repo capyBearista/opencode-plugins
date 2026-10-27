@@ -1823,6 +1823,37 @@ describe("@capybearista/opencode-adversarial-review", () => {
     ]);
   });
 
+  test("setup creates a missing commands directory and installs both command files", async () => {
+    const configDir = await temporaryDirectory("adversarial-review-fresh-config-");
+    const context = createTestContext();
+
+    await setupPlugin(context, configDir);
+
+    expect(await readFile(join(configDir, "commands", COMMAND_FILE_NAME), "utf8")).toBe(
+      await readFile(COMMAND_ASSET_PATH, "utf8"),
+    );
+    expect(
+      await readFile(join(configDir, "commands", CONSTRUCTIVE_REVIEW_COMMAND_FILE_NAME), "utf8"),
+    ).toBe(await readFile(CONSTRUCTIVE_REVIEW_COMMAND_ASSET_PATH, "utf8"));
+    expect([...context.agents.keys()].sort()).toEqual(
+      [REVIEWER_AGENT_ID, CONSTRUCTIVE_REVIEW_AGENT_ID].sort(),
+    );
+  });
+
+  test("a missing config directory fails setup without creating it", async () => {
+    const configDir = join(
+      await temporaryDirectory("adversarial-review-missing-config-"),
+      "opencode",
+    );
+    const context = createTestContext();
+
+    await expect(setupPlugin(context, configDir)).rejects.toThrow(
+      /Unable to install the \/adversarial-review command/,
+    );
+    await expect(stat(configDir)).rejects.toThrow();
+    expect(context.agents.size).toBe(0);
+  });
+
   test("both installed command files persist on disk after dispose", async () => {
     const context = createTestContext();
     const cleanup = await setupPlugin(context);

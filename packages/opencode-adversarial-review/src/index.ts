@@ -1,8 +1,8 @@
 import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
-import { lstat, open, readFile, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import type { Context as PluginContext } from "@opencode/plugin/promise/plugin";
 import { ADVERSARIAL_REVIEWER_SYSTEM_PROMPT, REVIEWER_SYSTEM_PROMPT } from "./prompt.js";
@@ -313,8 +313,9 @@ function warnExistingFile(commandPath: string, logWarn: (message: string) => voi
 // `wx` makes the first write atomic and refuses to replace anything already at
 // the path; the EEXIST path decides between a managed refresh (a known
 // `managed_version` stamp no newer than the shipped template) and a preserve-
-// and-warn for user-owned, unknown, or newer content. Parent-directory trust:
-// the containing `commands/` directory is assumed trustworthy. A symlinked
+// and-warn for user-owned, unknown, or newer content. A missing `commands/`
+// directory is created, but never the config directory above it. Parent-directory
+// trust: the containing `commands/` directory is assumed trustworthy. A symlinked
 // parent could redirect the write outside the config directory; the
 // no-symlink-following guarantee covers the leaf file only.
 async function installCommandFile(
@@ -336,11 +337,14 @@ async function installCommandFile(
   }
   const installFailure = (error: unknown): Error =>
     new Error(
-      `Unable to install the ${commandName} command at ${commandPath}: ${errorMessage(error)}. Create the parent directory and grant write access, then run /reload. Neither reviewer agent was registered.`,
+      `Unable to install the ${commandName} command at ${commandPath}: ${errorMessage(error)}. Check that the config directory exists and is writable, then run /reload. Neither reviewer agent was registered.`,
       { cause: error },
     );
 
   try {
+    await mkdir(dirname(commandPath)).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    });
     await writeFile(commandPath, template, { flag: "wx" });
     return;
   } catch (error) {
