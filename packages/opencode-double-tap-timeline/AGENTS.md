@@ -60,7 +60,7 @@ Package root:
 ### Core (understand these first)
 - `src/escape-detector.ts` — core state machine: `createEscapeDetector` tracks the 800ms double-tap window, applies modal and session-route guards, and exposes `handle`/`dispose` with explicit timer cleanup
 - `src/index.ts` — TUI plugin: registers global Escape key listener via `context.ui.slot({ append: "app" })`, calls `context.keymap.dispatch("session.timeline")` on double-tap, disposes detectors and slot registration on teardown
-- `tui.js` — root wrapper so a local package directory loads; the named `./tui` export alone does not resolve for an unnamed filesystem directory
+- `tui.js` — root wrapper so a local package directory loads on OpenCode before 2.2.0, which resolves directories by file name; 2.2.0 resolves a directory through the `./tui` export
 
 ### Build
 TUI plugins use a split build:
@@ -71,6 +71,7 @@ TUI plugins use a split build:
 - Do not move async startup work to module top level. TUI plugins need to stay IPC-safe during initial load.
 - Keep keyboard handling cleanup explicit so repeated hot reloads do not stack listeners.
 - Validate that the command name triggered from the key handler still matches OpenCode's timeline action.
+- Timer-first ordering at the 800ms boundary is deliberate: the exact-boundary test advances the fake clock to 800ms, runs the scheduled expiry, then delivers the key, so that press starts a new gesture. No grace window is added. Key repeat is not filtered, so holding Escape can count as two presses.
 
 ## Testing Guidelines
 
@@ -78,6 +79,7 @@ TUI plugins use a split build:
 - Framework: bun test
 - Running Tests: `bun test`
 - Runtime smoke: verify the built TUI entrypoint still loads via the `./tui` export without JSX/runtime regressions
+- Coverage: unit tests cover the detector, and the scoped checks include the real local-directory resolver regression without starting a provider session. In one isolated OpenCode TUI, human verification confirmed that double-Escape opens the timeline, a single Escape keeps native behavior, the modal-close path does not seed an unintended gesture, and the timeline action executes.
 
 ## License
 

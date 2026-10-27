@@ -49,6 +49,6 @@ Restarting OpenCode does not fetch a newer release for an already cached target.
 
 ## V2 boundary
 
-The five V2 ports use the plural `"plugins"` key: loader, adversarial-review, and output-styles (server + TUI, one entry; needs OpenCode 2.2.0+; its TUI half loads automatically) belong in server `opencode.json`; timeline and ram-monitor belong in TUI `cli.json` (ram-monitor was a dual server+TUI plugin through `2.0.x` and is TUI-only from `2.1.0`). Local directory loading uses `server.js` and `tui.js`, respectively. All five are published as `2.x` on `latest`.
+The five V2 ports use the plural `"plugins"` key: loader, adversarial-review, and output-styles (server + TUI, one entry; its TUI half loads automatically) belong in server `opencode.json`; timeline and ram-monitor belong in TUI `cli.json` (ram-monitor was a dual server+TUI plugin through `2.0.x` and is TUI-only from `2.1.0`). Local directory loading uses `server.js` and `tui.js`, respectively. All five are published as `2.x` on `latest`.
 
 Keep the lines apart: V1 and V2 may share a default configuration directory, and these plugin releases do not migrate it for you. Use separate profiles for side-by-side testing. V2 provides explicit plugin `check` and `update` actions; a restart or reload alone does not upgrade a cached target, and exact pins stay fixed.

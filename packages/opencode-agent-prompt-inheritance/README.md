@@ -130,16 +130,9 @@ If the variable is unset, no capture file is written.
 
 ## Contributing
 
-This package lives in the `opencode-plugins` monorepo.
+This package lives in the `opencode-plugins` monorepo. See the [contribution guidelines](../../CONTRIBUTING.md) for setup, the full check suite, and releases, and open or find an issue before a pull request.
 
-See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
-
-- From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`,`bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test` as the workspace check.
-- For a focused run, `bun test` is supported from this package directory; its tests include the real local-directory resolver regression.
-- `bun run check` writes Biome changes; use it only when formatting changes are intended.
-- Prefer small, direct changes.
-
-Please open an issue or check for existing ones before creating a pull request.
+From this directory, `bun test` runs the package tests and `bun run sync:prompts` refreshes the bundled provider prompts from upstream OpenCode.
 
 ## License
 

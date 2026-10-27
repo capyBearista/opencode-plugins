@@ -40,7 +40,7 @@ flowchart LR
 
 ### OpenCode V2
 
-Add it under the `"plugins"` key in `cli.json`:
+Requires OpenCode **2.0.0** or later. Add it under the `"plugins"` key in `cli.json`:
 
 ```json
 {
@@ -86,32 +86,13 @@ V2 TUI `cli.json` profile as shown above. It is TUI-only and must not be added t
 
 - If double-tap doesn't work, ensure you're in a session screen (not the home screen with the opencode logo)
 - If a dialog is open, the timeline won't trigger. Close any open dialogs first
-
-## Development Notes
-
-Automated unit tests cover the detector, and the scoped build/static checks include the real
-local-directory resolver regression without starting a provider session. In one isolated OpenCode
-TUI, human verification confirmed that double-Escape opens the timeline, a single Escape keeps
-native behavior, the modal-close path does not seed an unintended gesture, and the timeline action
-executes.
-
-The detector uses an 800ms window and the exact-boundary test advances the fake clock to 800ms,
-runs the scheduled expiry, and then delivers the key. That is the chosen timer-first ordering; no
-grace window is added. The guard is session-only and modal-aware. Key-repeat filtering is not added,
-so holding Escape can count as multiple presses. Reload timing depends on OpenCode.
+- Holding `Escape` down can count as two presses and open the timeline; key repeat is not filtered
 
 ## Contributing
 
-This package lives in the `opencode-plugins` monorepo.
+This package lives in the `opencode-plugins` monorepo. See the [contribution guidelines](../../CONTRIBUTING.md) for setup, the full check suite, and releases, and open or find an issue before a pull request.
 
-See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
-
-- From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`,`bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test` as the workspace check.
-- For a focused run, `bun test` is supported from this package directory; its tests include the real local-directory resolver regression.
-- `bun run check` writes Biome changes; use it only when formatting changes are intended.
-- Prefer small, direct changes.
-
-Please open an issue or check for existing ones before creating a pull request.
+From this directory, `bun test` runs the package tests. To try a change in your own OpenCode, see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
 
 ## License
 

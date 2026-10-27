@@ -96,8 +96,9 @@ src/
 ```
 
 ### Core (understand these first)
-- `server.js` — package-root wrapper. A filesystem directory install resolves here, not through
-  the `exports` map; it intentionally exposes no TUI or RPC entrypoint.
+- `server.js` — package-root wrapper for directory installs that resolve by file name (OpenCode
+  before 2.2.0); 2.2.0 resolves a directory through the `exports` map. It intentionally exposes no
+  TUI or RPC entrypoint.
 - `src/index.ts` — default export is `Plugin.define({ id: "capybearista.opencode-agents-loader", setup })`;
   `registerPlugin(context, options)` starts the command and agent bridges (command first), disposes
   both on setup failure, and returns an idempotent dispose function.
@@ -107,6 +108,18 @@ src/
 - `src/agent-source.ts` — `parseMarkdown` / `parseMarkdownContent` (V1/V2 frontmatter decode),
   `fallbackSanitization`, `validateAgentContent`, and `convertAgent`; gates agent links.
 - `src/index.test.ts` — verifies the plugin id, the server export, and bridge behavior.
+
+### Bridge internals
+- Each destination parent keeps version-1 ownership metadata under `.agents-loader/`
+  (`commands-manifest.json` + `commands.lock` for commands, `agents-manifest.json` + `agents.lock`
+  for agents; project-local under `.opencode/.agents-loader/`, global under
+  `$OPENCODE_CONFIG_DIR/.agents-loader/`). Only exact recorded symlinks are ever removed; anything
+  else fails closed with a diagnostic. Writes are atomic behind a bounded per-domain lock — never
+  delete a stale lock while OpenCode instances are running.
+- Each bridge polls every 500 ms for source edits, creations, deletions, renames, and native-name
+  reservation changes, emitting a reload signal once per observed change. A reload signal is not a
+  native rescan: changes may need an OpenCode rescan or a restart, and no universal hot-reload
+  guarantee is made.
 
 ### Gotchas
 - This plugin extends discovery, it does not replace native OpenCode config loading. Native OpenCode
@@ -126,6 +139,12 @@ src/
 - Running Tests: `bun test`
 - Runtime smoke: verify the package root can still be loaded as a directory target from the V2
   server `opencode.json` `plugins` entry
+- Coverage: the package checks include the real local-directory resolver regression, build/static
+  checks, and the scoped bridge tests. In one isolated OpenCode setup, human verification confirmed
+  agent and command discovery and native execution, global/project precedence fixtures, live
+  additions, restart-required description changes, and removal cleanup. These observations do not
+  promise identical watcher behavior for every OpenCode version, platform, provider, or config
+  layout.
 
 ## License
 

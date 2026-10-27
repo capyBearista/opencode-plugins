@@ -64,7 +64,7 @@ One config drives two sandboxed subagents: agents register in memory and command
 
 ### OpenCode V2
 
-Add it under the `"plugins"` key in `opencode.json(c)`:
+Requires OpenCode **2.0.2** or later. Add it under the `"plugins"` key in `opencode.json(c)`:
 
 ```json
 {
@@ -148,19 +148,9 @@ One shared sandbox: `edit`/`write`/`patch`, `subagent`, `skill`, `webfetch`/`web
 
 ## Contributing
 
-This package lives in the `opencode-plugins` monorepo.
+This package lives in the `opencode-plugins` monorepo. See the [contribution guidelines](../../CONTRIBUTING.md) for setup, the full check suite, and releases, and open or find an issue before a pull request.
 
-See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
-
-- From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`,
-  `bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test`
-  as the workspace check.
-- For a focused run, `bun test` is supported from this package directory; its tests include the
-  real local-directory resolver regression.
-- `bun run check` writes Biome changes; use it only when formatting changes are intended.
-- Prefer small, direct changes.
-
-Please open an issue or check for existing ones before creating a pull request.
+From this directory, `bun test` runs the package tests and `bun run smoke` checks the built package. To try a change in your own OpenCode, see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
 
 ## License
 
