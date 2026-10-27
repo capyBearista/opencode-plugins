@@ -48,7 +48,7 @@ const cleanup = await server.setup({
   agent: {},
 });
 assert(
-  registered.join(",") === "rpc:output-styles,hook:context",
+  registered.join(",") === "rpc:output-styles,hook:prompt,hook:context",
   `unexpected server registrations: ${registered.join(",")}`,
 );
 assert(typeof cleanup === "function", "server setup returns no cleanup");

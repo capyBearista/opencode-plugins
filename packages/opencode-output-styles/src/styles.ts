@@ -13,7 +13,6 @@ export interface Style {
   readonly name: string;
   readonly description: string;
   readonly prompt: string;
-  readonly keepCodingInstructions: boolean;
   readonly turnReminder?: string;
   readonly source: StyleSource;
 }
@@ -49,13 +48,11 @@ function parseStyle(file: string, raw: string, source: StyleSource): Style | und
 
   const text = (value: unknown) => (value == null ? "" : String(value));
   const reminder = data["turn-reminder"];
-  const keep = data["keep-coding-instructions"];
   return {
     id,
     name: text(data.name) || basename(file).slice(0, -".md".length),
     description: text(data.description),
     prompt,
-    keepCodingInstructions: keep !== false && keep !== "false",
     ...(typeof reminder === "string" && reminder ? { turnReminder: reminder } : {}),
     source,
   };

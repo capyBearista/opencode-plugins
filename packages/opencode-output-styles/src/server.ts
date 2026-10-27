@@ -1,7 +1,13 @@
 import { Plugin } from "@opencode/plugin";
-import { appendReminders, applyStyle, reminderText } from "./prompt.js";
+import {
+  appendReminders,
+  ENTRY_KEY,
+  entryValue,
+  REMINDER_METADATA_KEY,
+  reminderText,
+} from "./prompt.js";
 import { DEFAULT_STYLE_ID, METADATA_KEY, OutputStylesRpc, type StyleSummary } from "./rpc.js";
-import { discoverStyles, findStyle } from "./styles.js";
+import { discoverStyles, findStyle, type Style } from "./styles.js";
 
 const STORAGE_KEY = "default-style";
 
@@ -103,43 +109,60 @@ export default Plugin.define({
       },
     });
 
-    const hook = await ctx.session.hook("context", async (event) => {
+    // The style travels as an instruction entry, never in the system prompt, so switching styles
+    // appends an update instead of invalidating the cached request prefix.
+    const syncEntry = async (sessionID: string, style: Style | undefined) => {
+      const entries = await ctx.session.instructions.entry.list({ sessionID });
+      const current = entries.find((entry) => entry.key === ENTRY_KEY);
+      if (!style) {
+        if (current) await ctx.session.instructions.entry.remove({ sessionID, key: ENTRY_KEY });
+        return;
+      }
+      const value = entryValue(style);
+      if (current?.value !== value) {
+        await ctx.session.instructions.entry.put({ sessionID, key: ENTRY_KEY, value });
+      }
+    };
+
+    // Prompts are admitted before the step that reads entries, so a change applies to this turn.
+    const promptHook = await ctx.session.hook("prompt", async (event) => {
       try {
-        const [session, storedDefault, context] = await Promise.all([
+        const [session, storedDefault] = await Promise.all([
           ctx.session.get({ sessionID: event.sessionID }),
           ctx.storage.get(STORAGE_KEY),
-          ctx.session.context({ sessionID: event.sessionID }).catch(() => []),
         ]);
         if (session.parentID) return;
 
         const id = sessionStyleOf(session) ?? asString(storedDefault);
-        if (!id || isDefault(id)) return;
-
-        const style = findStyle(await discoverStyles({ project }), id);
-        if (!style) return;
-
-        let agentHasOwnSystem = true;
-        if (!style.keepCodingInstructions) {
-          try {
-            agentHasOwnSystem = Boolean(
-              (await ctx.agent.get({ agentID: event.agent })).data.system,
-            );
-          } catch {}
+        const style =
+          id && !isDefault(id) ? findStyle(await discoverStyles({ project }), id) : undefined;
+        await syncEntry(event.sessionID, style);
+        if (style) {
+          event.metadata = { ...event.metadata, [REMINDER_METADATA_KEY]: reminderText(style) };
         }
-        applyStyle(event.system, style, agentHasOwnSystem);
-        const prompts = new Set(context.filter((m) => m.type === "user").map((m) => m.id));
-        appendReminders(
-          event.messages,
-          reminderText(style),
-          (m) => m.id !== undefined && prompts.has(m.id),
-        );
+      } catch {
+        // Styling is best-effort: never fail the user's prompt.
+      }
+    });
+
+    const contextHook = await ctx.session.hook("context", async (event) => {
+      try {
+        const context = await ctx.session.context({ sessionID: event.sessionID });
+        const reminders = new Map<string, string>();
+        for (const message of context) {
+          const text =
+            message.type === "user" && asString(message.metadata?.[REMINDER_METADATA_KEY]);
+          if (text) reminders.set(message.id, text);
+        }
+        appendReminders(event.messages, (messageID) => reminders.get(messageID));
       } catch {
         // Styling is best-effort: never fail the user's request.
       }
     });
 
     return async () => {
-      await hook.dispose();
+      await promptHook.dispose();
+      await contextHook.dispose();
       await rpc.dispose();
     };
   },

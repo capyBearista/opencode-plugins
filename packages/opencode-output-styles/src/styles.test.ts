@@ -37,7 +37,6 @@ describe("built-in styles", () => {
     expect(styles.get("concise")?.turnReminder).toBeTruthy();
     expect(styles.get("explanatory")?.turnReminder).toBeUndefined();
     for (const style of styles.values()) {
-      expect(style.keepCodingInstructions).toBe(true);
       expect(style.source).toBe("built-in");
       expect(style.prompt.length).toBeGreaterThan(0);
     }
@@ -90,16 +89,12 @@ describe("configDir", () => {
 
 describe("filesystem handling", () => {
   test("reads frontmatter from a file saved with a UTF-8 BOM", async () => {
-    await put(
-      globalDir(),
-      "bom.md",
-      "\uFEFF---\nname: With BOM\nkeep-coding-instructions: false\n---\nbody",
-    );
+    await put(globalDir(), "bom.md", "\uFEFF---\nname: With BOM\ndescription: d\n---\nbody");
     const style = (await discoverStyles({ project, env })).get("bom");
     expect(style).toMatchObject({
       name: "With BOM",
+      description: "d",
       prompt: "body",
-      keepCodingInstructions: false,
     });
   });
 
@@ -161,7 +156,6 @@ describe("parsing", () => {
       name: "broken",
       description: "",
       prompt: "the body",
-      keepCodingInstructions: true,
     });
   });
 
@@ -198,22 +192,22 @@ describe("parsing", () => {
     expect(styles.has("default")).toBe(false);
   });
 
-  test("parses keep-coding-instructions and turn-reminder", async () => {
+  test("parses turn-reminder and ignores the dropped keep-coding-instructions field", async () => {
     await put(
       globalDir(),
       "a.md",
       "---\nkeep-coding-instructions: false\nturn-reminder: stay\n---\nbody",
     );
-    await put(globalDir(), "b.md", '---\nkeep-coding-instructions: "false"\n---\nbody');
-    await put(
-      globalDir(),
-      "c.md",
-      "---\nkeep-coding-instructions: true\nturn-reminder: 5\n---\nbody",
-    );
+    await put(globalDir(), "c.md", "---\nturn-reminder: 5\n---\nbody");
     const styles = await discoverStyles({ project, env });
-    expect(styles.get("a")).toMatchObject({ keepCodingInstructions: false, turnReminder: "stay" });
-    expect(styles.get("b")?.keepCodingInstructions).toBe(false);
-    expect(styles.get("c")?.keepCodingInstructions).toBe(true);
+    expect(styles.get("a")).toEqual({
+      id: "a",
+      name: "a",
+      description: "",
+      prompt: "body",
+      turnReminder: "stay",
+      source: "global",
+    });
     expect(styles.get("c")?.turnReminder).toBeUndefined();
   });
 

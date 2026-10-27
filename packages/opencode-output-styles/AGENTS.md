@@ -3,7 +3,7 @@
 **Technology**: TypeScript / OpenCode V2 plugin (server + TUI)
 **Entry Points**: `src/server.ts` (server), `src/tui.ts` (TUI)
 **Parent Context**: This extends [../../AGENTS.md](../../AGENTS.md)
-**Compatibility**: OpenCode >= 2.0.23 (2.x line, `latest`). The 1.x line (V1) is frozen at 1.0.2.
+**Compatibility**: OpenCode >= 2.2.0 (2.x line, `latest`). The 1.x line (V1) is frozen at 1.0.2.
 
 ## Quick Reference
 
@@ -33,22 +33,24 @@ bun --filter @capybearista/opencode-output-styles test && \
 
 ## Architecture
 
-- `src/server.ts` registers the `output-styles` RPC and one `session.hook("context")` callback.
+- `src/server.ts` registers the `output-styles` RPC, a `session.hook("prompt")` callback that syncs the `output-style` instruction entry and records the turn's reminder on the prompt, and a `session.hook("context")` callback that attaches those recorded reminders.
 - `src/tui.ts` registers the `/output-style` command, the picker, and the `sidebar.content` line.
 - `src/rpc.ts` is the contract both halves import.
-- `src/styles.ts` handles discovery and parsing. `src/prompt.ts` holds the pure prompt and reminder helpers.
+- `src/styles.ts` handles discovery and parsing. `src/prompt.ts` holds the pure entry and reminder helpers.
 - `built-in-styles/*.md` are published assets loaded at runtime from `../built-in-styles` relative to the module, which works from both `src/` and `dist/`.
 
 ### Gotchas
 - **One `opencode.json` entry loads both halves.** The TUI half gets `context.options = {}`, so every option is read on the server and handed to the TUI through the `state` RPC.
-- **`@opencode/plugin` must stay a required peer.** OpenCode 2.0.23–2.0.24 servers do not provide the SDK to plugins. The OpenTUI and solid peers are optional.
+- **`@opencode/plugin` stays a required peer.** Its `>=2.2.0` range states the floor: `session.instructions.entry` is new in 2.2.0. The OpenTUI and solid peers are optional.
 - **`session.update({ metadata })` replaces the whole object.** Always read, merge, then write.
 - **Subagent sessions inherit metadata.** Skip sessions with `parentID`.
 - **The TUI's cached session does not re-render on metadata changes.** The sidebar is driven by a signal fed from `session.metadata.updated`.
 - **RPC inputs must be objects.** Pass `{}` when a method takes nothing.
 - **Every TUI RPC call carries a `location`.** The shared server runs one plugin instance per project; use the session's location for session calls, else the TUI's.
-- **Only real prompts get the reminder.** Synthetic, skill, shell and compaction messages are also `role: "user"`; the hook matches ids against `session.context` entries with `type: "user"`.
-- **The `context` hook must never throw into the user's request.** Failures are swallowed.
+- **Never edit what the model has already seen.** The style lives in an instruction entry, never in `event.system`, and each prompt's reminder is recorded in its metadata when sent, so a switch only appends. Rewriting the system prompt or past reminders breaks the provider's prompt cache for the whole conversation.
+- **Change the entry in the `prompt` hook, not the `context` hook.** Entries load when a step starts, before `context` runs; a change made in `prompt` applies to that same turn.
+- **Only real prompts get the reminder.** Synthetic, skill, shell and compaction messages are also `role: "user"`, but they never pass through the `prompt` hook, so they have no recorded reminder.
+- **Neither hook may throw into the user's prompt or request.** Failures are swallowed.
 - **Built-in prompts come from Claude Code 2.1.310.** They were extracted from the binary bytes (`strings` drops short lines). See [the findings doc](../../docs/output-styles/v2-port-findings.md) before refreshing them.
 
 ## Testing Guidelines
