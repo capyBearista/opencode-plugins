@@ -168,7 +168,7 @@ describe("package and entrypoint", () => {
     expect(packageJson.files).toEqual(["dist", "tui.js"]);
     expect(packageJson["oc-plugin"]).toBeUndefined();
     expect(packageJson.peerDependencies["@opencode/plugin"]).toBe(">=2.1.0 <3");
-    expect(packageJson.devDependencies["@opencode/plugin"]).toMatch(/^2\.1\./);
+    expect(packageJson.devDependencies["@opencode/plugin"]).toMatch(/^2\.2\./);
   });
 
   test("ships no server entry for OpenCode to resolve", async () => {

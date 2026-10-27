@@ -80,7 +80,7 @@ describe("@capybearista/opencode-agents-loader", () => {
     expect("server" in plugin).toBe(false);
   });
 
-  test("real V2 host resolves the package root server wrapper and preserves named package mapping", () => {
+  test("real V2 host resolves the package directory through its exports and preserves named package mapping", () => {
     const packageRoot = path.resolve(import.meta.dir, "..");
     const child = Bun.spawnSync({
       cmd: [
@@ -109,7 +109,7 @@ describe("@capybearista/opencode-agents-loader", () => {
 
     expect(JSON.parse(new TextDecoder().decode(child.stdout))).toEqual({
       local: {
-        server: pathToFileURL(path.join(packageRoot, "server.js")).href,
+        server: pathToFileURL(path.join(packageRoot, "dist", "index.js")).href,
         tui: null,
         rpc: null,
       },

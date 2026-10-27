@@ -41,16 +41,17 @@ The `services/www` docs describe V2. The older `packages/web` docs still describ
 
 ## Entry resolution
 
-`Host.resolve` (`packages/plugin/src/host.ts:17-43`, exported as `@opencode/plugin/host`) looks for:
+`Host.resolve` (`packages/plugin/src/host.ts:25-65` at `v2.2.0`, exported as `@opencode/plugin/host`) looks for:
 
 - **server**: `<pkg>/server`, then the package root (`<pkg>`, or `index` for a local directory)
 - **tui**: `<pkg>/tui`
 - **rpc**: `<pkg>/rpc`
+- **gui**: `<pkg>/gui-experimental` (desktop app only; new in 2.2.0)
 
 What counts as a server entry depends on how the plugin is loaded:
 
 - **Named package** (npm): resolution goes through the package's `exports` map. A TUI-only package must not export `.` or `./server`. Without an `exports` map, `main` would count as the root.
-- **Local directory** (a path in `cli.json`): resolution looks at files. A TUI-only package must not ship a root `server.js` or `index.js`.
+- **Local directory** (an absolute path in `plugins`): from 2.2.0, a directory whose `package.json` has both `name` and `exports` resolves through `exports`, the same as the named package **(verified on 2.2.0: the server loaded `dist/server.js`, not the root `server.js`)**. A directory without them, and every directory before 2.2.0, resolves by file name, so a TUI-only package must not ship a root `server.js` or `index.js`. The root `server.js` / `tui.js` shims exist for that file-name case.
 
 Otherwise OpenCode treats it as a server plugin too. A TUI-only package does nothing from `opencode.json`; list it in `cli.json`. The ram-monitor smoke script calls `resolve()` with the package directory, so it asserts the local-directory case **(verified)**.
 
