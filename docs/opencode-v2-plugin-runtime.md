@@ -64,6 +64,7 @@ Learned while porting `opencode-output-styles`; details and evidence in [output-
 - **The SDK peer stays required.** The server half needs its own `@opencode/plugin` copy before 2.0.25 (see above) **(verified on 2.0.23)**.
 - **Session metadata is replace-only and inherited.** `session.update({ metadata })` replaces the whole object, and subagent sessions inherit it, so merge before writing and check `parentID` **(verified)**.
 - **`session.hook("context")` runs last and on every agent request**, including the step after a tool call, after the built-in `identity` and `optimize` hooks **(verified)**.
+- **Keep per-session instructions out of `event.system`.** Editing the system prompt, or any earlier message, in the `context` hook invalidates the provider's cached prefix. From 2.2.0, put the text in `ctx.session.instructions.entry` from the `prompt` hook; a change is appended as an update and the prefix stays cached **(verified on 2.2.0)**.
 - **TUI session data does not react to metadata changes.** Feed a signal from `data.on("session.metadata.updated")` **(verified)**. A slot element with `onMouseUp → context.keymap.dispatch("<command id>")` runs the plugin's own command, which is how the TUI's own footer works **(verified)**.
 
 ## Testing TUI plugins with OpenTUI

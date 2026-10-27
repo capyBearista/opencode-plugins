@@ -16,21 +16,22 @@
 
 ## Philosophy: Extending OpenCode
 
-An output style is a set of instructions that applies to every response in a session. The plugin keeps OpenCode's own prompt and adds the style next to it. It does not touch an agent's own prompt.
+An output style is a set of instructions that applies to every response in a session. The plugin adds the style next to OpenCode's own prompt and never edits either OpenCode's prompt or an agent's own prompt.
 
-- **Durable:** the style is added to the system prompt on every model request, including the steps after tool calls.
-- **Reminded:** a short `<system-reminder>` naming the active style is attached to each of your messages in the request. It is never saved to the session.
+- **Durable:** the style is attached to the session as an OpenCode instruction entry. It applies to every model request, including the steps after tool calls, and survives compaction.
+- **Cache-friendly:** switching styles never rewrites anything the model has already seen. OpenCode adds a short update at the point of the switch, so the cached part of the conversation is reused.
+- **Reminded:** each of your messages carries a short `<system-reminder>` naming the style that was active when you sent it. Messages sent with no style carry none.
 - **Primary agents only:** subagents run their own prompts and get no style, as in Claude Code.
 
 ### Architecture
 
 ```text
 src/
-├── server.ts      # Server entry: RPC + system-prompt hook
+├── server.ts      # Server entry: RPC, instruction entry, reminders
 ├── tui.ts         # TUI entry: /output-style, picker, sidebar line
 ├── rpc.ts         # Server ↔ TUI contract
 ├── styles.ts      # Discovery and frontmatter parsing
-└── prompt.ts      # Prompt and reminder composition
+└── prompt.ts      # Entry and reminder composition
 built-in-styles/   # Proactive, Concise, Explanatory, Learning
 ```
 
@@ -47,7 +48,7 @@ The server owns the style files, the session choice, and the global setting. The
 
 ### OpenCode V2
 
-Requires OpenCode **2.0.23** or later. Add one entry under `"plugins"` in `opencode.json(c)`:
+Requires OpenCode **2.2.0** or later. Add one entry under `"plugins"` in `opencode.json(c)`:
 
 ```json
 {
@@ -127,7 +128,6 @@ The id is the filename without `.md`. Only files directly in those directories c
 | --- | --- | --- |
 | `name` | filename | Shown in the picker and sidebar. |
 | `description` | empty | Shown in the picker. |
-| `keep-coding-instructions` | `true` | Set to `false` for a style that isn't about coding. It drops the `# Working in codebases` and `# Code comments` sections from OpenCode's base prompt. It never changes an agent's own prompt. |
 | `turn-reminder` | none | Text for the per-message reminder. Without it, the reminder says "Remember to follow the specific guidelines for this style." |
 
 ### Overriding built-in styles
@@ -144,7 +144,7 @@ A file with the same id replaces the built-in completely: project over global ov
 
 - **No sidebar line and an "Output styles: server plugin not reachable" toast:** the package is in `cli.json` instead of `opencode.json(c)`. Move it.
 - **A style does nothing:** check the file ends in `.md`, sits directly in one of the style directories, and has instructions after the frontmatter.
-- **The plugin fails to load on an older OpenCode:** upgrade to 2.0.23 or later.
+- **Styles do nothing on an older OpenCode:** upgrade to 2.2.0 or later. Session instruction entries are new in 2.2.0.
 
 ## Contributing
 

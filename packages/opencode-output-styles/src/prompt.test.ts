@@ -1,39 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  appendReminders,
-  applyStyle,
-  FALLBACK_REMINDER,
-  reminderText,
-  stripCodingSections,
-} from "./prompt.js";
-import type { Style } from "./styles.js";
-
-const DEFAULT_PROMPT = `You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using the tools you have available.
-
-# Harness
-- Responses are rendered as GitHub-flavored Markdown.
-- Prefer parallelizing independent tool calls.
-
-# Communication
-- Use clear file paths when referring to files.
-- Keep responses clear and concise, and avoid unnecessary technical jargon.
-
-# Working in codebases
-- Keep changes consistent with the structure, naming, style, and patterns of the surrounding code.
-- Treat unfamiliar files or changes as potential user work and investigate before deleting or overwriting them.`;
-
-const ANTHROPIC_APPEND = `# Code comments
-By default, match the surrounding comment density: where the code has none, add none.`;
-
-const style = (overrides: Partial<Style> = {}): Style => ({
-  id: "x",
-  name: "X",
-  description: "",
-  prompt: "STYLE PROMPT",
-  keepCodingInstructions: true,
-  source: "global",
-  ...overrides,
-});
+import { appendReminders, entryValue, FALLBACK_REMINDER, reminderText } from "./prompt.js";
 
 describe("reminderText", () => {
   test("uses the turn reminder", () => {
@@ -49,114 +15,63 @@ describe("reminderText", () => {
   });
 });
 
-describe("stripCodingSections", () => {
-  test("removes the codebase section and keeps the others", () => {
-    const out = stripCodingSections(DEFAULT_PROMPT);
-    expect(out).not.toContain("Working in codebases");
-    expect(out).not.toContain("Keep changes consistent");
-    expect(out).toContain("# Harness");
-    expect(out).toContain("# Communication");
-    expect(out.endsWith("technical jargon.")).toBe(true);
-  });
-
-  test("removes both sections from default + anthropic append", () => {
-    const out = stripCodingSections(`${DEFAULT_PROMPT}\n\n${ANTHROPIC_APPEND}`);
-    expect(out).not.toContain("Working in codebases");
-    expect(out).not.toContain("Code comments");
-    expect(out).not.toContain("comment density");
-    expect(out).toContain("# Communication");
-    expect(out).not.toMatch(/\n{3,}/);
-  });
-
-  test("returns text without the headings unchanged", () => {
-    const text = "# Harness\nstuff\n\n\n\n## Working in codebases\nnested heading stays\n";
-    expect(stripCodingSections(text)).toBe(text);
-  });
-
-  test("stops at the next top-level heading", () => {
-    const text = "# A\na\n\n# Code comments\nc1\n## inner\nc2\n\n# B\nb\n\n## B.1\nsub";
-    expect(stripCodingSections(text)).toBe("# A\na\n\n# B\nb\n\n## B.1\nsub");
-  });
-
-  test("heading must match exactly", () => {
-    const text = "# Working in codebases today\nkeep\n";
-    expect(stripCodingSections(text)).toBe(text);
-  });
-});
-
-describe("applyStyle", () => {
-  const base = () => [{ type: "text", text: DEFAULT_PROMPT }];
-
-  test("pushes the style prompt and keeps coding sections by default", () => {
-    const system = base();
-    applyStyle(system, style(), false);
-    expect(system).toEqual([
-      { type: "text", text: DEFAULT_PROMPT },
-      { type: "text", text: "STYLE PROMPT" },
-    ]);
-  });
-
-  test("strips system[0] when coding instructions are dropped", () => {
-    const system = [{ type: "text", text: DEFAULT_PROMPT, cache: true }];
-    applyStyle(system, style({ keepCodingInstructions: false }), false);
-    expect(system[0]?.text).not.toContain("Working in codebases");
-    expect(system[0]).toHaveProperty("cache", true);
-    expect(system[1]?.text).toBe("STYLE PROMPT");
-  });
-
-  test("leaves system[0] alone when the agent has its own system prompt", () => {
-    const system = base();
-    applyStyle(system, style({ keepCodingInstructions: false }), true);
-    expect(system[0]?.text).toBe(DEFAULT_PROMPT);
-    expect(system).toHaveLength(2);
-  });
-
-  test("just pushes when there is no system[0]", () => {
-    const system: Array<{ type: string; text: string }> = [];
-    applyStyle(system, style({ keepCodingInstructions: false }), false);
-    expect(system).toEqual([{ type: "text", text: "STYLE PROMPT" }]);
+describe("entryValue", () => {
+  test("names the style above its prompt", () => {
+    expect(entryValue({ name: "Concise", prompt: "Be brief." })).toBe(
+      "Concise output style\n\nBe brief.",
+    );
   });
 });
 
 describe("appendReminders", () => {
-  const text = "<system-reminder>r</system-reminder>";
   const make = () => [
     { role: "user", id: "u1", content: [{ type: "text", text: "hello" }] },
     { role: "assistant", id: "a1", content: [{ type: "text", text: "hi" }] },
     { role: "tool", id: "t1", content: [{ type: "tool-result", id: "1" }] },
+    { role: "user", id: "u2", content: [{ type: "text", text: "later" }] },
     { role: "user", id: "syn", content: [{ type: "text", text: "harness" }] },
     { role: "user", content: [{ type: "text", text: "no id" }] },
   ];
-  const isPrompt = (m: { id?: string }) => m.id === "u1";
+  const recorded: Record<string, string> = { u1: "<r>one</r>", u2: "<r>two</r>", a1: "<r>x</r>" };
+  const reminderOf = (id: string) => recorded[id];
 
-  test("appends only to user messages the predicate accepts and returns the count", () => {
+  test("appends each prompt's own recorded reminder and returns the count", () => {
     const messages = make();
-    expect(appendReminders(messages, text, isPrompt)).toBe(1);
+    expect(appendReminders(messages, reminderOf)).toBe(2);
     expect(messages[0]?.content).toEqual([
       { type: "text", text: "hello" },
-      { type: "text", text },
+      { type: "text", text: "<r>one</r>" },
     ]);
-    expect(messages[3]?.content).toEqual([{ type: "text", text: "harness" }]);
-    expect(messages[4]?.content).toEqual([{ type: "text", text: "no id" }]);
+    expect(messages[3]?.content).toEqual([
+      { type: "text", text: "later" },
+      { type: "text", text: "<r>two</r>" },
+    ]);
   });
 
-  test("leaves assistant and tool messages untouched even if accepted", () => {
+  test("leaves messages without a recorded reminder untouched", () => {
     const messages = make();
-    appendReminders(messages, text, () => true);
+    appendReminders(messages, reminderOf);
+    expect(messages[4]?.content).toEqual([{ type: "text", text: "harness" }]);
+    expect(messages[5]?.content).toEqual([{ type: "text", text: "no id" }]);
+  });
+
+  test("leaves assistant and tool messages untouched even if a reminder is recorded", () => {
+    const messages = make();
+    appendReminders(messages, () => "<r>any</r>");
     expect(messages[1]?.content).toEqual([{ type: "text", text: "hi" }]);
     expect(messages[2]?.content).toEqual([{ type: "tool-result", id: "1" }]);
   });
 
   test("is idempotent", () => {
     const messages = make();
-    appendReminders(messages, text, isPrompt);
-    expect(appendReminders(messages, text, isPrompt)).toBe(0);
+    appendReminders(messages, reminderOf);
+    expect(appendReminders(messages, reminderOf)).toBe(0);
     expect(messages[0]?.content).toHaveLength(2);
   });
 
   test("ignores string content", () => {
     const messages = [{ role: "user", id: "u1", content: "plain" }];
-    expect(appendReminders(messages, text, () => true)).toBe(0);
+    expect(appendReminders(messages, reminderOf)).toBe(0);
     expect(messages[0]?.content).toBe("plain");
   });
 });

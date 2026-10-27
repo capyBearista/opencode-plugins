@@ -181,7 +181,7 @@ Add your selected server plugins to `opencode.json` or `opencode.jsonc`:
 }
 ```
 
-**Output Styles** is a server + TUI plugin that needs OpenCode **2.0.23 or later**. This one entry is all it takes; its TUI half loads automatically, so it does not belong in `cli.json`.
+**Output Styles** is a server + TUI plugin that needs OpenCode **2.2.0 or later**. This one entry is all it takes; its TUI half loads automatically, so it does not belong in `cli.json`.
 
 **Adversarial Review setup:** The plugin installs its two review command files into `commands/` in your OpenCode config directory, creating `commands/` if it is missing. See the [package installation guide](./packages/opencode-adversarial-review/#install).
 
@@ -214,7 +214,7 @@ The repository supports both OpenCode V2 and V1, but plugin availability and con
 | [Agents Loader](./packages/opencode-agents-loader/) | `@latest` · `opencode.json(c)` | `@1.0.0` · `opencode.json(c)` |
 | [Double-Tap Timeline](./packages/opencode-double-tap-timeline/) | `@latest` · `cli.json` | `@1.0.1` · `tui.json(c)` |
 | [RAM Monitor](./packages/opencode-ram-monitor/) | `@latest` · `cli.json` (2.1+) | `@1.1.0` · `opencode.json(c)` and `tui.json(c)` |
-| [Output Styles](./packages/opencode-output-styles/) | `@latest` · `opencode.json(c)` (2.0.23+, TUI half loads automatically) | `@1` · `opencode.json(c)` |
+| [Output Styles](./packages/opencode-output-styles/) | `@latest` · `opencode.json(c)` (2.2.0+, TUI half loads automatically) | `@1` · `opencode.json(c)` |
 | [Agent Prompt Inheritance](./packages/opencode-agent-prompt-inheritance/) | Not yet ported | `@latest` · `opencode.json(c)` |
 
 **Using OpenCode V1?** See the [V1 Plugin Guide](./docs/v1-plugins.md) for installation, version pinning, and upgrade instructions.

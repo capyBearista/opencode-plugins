@@ -1,10 +1,10 @@
 # Output Styles V2 Port: Findings
 
-What we verified about Claude Code output styles and OpenCode V2 while porting `opencode-output-styles` to 2.0.0 and refining it in 2.1.0. Use it to re-check behavior after an OpenCode or Claude Code upgrade.
+What we verified about Claude Code output styles and OpenCode V2 while porting `opencode-output-styles` to 2.0.0, refining it in 2.1.0, and moving the style into a session instruction entry for OpenCode 2.2.0. Use it to re-check behavior after an OpenCode or Claude Code upgrade.
 
 **Sources.** Each claim is marked:
 
-- **verified**: observed live. OpenCode claims were exercised on 2.1.4 and 2.0.23 in an isolated `HOME`, with a mock model server logging every request, a probe plugin from a local registry, and a real TUI under tmux.
+- **verified**: observed live. OpenCode claims were exercised on 2.1.4 and 2.0.23 (2.2.0 for the instruction-entry section) in an isolated `HOME`, with a mock model server logging every request, a probe plugin from a local registry, and a real TUI under tmux.
 - **binary**: read from the Claude Code 2.1.310 native binary (strings and byte slices; nothing executed beyond `--version`).
 - **source**: read from OpenCode source at the `v2.1.4` tag (`anomalyco/opencode`), not exercised live.
 - **docs**: from <https://code.claude.com/docs/en/output-styles> (snapshot in [`claude-output-styles.md`](claude-output-styles.md)).
@@ -80,6 +80,21 @@ Anything a plugin pushes comes after these.
   - Kimi, Meta, Trinity: different headings.
 - `# Harness` tells the model that `<system-reminder>` blocks are harness instructions.
 
+### Instruction entries and the prompt cache (verified on 2.2.0)
+
+Editing `event.system` in the `context` hook works, but any change to it invalidates the provider's cached prefix from that block on. Measured with the 2.1.0 plugin: after an Explanatory → Concise switch, only the tools and the first four system blocks were reused (5 of 17 blocks); everything after was sent uncached once. The rewritten reminders on every earlier prompt broke the cache on their own too.
+
+- `ctx.session.instructions.entry.put/list/remove` (new in 2.2.0) attach keyed text to a session. Entries load when a step starts (`SessionContext.select` in `core/src/session/context.ts`, source), before the `context` hook runs, so an entry changed inside `context` only shows on the next step.
+- The `prompt` hook runs in `SessionPrompt.prepare`, before the prompt is admitted (`core/src/session/prompt.ts`, source). An entry put there applies to that same turn.
+- On a session's first step the entry is rendered at the end of the system prompt as `<context key="output-style">…</context>`. A later change or removal is appended as a user-role `<system-update>` just before the next prompt ("…changed and supersedes the previous value", "…no longer applies. Disregard it."). Earlier content is never edited.
+- Update bodies are XML-escaped (`&lt;context …&gt;`) so they cannot close the wrapper (`packages/ai/src/protocols/shared.ts:189-199`, source). A style whose text uses `<`, `>` or `&` reaches the model escaped after a mid-session switch.
+- Metadata a `prompt` hook sets on `event.metadata` is stored on the user message and comes back from `ctx.session.context()`. The plugin records each turn's reminder there and re-attaches exactly that text, so old reminders never change.
+- With both changes, 11 consecutive requests in one session reused 100% of the previous request, across a session switch, a switch to None, a return to the global setting, and a change of the global setting.
+- After compaction, history restarts from the summary and the entry is rendered again in the system prompt from its current value. The break at compaction is compaction's own.
+- Forks copy the parent's entries but not its metadata (the fork's `metadata` was `{}`), so a fork follows the global setting from its first prompt.
+- A subagent's child session got no entry and no reminder, and its prompt did not fire the plugin's `prompt` hook.
+- An agent with its own `system` keeps it; the entry is added after it.
+
 ### Sessions and storage (verified)
 
 - `session.update({ metadata })` **replaces** the whole metadata object. Read, merge, then write.
@@ -104,7 +119,7 @@ Anything a plugin pushes comes after these.
 
 ### Versions and packaging (verified)
 
-- The 2.0.23 floor comes from `ctx.session.context`, which the reminder needs to find real prompts (see above). `session.update` gained `metadata` in 2.0.15, and everything else the plugin uses exists from 2.0.0. `dialog.select` `actions` also first appear in 2.0.23, but the plugin stopped using them in 2.1.0.
+- The 2.2.0 floor comes from `ctx.session.instructions.entry`. On 2.1.4 the `prompt` hook exists but `session.instructions` does not, so the plugin loads, prompts still go through, and no style is applied (verified on 2.1.4). Before 2.2.0 the floor was 2.0.23, from `ctx.session.context`.
 - Up to 2.0.24 the **server** does not serve `@opencode/plugin` as a virtual module. A server entry fails with `Cannot find package '@opencode/plugin'` unless the SDK is a **required** peer, which npm then installs.
 - A required peer also works on 2.1.4, where the host module wins.
 - Plugin installs use npm config through `@npmcli/config`, so `NPM_CONFIG_USERCONFIG` overrides `~/.npmrc` when testing against a local registry.
@@ -114,11 +129,12 @@ Anything a plugin pushes comes after these.
 
 | Topic | Claude Code | This plugin |
 |---|---|---|
+| Where the style text goes | `output_style_instructions` attachment | A session instruction entry, never the system prompt |
 | Where the choice lives | `outputStyle` in settings files | Per-session `metadata.outputStyle`, plus a global setting in plugin storage, changed from the home screen |
 | Name for "no style" | `Default` | `None` ("default" was ambiguous next to the global setting) |
-| Reminder timing | Every user prompt and after every tool batch, persisted | Appended to every user message in each outgoing request, not persisted |
+| Reminder timing | Every user prompt and after every tool batch, persisted | Recorded on each user prompt when sent and re-attached unchanged to that prompt in every request; none after tool batches |
 | Custom reminder | Not possible | Optional `turn-reminder` frontmatter |
-| `keep-coding-instructions: false` | Drops Claude Code's software-engineering section | Drops `# Working in codebases` and `# Code comments` from OpenCode's base prompt, never from an agent's own prompt |
+| `keep-coding-instructions: false` | Drops Claude Code's software-engineering section | Not supported since plugin 2.2.0. Removing base-prompt sections edits the system prompt, which breaks the prompt cache, and the heading match only covered the default, Claude and GPT prompts |
 | Project styles | Every `.claude/output-styles` from cwd to repo root | `<project>/.opencode/output-styles` only, plus the global config dir |
 
 ## Re-verifying
@@ -129,4 +145,5 @@ For a quick check in your own setup, use [Testing in OpenCode](../../CONTRIBUTIN
 - Set `NPM_CONFIG_USERCONFIG` to a scratch `.npmrc` that points at a local verdaccio.
 - Run a mock Anthropic Messages server that logs request bodies. Use provider package `@opencode/ai/providers/anthropic-compatible` on 2.1.x, and `@opencode/ai/providers/anthropic` on 2.0.23.
 - Run `opencode serve` with `OPENCODE_PASSWORD`.
+- Drive single turns with `opencode run --server <url> --session <id> "…" < /dev/null`. With an open non-TTY stdin, `run` can wait and never send the prompt.
 - Drive the TUI with `opencode --server <url>` in tmux. Clicks are SGR mouse sequences: `tmux send-keys -l $'\e[<0;COL;ROWM'`, then `…m`.

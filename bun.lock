@@ -18,7 +18,7 @@
     },
     "packages/opencode-adversarial-review": {
       "name": "@capybearista/opencode-adversarial-review",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "devDependencies": {
         "@opencode/plugin": "2.2.0",
         "@tsconfig/node22": "^22.0.6",
@@ -87,7 +87,7 @@
         "typescript": "^7.0.2",
       },
       "peerDependencies": {
-        "@opencode/plugin": ">=2.0.23 <3",
+        "@opencode/plugin": ">=2.2.0 <3",
         "@opentui/core": ">=0.6.6",
         "@opentui/solid": ">=0.6.6",
         "solid-js": ">=1.9.0",
