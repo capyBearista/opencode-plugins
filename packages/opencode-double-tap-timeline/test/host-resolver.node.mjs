@@ -7,11 +7,12 @@ import { Host } from "@opencode/plugin/host";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const url = (entry) => pathToFileURL(path.join(root, entry)).href;
 
-test("Host.resolve finds the local root TUI wrapper without a server entrypoint", () => {
+test("Host.resolve maps the local package directory through its exports without a server entrypoint", () => {
   assert.deepEqual(Host.resolve({ directory: root }), {
     server: undefined,
-    tui: url("tui.js"),
+    tui: url("dist/index.js"),
     rpc: undefined,
+    gui: undefined,
   });
 });
 
@@ -20,6 +21,7 @@ test("Host.resolve keeps the built directory server-only", () => {
     server: url("dist/index.js"),
     tui: undefined,
     rpc: undefined,
+    gui: undefined,
   });
 });
 
@@ -33,6 +35,7 @@ test("Host.resolve keeps the named package TUI export mapped to dist/index.js", 
       server: undefined,
       tui: url("dist/index.js"),
       rpc: undefined,
+      gui: undefined,
     },
   );
 });

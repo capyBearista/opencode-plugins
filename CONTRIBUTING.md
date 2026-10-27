@@ -45,7 +45,7 @@ Unit tests and smoke scripts don't run a real OpenCode. To try a change in your 
 3. Run `opencode service restart`, then reopen the TUI. Do the same after every rebuild.
 4. When you're done, put the npm entry back and run `opencode plugin update`.
 
-Each V2 package ships root `server.js` / `tui.js` files that re-export `dist/`, which is what a directory entry loads. A combined server + TUI package such as output-styles loads both halves from the one entry.
+On OpenCode 2.2.0 and later, a directory entry resolves through the package's `exports`, the same way the npm package does. Older versions load the root `server.js` / `tui.js` files instead, which re-export `dist/`. A combined server + TUI package such as output-styles loads both halves from the one entry.
 
 ## Changesets and releases
 

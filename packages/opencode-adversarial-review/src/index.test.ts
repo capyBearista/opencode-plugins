@@ -655,7 +655,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
     expect("oc-plugin" in manifest).toBe(false);
   });
 
-  test("real V2 host resolves the package root server wrapper to the built entry", () => {
+  test("real V2 host resolves the package directory through its exports to the built entry", () => {
     const child = Bun.spawnSync({
       cmd: [
         "node",
@@ -683,7 +683,7 @@ describe("@capybearista/opencode-adversarial-review", () => {
 
     expect(JSON.parse(new TextDecoder().decode(child.stdout))).toEqual({
       local: {
-        server: pathToFileURL(join(PACKAGE_ROOT, "server.js")).href,
+        server: pathToFileURL(join(PACKAGE_ROOT, "dist", "index.js")).href,
         tui: null,
         rpc: null,
       },
