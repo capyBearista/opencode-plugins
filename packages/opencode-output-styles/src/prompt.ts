@@ -2,9 +2,7 @@ import type { Style } from "./styles.js";
 
 export const FALLBACK_REMINDER = "Remember to follow the specific guidelines for this style.";
 
-/** Instruction entry key holding the active style. */
 export const ENTRY_KEY = "output-style";
-/** Prompt metadata key holding the reminder recorded when the prompt was sent. */
 export const REMINDER_METADATA_KEY = "outputStyleReminder";
 
 export function entryValue(style: Pick<Style, "name" | "prompt">): string {
