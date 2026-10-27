@@ -1,6 +1,6 @@
 # Documentation
 
-The root [README](../README.md) and package READMEs describe current installation and usage. The [V1 guide](./v1-plugins.md) retains instructions for OpenCode V1, including the frozen releases whose package READMEs now describe V2. Contributor checks and release procedures live in [CONTRIBUTING.md](../CONTRIBUTING.md).
+The root [README](../README.md) and package READMEs describe current installation and usage. The [V1 guide](./v1-plugins.md) retains instructions for OpenCode V1, including the frozen releases whose package READMEs now describe V2. Contributor checks, release procedures, and [Testing in OpenCode](../CONTRIBUTING.md#testing-in-opencode) (trying a local build in your own setup) live in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Map
 
@@ -30,5 +30,12 @@ The V1 prompt-sync workflow stays on. A V2 port is TBD; no V2 release is availab
 Provenance notes ship with the skill where they exist. The Biome skill carries its own `LICENSE.txt` and changelog. Do not invent ownership or license claims for the rest.
 
 ## Conventions
+
+Where each kind of content goes:
+
+- **Root README:** what each plugin is, the generic V2 install steps, and the Compatibility table, which is the one place that lists every plugin's minimum OpenCode version.
+- **Package README:** everything a user of that plugin needs: install (with its minimum version), usage, configuration, behavior notes, and troubleshooting. New READMEs start from [README-template.md](../README-template.md).
+- **Package AGENTS.md:** internals, verification notes, and test details for contributors.
+- **`docs/`:** plugin-author references, per-package research and findings, and dated snapshots. Not install or usage steps, except the V1 guide.
 
 Dated documents retain their scope banners and existing paths. Prefer links to current installation instructions rather than copying them; the V1 guide is the explicit compatibility reference for frozen releases. Update navigation and inbound links together if documents move.

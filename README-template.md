@@ -12,7 +12,7 @@
 
 ## Why?
 
-> [Why this plugin exists and what it achives...]
+> [Why this plugin exists and what it achieves...]
 
 ## Philosophy: Extending OpenCode
 
@@ -41,6 +41,8 @@ Some plugins will be special cases where one component (Server / TUI) is not req
 
 ### OpenCode V2
 
+Requires OpenCode **<2.x.y>** or later. [Use the lowest version the package's `@opencode/plugin` peer range allows.]
+
 <server|TUI>
 This plugin has only a [Server|TUI] component.
 
@@ -59,7 +61,7 @@ Add it under the `"plugins"` key in [`opencode.json(c)`|`cli.json`]:
 <server+TUI>
 This plugin has a Server component + TUI component.
 
-Add it under the `"plugins"` key in `opencode.json(c)`:
+Add one entry under the `"plugins"` key in `opencode.json(c)`:
 
 ```json
 {
@@ -67,15 +69,7 @@ Add it under the `"plugins"` key in `opencode.json(c)`:
 }
 ```
 
-**AND**
-
-Add it under the `"plugins"` key in `cli.json`:
-
-```json
-{
-  "plugins": ["@capybearista/opencode-<plugin-name>@latest"]
-}
-```
+The TUI half loads automatically, so `cli.json` needs no entry.
 </server+TUI>
 
 ### OpenCode V1
@@ -167,25 +161,13 @@ Pass options in the plugin's entry, using the object form:
 
 - [...]
 
-<optional>
-
-## Development Notes
-
-...
-</optional>
+[Keep the README for users. Internals, verification notes and test details go in the package's AGENTS.md or `docs/<plugin-name>/`.]
 
 ## Contributing
 
-This package lives in the `opencode-plugins` monorepo.
+This package lives in the `opencode-plugins` monorepo. See the [contribution guidelines](../../CONTRIBUTING.md) for setup, the full check suite, and releases, and open or find an issue before a pull request.
 
-See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
-
-- From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`,`bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test` as the workspace check.
-- For a focused run, `bun test` is supported from this package directory; its tests include the real local-directory resolver regression.
-- `bun run check` writes Biome changes; use it only when formatting changes are intended.
-- Prefer small, direct changes.
-
-Please open an issue or check for existing ones before creating a pull request.
+From this directory, `bun test` runs the package tests[ and `bun run smoke` checks the built package]. To try a change in your own OpenCode, see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
 
 ## License
 

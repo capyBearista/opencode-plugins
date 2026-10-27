@@ -48,7 +48,7 @@ flowchart TB
 
 ### OpenCode V2
 
-Requires OpenCode 2.1 or later. This is a TUI-only plugin: add it under the `"plugins"` key in `cli.json` (your global OpenCode config directory, usually `~/.config/opencode/cli.json`):
+Requires OpenCode **2.1.0** or later. This is a TUI-only plugin: add it under the `"plugins"` key in `cli.json` (your global OpenCode config directory, usually `~/.config/opencode/cli.json`):
 
 ```json
 {
@@ -149,31 +149,13 @@ OpenCode re-applies a plugin's options when `cli.json` changes, so edits take ef
 - **Terminals missing after a server restart**: Terminal panes that outlive a server restart are matched by their runtime directory under your home directory. If `XDG_STATE_HOME` points outside your home, they are not counted.
 - **Tools look high**: Tools include everything the server starts: MCP servers, language servers, shell commands, and terminal panes. Open `/ram` to see which processes are responsible.
 - **Options did not apply**: Make sure the entry uses the object form (see [Configuration](#configuration)) and lives in the global `cli.json`.
-
-## Development Notes
-
-### Debug logging
-
-Debug logging is disabled by default. To enable diagnostic logs during development:
-
-```bash
-OPENCODE_RAM_MONITOR_DEBUG=1 opencode
-```
-
-When enabled, the plugin appends structured JSON log lines to `.opencode-ram-monitor.log` in the current working directory.
+- **Reporting a bug**: Start OpenCode with `OPENCODE_RAM_MONITOR_DEBUG=1 opencode` to have the plugin append JSON log lines to `.opencode-ram-monitor.log` in the current directory, and attach that file. Logging is off by default.
 
 ## Contributing
 
-This package lives in the `opencode-plugins` monorepo.
+This package lives in the `opencode-plugins` monorepo. See the [contribution guidelines](../../CONTRIBUTING.md) for setup, the full check suite, and releases, and open or find an issue before a pull request.
 
-See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
-
-- From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`, `bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test` as the workspace check.
-- For a focused run, `bun test` is supported from this package directory. `bun run smoke` builds the package and loads it through OpenCode's own entry resolver.
-- `bun run check` writes Biome changes; use it only when formatting changes are intended.
-- Prefer small, direct changes.
-
-Please open an issue or check for existing ones before creating a pull request.
+From this directory, `bun test` runs the package tests and `bun run smoke` builds the package and loads it through OpenCode's own entry resolver. To try a change in your own OpenCode, see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
 
 ## License
 

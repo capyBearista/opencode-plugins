@@ -95,6 +95,9 @@ Remove the entry from `"plugins"`. Session choices live in session metadata and 
 
 A switch applies from your next message.
 
+- **Forked sessions** start on the global setting. A session's own style is not copied into a fork.
+- **Several open windows:** changing the global setting in one window doesn't update another window's sidebar line until you open the picker there or restart that TUI. The model still gets the current style, because the server reads the setting on every message.
+
 `none` and `global` are command words, so a custom style whose id or name is `none` or `global` can only be picked from the picker.
 
 ### Built-in styles
@@ -148,17 +151,9 @@ A file with the same id replaces the built-in completely: project over global ov
 
 ## Contributing
 
-This package lives in the `opencode-plugins` monorepo.
+This package lives in the `opencode-plugins` monorepo. See the [contribution guidelines](../../CONTRIBUTING.md) for setup, the full check suite, and releases, and open or find an issue before a pull request.
 
-See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
-
-- From the monorepo root, run `bun run build`, `bun run typecheck`, `bun run lint`, and `bun run test`. Do not use bare root `bun test` as the workspace check.
-- From this package directory, `bun test` runs the unit tests and `bun run smoke` checks the built package.
-- To try a change in your own OpenCode, point `plugins` at this directory; see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
-- `bun run check` writes Biome changes; use it only when formatting changes are intended.
-- The built-in styles are Claude Code's prompts. When refreshing them, see [the findings doc](../../docs/output-styles/v2-port-findings.md) for how they were extracted.
-
-Please open an issue or check for existing ones before creating a pull request.
+From this directory, `bun test` runs the package tests and `bun run smoke` checks the built package. To try a change in your own OpenCode, see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode). Before refreshing the built-in styles, read [the findings doc](../../docs/output-styles/v2-port-findings.md) for how they were extracted.
 
 ## License
 

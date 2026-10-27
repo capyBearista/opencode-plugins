@@ -52,7 +52,7 @@ win.
 
 ### OpenCode V2
 
-Add it under the `"plugins"` key in `opencode.json(c)`:
+Requires OpenCode **2.0.2** or later. Add it under the `"plugins"` key in `opencode.json(c)`:
 
 ```json
 {
@@ -140,7 +140,7 @@ singular and plural source spellings both exist, the plural (`commands/`, `agent
 nested names stay nested. Sources with invalid metadata are skipped with a diagnostic rather than
 linked. Links reconcile automatically as sources change; if an update does not appear, restart
 OpenCode. Command execution itself is not emulated — `$ARGUMENTS`, shell blocks, and `subagent`
-behavior stay native. See [Development Notes](#development-notes) for the bridge internals.
+behavior stay native. Bridge internals (manifests, locks, polling) are documented for contributors in [AGENTS.md](./AGENTS.md#bridge-internals).
 
 ## Configuration
 
@@ -163,41 +163,11 @@ V1 configuration as described in [Install](#install).
   diagnostic errors; when safe reconciliation resumes, the bridge reports that pending
   cleanup may remain. This message does not mean all stale links have been removed.
 
-## Development Notes
-
-### Bridge internals
-
-Each destination parent keeps version-1 ownership metadata under `.agents-loader/`
-(`commands-manifest.json` + `commands.lock` for commands, `agents-manifest.json` + `agents.lock`
-for agents; project-local under `.opencode/.agents-loader/`, global under
-`$OPENCODE_CONFIG_DIR/.agents-loader/`). Only exact recorded symlinks are ever removed; anything
-else fails closed with a diagnostic. Writes are atomic behind a bounded per-domain lock — never
-delete a stale lock while OpenCode instances are running.
-
-Each bridge polls every 500 ms for source edits, creations, deletions, renames, and
-native-name reservation changes, emitting a reload signal once per observed change. A reload
-signal is not a native rescan: changes may need an OpenCode rescan or a restart, and no
-universal hot-reload guarantee is made.
-
-
-The package checks include the real local-directory resolver regression, build/static checks, and
-the scoped bridge tests. In one isolated OpenCode setup, human verification confirmed agent and
-command discovery and native execution, global/project precedence fixtures, live additions,
-restart-required description changes, and removal cleanup. These observations do not promise
-identical watcher behavior for every OpenCode version, platform, provider, or config layout.
-
 ## Contributing
 
-This package lives in the `opencode-plugins` monorepo.
+This package lives in the `opencode-plugins` monorepo. See the [contribution guidelines](../../CONTRIBUTING.md) for setup, the full check suite, and releases, and open or find an issue before a pull request.
 
-See the [contribution guidelines](../../CONTRIBUTING.md) before opening a pull request.
-
-- From the monorepo root, run `bun run build` before artifact checks, then `bun run typecheck`,`bun run lint`, and the canonical `bun run test` Turbo pipeline. Do not use bare root `bun test` as the workspace check.
-- For a focused run, `bun test` is supported from this package directory; its tests include the real local-directory resolver regression.
-- `bun run check` writes Biome changes; use it only when formatting changes are intended.
-- Prefer small, direct changes.
-
-Please open an issue or check for existing ones before creating a pull request.
+From this directory, `bun test` runs the package tests. To try a change in your own OpenCode, see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
 
 ## License
 
