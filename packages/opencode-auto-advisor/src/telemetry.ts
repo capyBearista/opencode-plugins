@@ -44,7 +44,7 @@ export function createTelemetry(path: string = resolveTelemetryPath(), maxBytes 
       (info) => info.size,
       () => 0,
     );
-    if (size > 0 && size + line.length > maxBytes) await rename(path, `${path}.1`);
+    if (size > 0 && size + Buffer.byteLength(line) > maxBytes) await rename(path, `${path}.1`);
     await appendFile(path, line);
   };
   return {

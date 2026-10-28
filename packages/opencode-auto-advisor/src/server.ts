@@ -34,6 +34,7 @@ export const PLUGIN_ID = "capybearista.opencode-auto-advisor";
 const DEFAULT_CONTEXT_TOKENS = 128_000;
 /** Conservative chars-per-token, so the transcript fits even token-dense content. */
 const CHARS_PER_TOKEN = 3;
+const MAX_PROMPTS = 32;
 
 interface Snapshot {
   readonly system: readonly SystemText[];
@@ -117,16 +118,15 @@ export default Plugin.define({
     const budgetChars = async (model: ModelRef) => {
       const key = keyOf(model);
       if (!contextTokens.has(key)) {
-        let context = DEFAULT_CONTEXT_TOKENS;
         try {
           const { data } = await ctx.model.list({ types: ["chat"] });
           const info = data.find(
             (item) =>
               item.providerID === model.providerID && (item.modelID ?? item.id) === model.id,
           );
-          if (info?.limit?.context) context = info.limit.context;
+          // Cache only a real answer: a failed lookup is retried on the next consult.
+          contextTokens.set(key, info?.limit?.context || DEFAULT_CONTEXT_TOKENS);
         } catch {}
-        contextTokens.set(key, context);
       }
       const context = contextTokens.get(key) ?? DEFAULT_CONTEXT_TOKENS;
       return Math.floor(context * 0.75 * CHARS_PER_TOKEN);
@@ -187,7 +187,7 @@ export default Plugin.define({
       return { advice, model };
     };
 
-    await ctx.tool.transform((editor) => {
+    const toolRegistration = await ctx.tool.transform((editor) => {
       editor.add({
         name: TOOL_NAME,
         description: TOOL_DESCRIPTION,
@@ -229,7 +229,10 @@ export default Plugin.define({
     });
 
     const promptHook = await ctx.session.hook("prompt", async (event) => {
-      state(event.sessionID).prompts.add(event.messageID);
+      const { prompts } = state(event.sessionID);
+      prompts.add(event.messageID);
+      // Only the latest prompts matter for the turn key.
+      if (prompts.size > MAX_PROMPTS) prompts.delete(prompts.values().next().value as string);
     });
 
     const contextHook = await ctx.session.hook("context", async (event) => {
@@ -241,7 +244,13 @@ export default Plugin.define({
         }
         const messages = event.messages as unknown as Message[];
         const system = event.system.map(asText).filter((part): part is SystemText => Boolean(part));
-        session.last = { system, messages, tools: Object.keys(event.tools), model: event.model };
+        const snapshot: Snapshot = {
+          system,
+          messages,
+          tools: Object.keys(event.tools),
+          model: event.model,
+        };
+        session.last = snapshot;
 
         const { config } = await loadConfig();
         const { mode } = config.routing;
@@ -321,7 +330,7 @@ export default Plugin.define({
           const advisorModel = config.advisor.model ?? event.model;
           try {
             const { advice } = await review(
-              session.last,
+              snapshot,
               config.advisor.model,
               config.advisor.timeoutMs,
               verdict.reading.moment,
@@ -414,6 +423,7 @@ export default Plugin.define({
 
     return async () => {
       await iterator.return?.();
+      await toolRegistration.dispose();
       await promptHook.dispose();
       await contextHook.dispose();
       await rpc.dispose();

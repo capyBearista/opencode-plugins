@@ -153,6 +153,20 @@ describe("policy", () => {
 
   test("the moment is the likeliest non-routine one", () => {
     expect(read(answers({ approach: 0.3, stuck: 0.5, routine: 0.2 }, 2))?.moment).toBe("stuck");
-    expect(read(answers({ approach: 0.2, routine: 0.8 }, 2))?.moment).toBe("routine");
+  });
+
+  test("a consult never carries the routine label", () => {
+    const even = { approach: 0.25, stuck: 0.25, done: 0.25, routine: 0.25 };
+    const verdict = decide({ answers: answers(even, 3), routing });
+    expect(verdict.consult).toBe(true);
+    expect(verdict.reading?.moment).not.toBe("routine");
+  });
+
+  test("a moment answer without probabilities is unanswered", () => {
+    const bare = [{ name: "moment", type: "choice", choice: "routine" }, ok.answers[1]];
+    expect(decide({ answers: bare, routing })).toMatchObject({
+      consult: false,
+      reason: "unanswered",
+    });
   });
 });

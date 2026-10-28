@@ -48,17 +48,22 @@ export default Plugin.define({
     // Only reviews delivered while this TUI runs are shown; an old one after restart is noise.
     const [reviews, setReviews] = createSignal<Record<string, Status["latest"]>>({});
     const timers = new Set<ReturnType<typeof setTimeout>>();
+    // The entry id when each consult started: a finished consult is new only if it changed.
+    const before = new Map<string, string | undefined>();
 
     const setView = (sessionID: string, view: View) =>
       setViews((known) => ({ ...known, [sessionID]: view }));
 
     const offStarted = client.events.on("review.started", ({ data }) => {
-      if (data) setView(data.sessionID, "reviewing");
+      if (!data) return;
+      before.set(data.sessionID, data.latest?.id);
+      setView(data.sessionID, "reviewing");
     });
     const offFinished = client.events.on("review.finished", ({ data }) => {
       if (!data) return;
       // A consult that delivered nothing (stale, or no new entry) leaves the latest id unchanged.
-      const fresh = data.latest && data.latest.id !== reviews()[data.sessionID]?.id;
+      const fresh = Boolean(data.latest) && data.latest?.id !== before.get(data.sessionID);
+      before.delete(data.sessionID);
       const view: View = data.failed ? "failed" : fresh ? "finished" : "idle";
       setView(data.sessionID, view);
       if (fresh) setReviews((known) => ({ ...known, [data.sessionID]: data.latest }));

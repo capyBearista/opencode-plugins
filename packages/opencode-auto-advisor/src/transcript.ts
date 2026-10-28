@@ -139,7 +139,8 @@ export function turnKey(
 
 /**
  * What the Advisor sees: system text, tool names and the transcript. Over budget it keeps the
- * system text, the first user message and as many of the newest messages as fit.
+ * system text, the first user message and as many of the newest messages as fit, with every part
+ * capped at a quarter of the budget so no single message can crowd out the rest.
  */
 export function advisorTranscript(input: {
   readonly system: readonly SystemText[];
@@ -147,20 +148,26 @@ export function advisorTranscript(input: {
   readonly messages: readonly Message[];
   readonly budgetChars: number;
 }): string {
-  const head = [
-    `SYSTEM PROMPT:\n${input.system.map((part) => part.text).join("\n\n")}`,
-    `AVAILABLE TOOLS: ${input.tools.join(", ") || "(none)"}`,
-  ].join("\n\n");
-  const blocks = input.messages.map((message) => renderMessage(message).join("\n")).filter(Boolean);
-  const total = (list: readonly string[]) => list.reduce((sum, block) => sum + block.length + 2, 0);
-  if (head.length + total(blocks) <= input.budgetChars) return [head, ...blocks].join("\n\n");
+  const render = (partMax: number) => {
+    const head = [
+      `SYSTEM PROMPT:\n${truncate(input.system.map((part) => part.text).join("\n\n"), partMax)}`,
+      `AVAILABLE TOOLS: ${input.tools.join(", ") || "(none)"}`,
+    ].join("\n\n");
+    const blocks = input.messages.map((message) => renderMessage(message, partMax).join("\n"));
+    return { head, blocks };
+  };
 
+  const full = render(Number.POSITIVE_INFINITY);
+  const all = [full.head, ...full.blocks.filter(Boolean)].join("\n\n");
+  if (all.length <= input.budgetChars) return all;
+
+  const { head, blocks } = render(Math.floor(input.budgetChars / 4));
   const first = input.messages.findIndex(isUserPrompt);
+  const firstBlock = first >= 0 ? blocks[first] : "";
   const kept: string[] = [];
-  const firstBlock = first >= 0 ? renderMessage(input.messages[first]).join("\n") : "";
   let used = head.length + firstBlock.length + OMISSION_MARKER.length + 6;
-  for (let i = input.messages.length - 1; i > first; i--) {
-    const block = renderMessage(input.messages[i]).join("\n");
+  for (let i = blocks.length - 1; i > first; i--) {
+    const block = blocks[i];
     if (!block) continue;
     if (used + block.length + 2 > input.budgetChars) break;
     kept.unshift(block);

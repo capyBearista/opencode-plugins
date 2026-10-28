@@ -102,6 +102,28 @@ describe("advisorTranscript", () => {
     expect(text).not.toContain(OMISSION_MARKER);
   });
 
+  test("an oversized newest message is truncated, not dropped", () => {
+    const messages = [
+      user("u1", "task"),
+      result("read", "small"),
+      result("read", "q".repeat(50_000)),
+    ];
+    const text = advisorTranscript({ ...base, messages, budgetChars: 4_000 });
+    expect(text.length).toBeLessThanOrEqual(4_000);
+    expect(text).toContain("TOOL RESULT read: qqq");
+  });
+
+  test("an oversized system prompt and first request still fit the budget", () => {
+    const text = advisorTranscript({
+      system: [{ text: "s".repeat(20_000) }],
+      tools: ["bash"],
+      messages: [user("u1", "f".repeat(20_000)), result("bash", "latest step")],
+      budgetChars: 4_000,
+    });
+    expect(text.length).toBeLessThanOrEqual(4_000);
+    expect(text).toContain("latest step");
+  });
+
   test("over budget keeps the first request and the newest messages", () => {
     const messages = [
       user("u1", "original task"),
