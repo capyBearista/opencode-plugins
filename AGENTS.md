@@ -19,7 +19,7 @@ Subdirectories contain specialized files that extend these rules.
 
 ### Plugin Development (MUST)
 
-Scope: V1 packages. The five V2 ports use the Promise API instead; see the V2 boundary below.
+Scope: V1 packages. The V2 packages use the Promise API instead; see the V2 boundary below.
 
 - **MUST** keep server and TUI entrypoints split. If a plugin exposes both, publish separate `./server` and `./tui` exports instead of exporting both from one module.
 - **MUST** verify the real runtime path when testing local plugins. Check both the package build output and the harness config that OpenCode actually loads.
@@ -30,7 +30,7 @@ Scope: V1 packages. The five V2 ports use the Promise API instead; see the V2 bo
 
 ### V2 Boundary (MUST)
 
-Five packages have V2 ports; one remains V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
+Five packages have V2 ports, one is V2-only, and one remains V1-only. [`docs/v1-plugins.md`](docs/v1-plugins.md) is the compatibility authority for V1 install, pinning, and the V2 boundary — link it instead of duplicating version tables.
 
 | Package | V2 status |
 | --- | --- |
@@ -39,10 +39,11 @@ Five packages have V2 ports; one remains V1-only. [`docs/v1-plugins.md`](docs/v1
 | `opencode-adversarial-review` | Ported: server plugin, plural `plugins` in `opencode.json`; `2.x` on `latest` |
 | `opencode-agent-prompt-inheritance` | V1 only; V2 port TBD |
 | `opencode-output-styles` | Ported: combined server + TUI plugin, one plural `plugins` entry in `opencode.json` (TUI half loads automatically; requires OpenCode 2.2.0+); `2.x` on `latest`, V1 users pin `@1` |
+| `opencode-auto-advisor` | V2-only: combined server + TUI plugin, one plural `plugins` entry in `opencode.json` (requires OpenCode 2.2.0+); `2.x` on `latest`, no V1 line |
 | `opencode-ram-monitor` | Ported: TUI plugin (TUI-only since `2.1.0`, requires OpenCode 2.1+), plural `plugins` in `cli.json`; `2.x` on `latest` |
 
 - **MUST** use the V2 Promise API in ports: `Plugin.define({ id, setup })` from `@opencode/plugin` 2.x. Do not carry V1 `server`/`config` hook signatures into a port.
-- **MUST** keep V2 entrypoints at the package root: `server.js` for server plugins (loader, adversarial-review, output-styles, which also ships `tui.js`), `tui.js` for TUI plugins (timeline, ram-monitor). Filesystem-local config points at the package directory, not the entry file.
+- **MUST** keep V2 entrypoints at the package root: `server.js` for server plugins (loader, adversarial-review, output-styles and auto-advisor, which also ship `tui.js`), `tui.js` for TUI plugins (timeline, ram-monitor). Filesystem-local config points at the package directory, not the entry file.
 - **MUST** use the plural `"plugins"` key and split host config: server plugins in `opencode.json`, TUI plugins in `cli.json`. V1 keeps the singular `"plugin"` key in `opencode.json` / `tui.json`.
 - **MUST NOT** write `@v2` as a specifier — npm parses it as a semver range. Use `@latest` (or an exact `@2.0.0` pin for a fixed setup).
 - **MUST** keep V1 and V2 lines apart. The loader and timeline V1 releases are frozen but available by exact pin. Both lines may share the default config directory, so use separate profiles (`OPENCODE_CONFIG_DIR`) for side-by-side testing.
@@ -96,6 +97,7 @@ CI runs typecheck, lint, and test only — `bun run build` is a local-only gate;
 ### Packages
 - **`packages/opencode-adversarial-review/`** → Adversarial code review plugin with a clean-context review subagent and `/adversarial-review` command (see `packages/opencode-adversarial-review/AGENTS.md`)
 - **`packages/opencode-agent-prompt-inheritance/`** → Preserves provider system prompts when custom agents inject their own instructions (see `packages/opencode-agent-prompt-inheritance/AGENTS.md`)
+- **`packages/opencode-auto-advisor/`** → Claude Code-style Advisor with Decision-model-triggered automatic reviews (see `packages/opencode-auto-advisor/AGENTS.md`)
 - **`packages/opencode-agents-loader/`** → OpenCode plugin that extends command and agent discovery to ~/.agents/ and .agents/ directories (see packages/opencode-agents-loader/AGENTS.md)
 - **`packages/opencode-double-tap-timeline/`** → OpenCode plugin (see packages/opencode-double-tap-timeline/AGENTS.md)
 - **`packages/opencode-output-styles/`** → OpenCode plugin (see packages/opencode-output-styles/AGENTS.md)
