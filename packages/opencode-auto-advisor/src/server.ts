@@ -157,8 +157,11 @@ export default Plugin.define({
     const rpc = await ctx.rpc.register(AutoAdvisorRpc, {
       status: async (input) => status((input as { sessionID: string }).sessionID),
     });
+    // Each event awaits a status lookup; chaining keeps `finished` from overtaking `started`.
+    let emitting: Promise<unknown> = Promise.resolve();
     const emit = (name: "review.started" | "review.finished", sessionID: string) => {
-      status(sessionID)
+      emitting = emitting
+        .then(() => status(sessionID))
         .then((snapshot) =>
           name === "review.started"
             ? rpc.events.emit("review.started", { ...snapshot })
