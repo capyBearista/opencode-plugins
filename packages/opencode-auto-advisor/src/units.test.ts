@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AdvisorTimeoutError, advisorPrompt, consult } from "./advisor.js";
@@ -127,7 +127,12 @@ describe("telemetry", () => {
       .split("\n")
       .map((line) => JSON.parse(line));
     expect(current.at(-1).step).toBe(4);
-    expect((await stat(`${path}.1`)).size).toBeGreaterThan(0);
+    expect(current.length).toBeLessThan(5);
+    const rotated = (await readFile(`${path}.1`, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(rotated.at(-1).step).toBe(current[0].step - 1);
   });
 
   test("write failures are swallowed", async () => {
