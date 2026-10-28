@@ -55,6 +55,8 @@ describe("setup", () => {
     expect(Object.keys(handlers).sort()).toEqual(["review.finished", "review.started"]);
     handlers["review.started"]({ data: { sessionID: "s" } });
     handlers["review.finished"]({ data: { sessionID: "s", failed: false, latest } });
+    // A later consult that delivered nothing leaves the same latest review behind.
+    handlers["review.finished"]({ data: { sessionID: "s", failed: false, latest } });
     cleanup();
     expect(slots).toEqual([]);
     expect(unsubscribed).toBe(2);

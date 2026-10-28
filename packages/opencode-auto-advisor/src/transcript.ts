@@ -83,6 +83,21 @@ function lastUserIndex(messages: readonly Message[]): number {
   return -1;
 }
 
+/**
+ * Index of the latest real user prompt. Synthetic, skill, shell and compaction messages are
+ * `role: "user"` too, so when the ids of real prompts are known (recorded by the `prompt` hook)
+ * only those count.
+ */
+function promptIndex(messages: readonly Message[], prompts?: ReadonlySet<string>): number {
+  if (prompts?.size) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const id = messages[i].id;
+      if (messages[i].role === "user" && id && prompts.has(id)) return i;
+    }
+  }
+  return lastUserIndex(messages);
+}
+
 export const DECISION_INPUT_MAX_CHARS = 32_000;
 const DECISION_RECENT_LINES = 12;
 const DECISION_LINE_MAX = 1_000;
@@ -92,8 +107,8 @@ const DECISION_REQUEST_MAX = 4_000;
  * What the Decision model sees: the latest request, the current turn's recent steps and two
  * counts. No system prompt or tool definitions: this goes to a third-party decision provider.
  */
-export function decisionInput(messages: readonly Message[]): string {
-  const start = lastUserIndex(messages);
+export function decisionInput(messages: readonly Message[], prompts?: ReadonlySet<string>): string {
+  const start = promptIndex(messages, prompts);
   const request = start >= 0 ? renderMessage(messages[start], DECISION_REQUEST_MAX).join("\n") : "";
   const turn = messages.slice(start + 1);
   const steps = turn.filter((message) => message.role === "assistant").length;
@@ -113,22 +128,12 @@ export function decisionInput(messages: readonly Message[]): string {
   return truncate(text, DECISION_INPUT_MAX_CHARS);
 }
 
-/**
- * The id of the latest user prompt: the key the per-turn budget counts against. Synthetic, skill,
- * shell and compaction messages are `role: "user"` too, so when the ids of real prompts are known
- * (recorded by the `prompt` hook) only those count.
- */
+/** The id of the latest real user prompt: the key the per-turn budget counts against. */
 export function turnKey(
   messages: readonly Message[],
   prompts?: ReadonlySet<string>,
 ): string | undefined {
-  if (prompts?.size) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const id = messages[i].id;
-      if (messages[i].role === "user" && id && prompts.has(id)) return id;
-    }
-  }
-  const index = lastUserIndex(messages);
+  const index = promptIndex(messages, prompts);
   return index >= 0 ? (messages[index].id ?? `index:${index}`) : undefined;
 }
 

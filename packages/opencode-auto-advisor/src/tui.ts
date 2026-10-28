@@ -57,9 +57,11 @@ export default Plugin.define({
     });
     const offFinished = client.events.on("review.finished", ({ data }) => {
       if (!data) return;
-      const view: View = data.failed ? "failed" : "finished";
+      // A consult that delivered nothing (stale, or no new entry) leaves the latest id unchanged.
+      const fresh = data.latest && data.latest.id !== reviews()[data.sessionID]?.id;
+      const view: View = data.failed ? "failed" : fresh ? "finished" : "idle";
       setView(data.sessionID, view);
-      if (!data.failed) setReviews((known) => ({ ...known, [data.sessionID]: data.latest }));
+      if (fresh) setReviews((known) => ({ ...known, [data.sessionID]: data.latest }));
       const timer = setTimeout(() => {
         timers.delete(timer);
         if (views()[data.sessionID] === view) setView(data.sessionID, "idle");

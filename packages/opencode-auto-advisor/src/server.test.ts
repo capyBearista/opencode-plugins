@@ -312,6 +312,36 @@ describe("active", () => {
     expect(host.entries.s).toBeUndefined();
   });
 
+  test("an interrupt during the Decision call skips the consult", async () => {
+    let answer: (value: Any) => void = () => {};
+    const host = await start({ decision: () => new Promise((resolve) => (answer = resolve)) });
+    const event = request("s", [user("u1"), ...step(1)]);
+    const pending = host.hooks.context(event);
+    await Bun.sleep(10);
+    await host.send({
+      type: "session.execution.interrupted",
+      data: { sessionID: "s", reason: "user" },
+    });
+    answer(STUCK);
+    await pending;
+    expect(host.textCalls).toHaveLength(0);
+    expect(host.emitted).toEqual([]);
+  });
+
+  test("an interrupt ends a pending consult at once, without marking it failed", async () => {
+    const host = await start({ advice: () => new Promise(() => {}) });
+    const event = request("s", [user("u1"), ...step(1)]);
+    const pending = host.hooks.context(event);
+    await Bun.sleep(10);
+    await host.send({
+      type: "session.execution.interrupted",
+      data: { sessionID: "s", reason: "user" },
+    });
+    await pending;
+    expect(event.messages).toHaveLength(3);
+    expect((await host.rpc().status({ sessionID: "s" })).failed).toBe(false);
+  });
+
   test("an Advisor failure fails open and reports failed", async () => {
     const host = await start({ advice: async () => Promise.reject(new Error("down")) });
     const event = request("s", [user("u1"), ...step(1)]);

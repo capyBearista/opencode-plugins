@@ -55,6 +55,8 @@ interface SessionState {
   memo?: { key: string; review: Promise<Review | undefined> };
   /** Ids of real user prompts, from the `prompt` hook. */
   prompts: Set<string>;
+  /** Aborted when the run ends, so a pending consult stops waiting at once. */
+  abort?: AbortController;
   observing: boolean;
   reviewing: boolean;
   failed: boolean;
@@ -271,7 +273,7 @@ export default Plugin.define({
         if (mode === "observe") {
           if (session.observing) return;
           session.observing = true;
-          const text = decisionInput(messages);
+          const text = decisionInput(messages, session.prompts);
           void route(config.routing.models, text)
             .then((routed) => {
               const verdict = routed.ok
@@ -284,6 +286,7 @@ export default Plugin.define({
                 delivered: false,
               });
             })
+            .catch(() => {})
             .finally(() => {
               session.observing = false;
             });
@@ -292,17 +295,23 @@ export default Plugin.define({
 
         if (session.started >= config.routing.maxConsultationsPerTurn) return;
         const epoch = session.epoch;
+        const abort = new AbortController();
+        session.abort = abort;
         let settle: (value: Review | undefined) => void = () => {};
         session.memo = { key, review: new Promise((resolve) => (settle = resolve)) };
         let delivered: Review | undefined;
         let record: TelemetryRecord | undefined;
         try {
-          const routed = await route(config.routing.models, decisionInput(messages));
+          const routed = await route(
+            config.routing.models,
+            decisionInput(messages, session.prompts),
+          );
           const verdict = routed.ok
             ? decide({ answers: routed.result.answers, routing: config.routing })
             : undefined;
           record = { ...base, mode, ...summary(routed, verdict), delivered: false };
-          if (!verdict?.consult) return;
+          // The run may have ended while the Decision model answered: don't pay for a consult.
+          if (!verdict?.consult || session.epoch !== epoch) return;
 
           session.started++;
           session.reviewing = true;
@@ -316,6 +325,7 @@ export default Plugin.define({
               config.advisor.model,
               config.advisor.timeoutMs,
               verdict.reading.moment,
+              abort.signal,
             );
             if (session.epoch !== epoch) {
               record = {
@@ -347,14 +357,15 @@ export default Plugin.define({
               .put({ sessionID: event.sessionID, key: ENTRY_KEY, value: text })
               .catch(() => {});
           } catch (cause) {
+            const stale = session.epoch !== epoch;
             const timeout = cause instanceof AdvisorTimeoutError;
-            session.failed = true;
+            if (!stale) session.failed = true;
             record = {
               ...record,
               advisor: {
                 model: keyOf(advisorModel),
                 ms: Date.now() - start,
-                outcome: timeout ? "timeout" : "error",
+                outcome: stale ? "stale" : timeout ? "timeout" : "error",
               },
             };
           } finally {
@@ -393,6 +404,7 @@ export default Plugin.define({
         const session = sessions.get(sessionID);
         if (session) {
           session.epoch++;
+          session.abort?.abort();
           // The request reference can hold large attachments; drop it once the run ends.
           session.last = undefined;
           session.memo = undefined;

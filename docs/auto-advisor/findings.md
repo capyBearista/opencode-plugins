@@ -40,7 +40,8 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
 - One `plugins` entry in `opencode.json` loads both halves: `/api/plugin` reports `features: {server: true, tui: true}`.
 - `active` with thresholds at 0 and real Jev: step 1 and step 2 each got a review at the tail of their own request; each review became a durable entry from the next step on; the budget stopped at 2. Across primary requests the system prompt and tools were byte-identical and only the newest tail message changed.
 - `observe` with an explicit `advisor()` call from the mock: no request was changed, telemetry was written, and the Advisor's prompt contained the in-flight `TOOL CALL advisor`; its advice came back as the tool result.
-- Not covered live: interruption during a consult, compaction, child sessions. These are covered by `src/server.test.ts` only.
+- Interrupt during a consult (`POST /api/session/:id/interrupt`, Advisor reply held 20 s): `session.execution.interrupted` aborted the consult after 4.4 s, telemetry recorded `stale`, nothing was delivered, and the interrupted step sent no model request.
+- Not covered live: compaction and child sessions. These are covered by `src/server.test.ts` only.
 
 ## Re-verify recipe
 1. `npm i @opencode/cli@2.2.0` in a scratch dir. Set `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` to a scratch home.

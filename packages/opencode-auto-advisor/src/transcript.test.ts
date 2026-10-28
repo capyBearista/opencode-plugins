@@ -71,6 +71,12 @@ describe("decisionInput", () => {
     expect(text).toContain("TOOL RESULT bash (error)");
   });
 
+  test("prefers the latest real prompt over a synthetic user message", () => {
+    const text = decisionInput([...turn, user("skill-1", "skill output")], new Set(["u1"]));
+    expect(text).toContain("Latest user request:\nUSER: Fix the failing login test");
+    expect(text).toContain("USER: skill output");
+  });
+
   test("stays under the provider input cap", () => {
     const big = Array.from({ length: 200 }, (_, i) => result("read", "x".repeat(5_000 + i)));
     const text = decisionInput([user("u1", "y".repeat(50_000)), ...big]);
