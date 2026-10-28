@@ -161,5 +161,4 @@ describe("policy", () => {
     expect(verdict.consult).toBe(true);
     expect(verdict.reading?.moment).not.toBe("routine");
   });
-  });
 });
