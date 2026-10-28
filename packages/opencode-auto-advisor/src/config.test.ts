@@ -33,6 +33,11 @@ describe("parseConfig", () => {
       id: "gpt-6",
     });
     expect(parseConfig({ advisor: { model: "inherit" } }).advisor.model).toBeUndefined();
+    expect(parseConfig({ advisor: { model: "openai/gpt-6#high" } }).advisor.model).toEqual({
+      providerID: "openai",
+      id: "gpt-6",
+      variant: "high",
+    });
   });
 
   test("routing.models keeps order and splits on the first slash", () => {
@@ -71,6 +76,18 @@ describe("parseModelRef", () => {
     expect(parseModelRef("/x")).toBeUndefined();
     expect(parseModelRef("x/")).toBeUndefined();
     expect(parseModelRef("a/b")).toEqual({ providerID: "a", id: "b" });
+  });
+
+  test("reads an optional #variant after the model", () => {
+    expect(parseModelRef("openrouter/meta/muse#xhigh")).toEqual({
+      providerID: "openrouter",
+      id: "meta/muse",
+      variant: "xhigh",
+    });
+    expect(parseModelRef("a/b#")).toBeUndefined();
+    expect(parseModelRef("a/#high")).toBeUndefined();
+    expect(parseModelRef("a/b#c#d")).toBeUndefined();
+    expect(parseModelRef("a#x/b")).toBeUndefined();
   });
 });
 

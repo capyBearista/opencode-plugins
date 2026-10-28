@@ -239,6 +239,18 @@ describe("active", () => {
     expect(JSON.stringify(line)).not.toContain("clock skew");
   });
 
+  test("an inherited Advisor keeps the Executor's variant", async () => {
+    const host = await start();
+    const event = {
+      ...request("s", [user("u1"), ...step(1)]),
+      model: { providerID: "mock", id: "exec", variant: "max" },
+    };
+    await host.hooks.context(event);
+    expect(host.textCalls[0].model).toEqual({ providerID: "mock", id: "exec", variant: "max" });
+    await Bun.sleep(20);
+    expect((await telemetryLines())[0].advisor.model).toBe("mock/exec#max");
+  });
+
   test("a routine moment changes nothing", async () => {
     const host = await start({ decision: async () => ROUTINE });
     const event = request("s", [user("u1"), ...step(1)]);
@@ -416,7 +428,7 @@ describe("explicit advisor()", () => {
   test("reviews the last request plus the in-flight call, without spending the budget", async () => {
     await writeConfig({
       routing: { mode: "active", maxConsultationsPerTurn: 1 },
-      advisor: { model: "openai/gpt-6" },
+      advisor: { model: "openai/gpt-6#high" },
     });
     const host = await start({ decision: async () => ROUTINE });
     await host.hooks.context(request("s", [user("u1"), ...step(1)]));
@@ -424,7 +436,7 @@ describe("explicit advisor()", () => {
       .tool()
       .execute({}, { sessionID: "s", messageID: "a-live", signal: new AbortController().signal });
     expect(result.content).toBe("Check the token clock skew first.");
-    expect(host.textCalls[0].model).toEqual({ providerID: "openai", id: "gpt-6" });
+    expect(host.textCalls[0].model).toEqual({ providerID: "openai", id: "gpt-6", variant: "high" });
     expect(host.textCalls[0].prompt).toContain("The Executor asked for this review.");
     expect(host.textCalls[0].prompt).toContain("TOOL CALL advisor");
   });

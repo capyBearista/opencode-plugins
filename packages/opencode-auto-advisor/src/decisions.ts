@@ -1,4 +1,4 @@
-import type { ModelRef } from "./config.js";
+import { type ModelRef, modelKey } from "./config.js";
 
 export type Moment = "approach" | "stuck" | "done" | "routine";
 
@@ -102,8 +102,6 @@ export const ATTEMPT_TIMEOUT_MS = 5_000;
 export const TOTAL_TIMEOUT_MS = 10_000;
 export const SKIP_MS = 60_000;
 
-const key = (ref: ModelRef) => `${ref.providerID}/${ref.id}`;
-
 /**
  * Host error tags seen on 2.2.0 (spike S1). The host already retries rate limits, overload and
  * unsent requests, so a failure here moves to the next model or stops; it never retries.
@@ -152,7 +150,7 @@ export function createRouter(generate: GenerateDecisions, now: () => number = Da
     const attempts: Attempt[] = [];
     const deadline = now() + TOTAL_TIMEOUT_MS;
     for (const ref of models) {
-      const model = key(ref);
+      const model = modelKey(ref);
       if ((skipUntil.get(model) ?? 0) > now()) {
         attempts.push({ model, outcome: "skipped", ms: 0 });
         continue;

@@ -7,6 +7,8 @@ export type RoutingMode = "off" | "observe" | "active";
 export interface ModelRef {
   readonly providerID: string;
   readonly id: string;
+  /** A catalog variant such as `high`; undefined uses the model's default. */
+  readonly variant?: string;
 }
 
 export interface Config {
@@ -40,12 +42,23 @@ export const DEFAULTS: Config = {
 
 export class ConfigError extends Error {}
 
-/** Model IDs may contain slashes (`openrouter/typesafe/jev-1.13`), so only the first one splits. */
+/**
+ * `provider/model[#variant]`, OpenCode's own model-ref syntax. Model IDs may contain slashes
+ * (`openrouter/typesafe/jev-1.13`), so only the first one splits.
+ */
 export function parseModelRef(value: string): ModelRef | undefined {
   const slash = value.indexOf("/");
-  if (slash <= 0 || slash === value.length - 1) return undefined;
-  return { providerID: value.slice(0, slash), id: value.slice(slash + 1) };
+  if (slash <= 0) return undefined;
+  const hash = value.indexOf("#", slash + 1);
+  const id = value.slice(slash + 1, hash === -1 ? undefined : hash);
+  const variant = hash === -1 ? undefined : value.slice(hash + 1);
+  const providerID = value.slice(0, slash);
+  if (!id || providerID.includes("#") || variant === "" || variant?.includes("#")) return undefined;
+  return { providerID, id, ...(variant ? { variant } : {}) };
 }
+
+export const modelKey = (ref: ModelRef) =>
+  `${ref.providerID}/${ref.id}${ref.variant ? `#${ref.variant}` : ""}`;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -95,7 +108,8 @@ export function parseConfig(input: unknown): Config {
   let model = DEFAULTS.advisor.model;
   if (advisor.model !== undefined && advisor.model !== "inherit") {
     model = typeof advisor.model === "string" ? parseModelRef(advisor.model) : undefined;
-    if (!model) throw new ConfigError('advisor.model must be "inherit" or "provider/model"');
+    if (!model)
+      throw new ConfigError('advisor.model must be "inherit" or "provider/model[#variant]"');
   }
 
   let mode = DEFAULTS.routing.mode;
@@ -119,7 +133,7 @@ export function parseConfig(input: unknown): Config {
       new Set(list as string[]).size === refs.length;
     if (!valid) {
       throw new ConfigError(
-        `routing.models must list 1..${MAX_MODELS} distinct "provider/model" decision models`,
+        `routing.models must list 1..${MAX_MODELS} distinct "provider/model[#variant]" decision models`,
       );
     }
     models = refs as ModelRef[];

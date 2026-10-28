@@ -7,7 +7,7 @@ import {
   TOOL_DESCRIPTION,
   TOOL_NAME,
 } from "./advisor.js";
-import { createConfigLoader, type ModelRef } from "./config.js";
+import { createConfigLoader, type ModelRef, modelKey } from "./config.js";
 import { createRouter, type GenerateDecisions } from "./decisions.js";
 import {
   ENTRY_KEY,
@@ -63,7 +63,6 @@ interface SessionState {
   failed: boolean;
 }
 
-const keyOf = (ref: ModelRef) => `${ref.providerID}/${ref.id}`;
 const asText = (part: unknown) =>
   typeof (part as { text?: unknown })?.text === "string"
     ? { text: (part as { text: string }).text }
@@ -116,7 +115,7 @@ export default Plugin.define({
 
     const contextTokens = new Map<string, number>();
     const budgetChars = async (model: ModelRef) => {
-      const key = keyOf(model);
+      const key = modelKey(model);
       if (!contextTokens.has(key)) {
         try {
           const { data } = await ctx.model.list({ types: ["chat"] });
@@ -342,7 +341,11 @@ export default Plugin.define({
             if (session.epoch !== epoch) {
               record = {
                 ...record,
-                advisor: { model: keyOf(advisorModel), ms: Date.now() - start, outcome: "stale" },
+                advisor: {
+                  model: modelKey(advisorModel),
+                  ms: Date.now() - start,
+                  outcome: "stale",
+                },
               };
               return;
             }
@@ -357,7 +360,7 @@ export default Plugin.define({
             record = {
               ...record,
               advisor: {
-                model: keyOf(advisorModel),
+                model: modelKey(advisorModel),
                 ms: Date.now() - start,
                 outcome: "ok",
                 chars: advice.length,
@@ -375,7 +378,7 @@ export default Plugin.define({
             record = {
               ...record,
               advisor: {
-                model: keyOf(advisorModel),
+                model: modelKey(advisorModel),
                 ms: Date.now() - start,
                 outcome: stale ? "stale" : timeout ? "timeout" : "error",
               },

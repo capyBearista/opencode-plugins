@@ -86,10 +86,10 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 
 | Key | Default | Description |
 | :--- | :--- | :--- |
-| `advisor.model` | `"inherit"` | `"provider/model"` of the Advisor, or `"inherit"` to use the agent's own model. |
+| `advisor.model` | `"inherit"` | `"provider/model"` of the Advisor, optionally with `#variant` for its reasoning level (`"openai/gpt-6#high"`). Without a variant, the provider's default applies. `"inherit"` uses the agent's own model and variant. |
 | `advisor.timeoutMs` | `300000` | Soft deadline for one consult. An automatic consult that runs out fails open; an explicit one returns an error. |
 | `routing.mode` | `"off"` | `off`, `observe` (Decision model only, logged), or `active` (consults and delivers). |
-| `routing.models` | `["opencode/jev-1.13-free"]` | Ordered decision models, 1–8 `"provider/model"` refs. On an availability or auth failure, the plugin tries the next one. |
+| `routing.models` | `["opencode/jev-1.13-free"]` | Ordered decision models, 1–8 `"provider/model[#variant]"` refs. On an availability or auth failure, the plugin tries the next one. |
 | `routing.momentThreshold` | `0.7` | Minimum probability that the step is not routine. |
 | `routing.consequenceThreshold` | `1.5` | Minimum stakes score (0 trivial … 4 critical), compared unrounded. |
 | `routing.maxConsultationsPerTurn` | `2` | Automatic consults per user turn. |

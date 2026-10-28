@@ -34,6 +34,7 @@
 - **Hooks and `generate.*` calls can't be cancelled.** A consult that outlives its run is dropped by the session epoch, which is bumped on `session.execution.{succeeded,failed,interrupted}`.
 - **Synthetic, skill, shell and compaction messages are `role: "user"` too.** The turn key prefers ids recorded by the `prompt` hook.
 - **`generate.text` without a model uses the global default**, not the agent's. Always pass the agent's `event.model` for "inherit".
+- **A model ref without a variant gets no reasoning overlay** (the provider's default), not the agent's variant. `event.model` carries the agent's variant, so "inherit" keeps it; an unknown `#variant` fails the call with `InvalidRequestError` (`field: model.variant`).
 - **Decision errors are plain objects with `_tag`.** A provider without credentials reports `Generate.ModelNotFoundError`, not an auth error. Shapes are in `src/fixtures/s1-decisions.json`.
 - **The host retries rate limits itself.** The router never retries; it skips a throttled model for 60 s instead of stalling every step.
 - **One `opencode.json` entry loads both halves**; `cli.json` needs none. The TUI gets `context.options = {}`, so configuration stays server-side.
