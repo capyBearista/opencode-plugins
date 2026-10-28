@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { type FileHandle, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -178,22 +178,29 @@ export interface LoadedConfig {
 export function createConfigLoader(path: string = resolveConfigPath()) {
   let cached: { mtime: number; loaded: LoadedConfig } | undefined;
   return async (): Promise<LoadedConfig> => {
-    let mtime: number;
+    // One handle for both the mtime check and the read, so they always see the same file.
+    let file: FileHandle;
     try {
-      mtime = (await stat(path)).mtimeMs;
+      file = await open(path, "r");
     } catch {
       return { config: DEFAULTS };
     }
-    if (cached?.mtime === mtime) return cached.loaded;
+    let mtime: number;
     let loaded: LoadedConfig;
     try {
-      loaded = { config: parseConfig(JSON.parse(await readFile(path, "utf8"))) };
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      loaded = {
-        config: { ...DEFAULTS, routing: { ...DEFAULTS.routing, mode: "off" } },
-        error: `${path}: ${message}`,
-      };
+      mtime = (await file.stat()).mtimeMs;
+      if (cached?.mtime === mtime) return cached.loaded;
+      try {
+        loaded = { config: parseConfig(JSON.parse(await file.readFile("utf8"))) };
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        loaded = {
+          config: { ...DEFAULTS, routing: { ...DEFAULTS.routing, mode: "off" } },
+          error: `${path}: ${message}`,
+        };
+      }
+    } finally {
+      await file.close();
     }
     cached = { mtime, loaded };
     return loaded;

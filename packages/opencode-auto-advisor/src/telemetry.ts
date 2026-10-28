@@ -1,4 +1,4 @@
-import { appendFile, mkdir, rename, stat } from "node:fs/promises";
+import { mkdir, open, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Attempt } from "./decisions.js";
@@ -40,12 +40,19 @@ export function createTelemetry(path: string = resolveTelemetryPath(), maxBytes 
   let queue: Promise<void> = Promise.resolve();
   const write = async (line: string) => {
     await mkdir(dirname(path), { recursive: true });
-    const size = await stat(path).then(
-      (info) => info.size,
-      () => 0,
-    );
-    if (size > 0 && size + Buffer.byteLength(line) > maxBytes) await rename(path, `${path}.1`);
-    await appendFile(path, line);
+    // Size check and append go through one handle, so they always see the same file.
+    let file = await open(path, "a");
+    try {
+      const { size } = await file.stat();
+      if (size > 0 && size + Buffer.byteLength(line) > maxBytes) {
+        await file.close();
+        await rename(path, `${path}.1`);
+        file = await open(path, "a");
+      }
+      await file.appendFile(line);
+    } finally {
+      await file.close();
+    }
   };
   return {
     record(entry: TelemetryRecord): void {
