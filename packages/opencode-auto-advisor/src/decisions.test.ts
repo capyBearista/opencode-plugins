@@ -161,12 +161,5 @@ describe("policy", () => {
     expect(verdict.consult).toBe(true);
     expect(verdict.reading?.moment).not.toBe("routine");
   });
-
-  test("a moment answer without probabilities is unanswered", () => {
-    const bare = [{ name: "moment", type: "choice", choice: "routine" }, ok.answers[1]];
-    expect(decide({ answers: bare, routing })).toMatchObject({
-      consult: false,
-      reason: "unanswered",
-    });
   });
 });

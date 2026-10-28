@@ -20,8 +20,7 @@ export function read(answers: readonly Answer[]): Reading | undefined {
   const consequence = answers.find((answer) => answer.name === "consequence");
   if (moment?.type !== "choice" || consequence?.type !== "score") return undefined;
   if (typeof consequence.score !== "number") return undefined;
-  if (!Array.isArray(moment.probabilities)) return undefined;
-  const probabilities = moment.probabilities;
+  const probabilities = moment.probabilities ?? [];
   const p = (value: Moment) => probabilities.find((item) => item.value === value)?.probability ?? 0;
   const candidates: Moment[] = ["approach", "stuck", "done"];
   const best = candidates.reduce((a, b) => (p(b) > p(a) ? b : a));
