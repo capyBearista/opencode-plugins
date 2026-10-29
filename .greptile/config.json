@@ -1,0 +1,30 @@
+{
+  "rules": [
+    {
+      "id": "plugin-install-contract",
+      "rule": "For a change to a plugin manifest or loadable entrypoint, flag a demonstrable mismatch between the published exports, built artifact, required @opencode/plugin peer, supported OpenCode major, and the actual server/TUI loading path. Do not assume a V1-only package should use V2 APIs; use the package's compatibility contract and identify the failing install or load path.",
+      "scope": [
+        "packages/*/package.json",
+        "packages/*/server.js",
+        "packages/*/tui.js",
+        "packages/*/src/index.ts",
+        "packages/*/src/server.ts",
+        "packages/*/src/tui.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "release-policy-coherence",
+      "rule": "Flag changes that allow unpublished package versions outside their approved OpenCode-major release class, desynchronize the release-channel policy and guard, or bypass the authorized Changesets/publish checks. Demonstrate the specific unsupported version or release path; do not treat ordinary package version increments as defects.",
+      "scope": [
+        "packages/*/package.json",
+        ".changeset/**",
+        "tools/release-channel-guard.ts",
+        "tools/release-channels.json",
+        ".github/workflows/release.yml",
+        ".github/workflows/changesets.yml"
+      ],
+      "severity": "high"
+    }
+  ]
+}

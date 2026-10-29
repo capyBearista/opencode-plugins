@@ -1,0 +1,47 @@
+{
+  "files": [
+    {
+      "path": "src/measure.ts",
+      "description": "OpenCode/Tools process ownership and memory aggregation.",
+      "scope": [
+        "src/tree.ts",
+        "src/tui.ts",
+        "src/snapshot.ts",
+        "src/command.ts"
+      ]
+    },
+    {
+      "path": "src/snapshot.ts",
+      "description": "OS-specific process enumeration and parsing contract.",
+      "scope": [
+        "src/measure.ts",
+        "src/command.ts",
+        "src/tui.ts"
+      ]
+    },
+    {
+      "path": "src/options.ts",
+      "description": "The only user-visible cli.json options and their validation.",
+      "scope": [
+        "src/tui.ts",
+        "src/format.ts"
+      ]
+    },
+    {
+      "path": "src/measure.test.ts",
+      "description": "Process-tree accounting and fallback coverage.",
+      "scope": [
+        "src/measure.ts",
+        "src/tree.ts"
+      ]
+    },
+    {
+      "path": "src/tui.test.ts",
+      "description": "Mounted TUI, polling cleanup, and modal behavior.",
+      "scope": [
+        "src/tui.ts",
+        "src/options.ts"
+      ]
+    }
+  ]
+}

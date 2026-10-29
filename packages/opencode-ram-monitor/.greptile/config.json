@@ -1,0 +1,38 @@
+{
+  "rules": [
+    {
+      "id": "process-accounting-integrity",
+      "rule": "Flag a concrete process tree or PID reuse scenario that double-counts RAM, drops the server/TUI boundary, misattributes orphaned terminal daemons, or trusts an unverified server PID. Identify the expected and erroneous totals.",
+      "scope": [
+        "src/measure.ts",
+        "src/tree.ts",
+        "src/command.ts",
+        "src/snapshot.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "tui-only-loading",
+      "rule": "Flag changes that accidentally expose a server or package-root entrypoint, use an incompatible V2 cli.json installation shape, or break the built TUI export. This package is intentionally TUI-only.",
+      "scope": [
+        "package.json",
+        "tui.js",
+        "src/tui.ts",
+        "scripts/smoke-built.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "cross-platform-process-probing",
+      "rule": "Flag a supported Linux/Windows command or parsing case that breaks process probing, allows overlapping polls, leaks timers, or produces invalid width-bound output. Provide a platform-specific failing example rather than general portability speculation.",
+      "scope": [
+        "src/snapshot.ts",
+        "src/command.ts",
+        "src/tui.ts",
+        "src/options.ts",
+        "src/format.ts"
+      ],
+      "severity": "medium"
+    }
+  ]
+}

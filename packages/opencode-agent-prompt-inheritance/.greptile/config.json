@@ -1,0 +1,26 @@
+{
+  "rules": [
+    {
+      "id": "prompt-order-and-fallback",
+      "rule": "Flag a change that drops, duplicates, or reverses the configured placement of the V1 provider base prompt, or makes missing session/provider information fail closed when the documented behavior is fail-open. Identify a concrete model, setting, or unavailable-session case.",
+      "scope": [
+        "src/index.ts",
+        "src/inheritance.ts",
+        "src/provider-prompt.ts",
+        "src/prompt-capture.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "generated-prompt-integrity",
+      "rule": "Flag changes that desynchronize generated provider-prompt fixtures, the mapping that selects them, the upstream sync script, or the build's dist/prompt assets. Do not propose manual edits to generated upstream snapshots without a deliberate fixture update.",
+      "scope": [
+        "src/prompt/**",
+        "src/provider-prompt.ts",
+        "scripts/**",
+        "src/artifact.test.ts"
+      ],
+      "severity": "medium"
+    }
+  ]
+}

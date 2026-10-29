@@ -1,0 +1,33 @@
+{
+  "rules": [
+    {
+      "id": "reviewer-tool-boundary",
+      "rule": "Flag a change that lets a reviewer mutate the workspace, invoke unapproved tools, access protected environment files or credentials, or defeat inherited denies. Respect the host's last-match-wins rule order. Show the exact rule precedence or executable command path.",
+      "scope": [
+        "src/index.ts",
+        "src/index.test.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "command-install-ownership",
+      "rule": "Flag command installation, refresh, or cleanup that can overwrite user-owned content, follow a symlink leaf, delete an unowned command, or leave a corrupt file after an interrupted write. Account for known managed_version stamps and the intentional preserve-and-warn behavior.",
+      "scope": [
+        "src/index.ts",
+        "commands/**",
+        "src/index.test.ts"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "review-prompt-parity",
+      "rule": "Flag a material divergence between a reviewer's canonical prompt in src/prompt.ts and its matching src/prompts reference, or moving review doctrine into installed command templates so the two reviewers behave inconsistently. Point to the specific mismatched instruction.",
+      "scope": [
+        "src/prompt.ts",
+        "src/prompts/**",
+        "commands/**"
+      ],
+      "severity": "medium"
+    }
+  ]
+}

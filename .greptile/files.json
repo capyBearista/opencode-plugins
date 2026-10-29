@@ -1,0 +1,68 @@
+{
+  "files": [
+    {
+      "path": "docs/opencode-v2-plugin-runtime.md",
+      "description": "OpenCode V2 server/TUI loading, exported entrypoints, SDK peers, and host runtime semantics.",
+      "scope": [
+        "packages/opencode-adversarial-review/**",
+        "packages/opencode-agents-loader/**",
+        "packages/opencode-double-tap-timeline/**",
+        "packages/opencode-output-styles/**",
+        "packages/opencode-ram-monitor/**"
+      ]
+    },
+    {
+      "path": "docs/v1-plugins.md",
+      "description": "Authoritative V1 support and install boundaries versus V2 releases.",
+      "scope": [
+        "packages/*/package.json",
+        "packages/opencode-agent-prompt-inheritance/**",
+        "tools/release-channel-guard.ts",
+        "tools/release-channels.json",
+        ".github/workflows/release.yml"
+      ]
+    },
+    {
+      "path": "docs/opencode-plugin-ipc-and-os-patterns.md",
+      "description": "Host IPC, TUI startup and cross-platform process-inspection pitfalls.",
+      "scope": [
+        "packages/opencode-ram-monitor/**",
+        "packages/opencode-double-tap-timeline/**",
+        "packages/opencode-output-styles/**"
+      ]
+    },
+    {
+      "path": "docs/opencode-system-prompt-guide.md",
+      "description": "Scoped V1 prompt-assembly reference; not a V2 API specification.",
+      "scope": [
+        "packages/opencode-agent-prompt-inheritance/**"
+      ]
+    },
+    {
+      "path": "docs/output-styles/v2-port-findings.md",
+      "description": "Verified V2 output-style prompt, RPC and TUI runtime observations.",
+      "scope": [
+        "packages/opencode-output-styles/**"
+      ]
+    },
+    {
+      "path": "tools/release-channels.json",
+      "description": "Canonical package release-class and channel declarations.",
+      "scope": [
+        "packages/*/package.json",
+        ".changeset/**",
+        ".github/workflows/release.yml",
+        ".github/workflows/changesets.yml"
+      ]
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "description": "Canonical quality gates, isolated runtime tests and Changesets publication workflow.",
+      "scope": [
+        "tools/**",
+        ".github/workflows/**",
+        "packages/*/package.json"
+      ]
+    }
+  ]
+}

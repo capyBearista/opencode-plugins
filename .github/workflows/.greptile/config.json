@@ -1,0 +1,31 @@
+{
+  "rules": [
+    {
+      "id": "ci-quality-gate-preservation",
+      "rule": "Flag an introduced path where source/package/release-policy changes reach merge without the expected typecheck, lint, test, or Changesets class-major checks. Account for intentional docs/assets-only path filters and the locally required build gate.",
+      "scope": [
+        "ci.yml",
+        "changesets.yml"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "publish-trust-boundary",
+      "rule": "Flag workflow changes that allow untrusted PR code to publish, expose npm credentials or tokens, bypass the npm-publish authorization boundary, or publish without release guard verification. Identify the triggering event, permissions, and job path.",
+      "scope": [
+        "release.yml",
+        "changesets.yml",
+        "ci.yml"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "prompt-sync-workflow-integrity",
+      "rule": "Flag changes that fetch prompt fixtures from an unexpected source, silently bypass the intended review PR, or modify files outside the V1 generated prompt fixture set. Show the resulting change or unsafe trust boundary.",
+      "scope": [
+        "sync-opencode-prompts.yml"
+      ],
+      "severity": "medium"
+    }
+  ]
+}
