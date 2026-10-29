@@ -114,7 +114,8 @@ export default Plugin.define({
     };
 
     const contextTokens = new Map<string, number>();
-    const budgetChars = async (model: ModelRef) => {
+    /** Characters for the Advisor's transcript: `maxTokens`, or 75% of its window if smaller. */
+    const budgetChars = async (model: ModelRef, maxTokens: number) => {
       const key = modelKey(model);
       if (!contextTokens.has(key)) {
         try {
@@ -128,7 +129,7 @@ export default Plugin.define({
         } catch {}
       }
       const context = contextTokens.get(key) ?? DEFAULT_CONTEXT_TOKENS;
-      return Math.floor(context * 0.75 * CHARS_PER_TOKEN);
+      return Math.floor(Math.min(maxTokens, context * 0.75) * CHARS_PER_TOKEN);
     };
 
     const latestReview = async (sessionID: string) => {
@@ -179,7 +180,7 @@ export default Plugin.define({
       const model = advisor.model ?? snapshot.model;
       const transcript = advisorTranscript({
         ...snapshot,
-        budgetChars: await budgetChars(model),
+        budgetChars: await budgetChars(model, advisor.maxTokens),
         compact: advisor.compactContext,
       });
       const advice = await consult({

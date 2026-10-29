@@ -20,7 +20,7 @@
 
 - `src/server.ts` wires everything: the `advisor` tool, a `prompt` hook that records real prompt ids, the `context` hook (route → consult → deliver), an event subscription that ends stale consults, the `auto-advisor` RPC and telemetry.
 - `src/decisions.ts`: the two Decision questions and the router over `routing.models`. `src/policy.ts`: the pure consult verdict.
-- `src/transcript.ts`: the Decision projection (small, no system prompt) and the Advisor transcript (system text, tool names, messages, budgeted).
+- `src/transcript.ts`: the Decision projection (small, no system prompt) and the Advisor transcript (system text, tool names, messages; compacted, then budgeted to `min(advisor.maxTokens, 75% of the window)` at 3 chars per token).
 - `src/advisor.ts`: prompts and the timeout-raced consult. `src/delivery.ts`: review text, marker, tail push.
 - `src/config.ts`: strict sparse `auto-advisor.json`, re-read when its mtime changes. `src/telemetry.ts`: JSONL with one rotation.
 - `src/tui.ts`: footer status and the composer panel, driven only by RPC events.

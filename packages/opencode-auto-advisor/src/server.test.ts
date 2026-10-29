@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fixtures from "./fixtures/s1-decisions.json";
 import server from "./server.js";
-import { COMPACTED } from "./transcript.js";
+import { COMPACTED, OMISSION_MARKER } from "./transcript.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: loosely typed fake host context
 type Any = any;
@@ -485,5 +485,39 @@ describe("advisor context", () => {
   test("compactContext false sends the catalogs as they are", async () => {
     const { host } = await consultWith({ advisor: { compactContext: false } });
     expect(host.textCalls[0].prompt).toContain(catalog);
+  });
+});
+
+describe("advisor budget", () => {
+  // The fake catalog gives the Executor's model a 50k-token window: 75% is 37.5k tokens.
+  const transcriptOf = (prompt: string) => prompt.slice(prompt.indexOf("EXECUTOR TRANSCRIPT"));
+  const long = (count: number) =>
+    Array.from({ length: count }, (_, n) => ({
+      role: "assistant",
+      id: `big${n}`,
+      content: [{ type: "text", text: `${n}:${"x".repeat(2_000)}` }],
+    }));
+  const consultWith = async (config: unknown, messages: Any[]) => {
+    await writeConfig(config);
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1"), ...messages]));
+    await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "a-live", signal: new AbortController().signal });
+    return transcriptOf(host.textCalls[0].prompt);
+  };
+
+  test("advisor.maxTokens caps a transcript the window would allow", async () => {
+    const transcript = await consultWith({ advisor: { maxTokens: 1_000 } }, long(10));
+    expect(transcript.length).toBeLessThanOrEqual(3_000 + 30);
+    expect(transcript).toContain(OMISSION_MARKER);
+    expect(transcript).toContain("9:xx");
+  });
+
+  test("a window smaller than advisor.maxTokens wins", async () => {
+    const transcript = await consultWith({ advisor: { maxTokens: 1_000_000 } }, long(80));
+    expect(transcript.length).toBeLessThanOrEqual(112_500 + 30);
+    expect(transcript.length).toBeGreaterThan(100_000);
+    expect(transcript).toContain(OMISSION_MARKER);
   });
 });

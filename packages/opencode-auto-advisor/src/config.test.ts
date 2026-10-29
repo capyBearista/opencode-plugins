@@ -16,7 +16,7 @@ describe("parseConfig", () => {
 
   test("defaults match the agreed v1 values", () => {
     expect(DEFAULTS).toEqual({
-      advisor: { model: undefined, timeoutMs: 300_000, compactContext: true },
+      advisor: { model: undefined, timeoutMs: 300_000, compactContext: true, maxTokens: 64_000 },
       routing: {
         mode: "off",
         models: [{ providerID: "opencode", id: "jev-1.13-free" }],
@@ -25,6 +25,10 @@ describe("parseConfig", () => {
         maxConsultationsPerTurn: 2,
       },
     });
+  });
+
+  test("advisor.maxTokens accepts an integer of at least 1000", () => {
+    expect(parseConfig({ advisor: { maxTokens: 1_000 } }).advisor.maxTokens).toBe(1_000);
   });
 
   test("advisor.compactContext accepts a boolean", () => {
@@ -69,6 +73,8 @@ describe("parseConfig", () => {
     [{ advisor: { timeoutMs: 0 } }, "advisor.timeoutMs"],
     [{ advisor: { model: "x" } }, "advisor.model"],
     [{ advisor: { compactContext: "yes" } }, "advisor.compactContext"],
+    [{ advisor: { maxTokens: 64 } }, "advisor.maxTokens must be"],
+    [{ advisor: { maxTokens: 1_500.5 } }, "advisor.maxTokens must be"],
     [{ advisor: { other: 1 } }, "unknown key: advisor.other"],
     [[], "must be a JSON object"],
   ])("rejects %j", (input, message) => {

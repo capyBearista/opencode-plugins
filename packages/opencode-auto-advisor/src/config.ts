@@ -18,6 +18,8 @@ export interface Config {
     readonly timeoutMs: number;
     /** Replace the host's tool, MCP and skill catalogs in the Advisor's copy of the context. */
     readonly compactContext: boolean;
+    /** Ceiling on the Advisor's transcript; the model's window can lower it further. */
+    readonly maxTokens: number;
   };
   readonly routing: {
     readonly mode: RoutingMode;
@@ -32,7 +34,7 @@ export const CONFIG_FILE = "auto-advisor.json";
 const MAX_MODELS = 8;
 
 export const DEFAULTS: Config = {
-  advisor: { model: undefined, timeoutMs: 300_000, compactContext: true },
+  advisor: { model: undefined, timeoutMs: 300_000, compactContext: true, maxTokens: 64_000 },
   routing: {
     mode: "off",
     models: [{ providerID: "opencode", id: "jev-1.13-free" }],
@@ -103,7 +105,7 @@ export function parseConfig(input: unknown): Config {
       throw new ConfigError(`unknown key: ${key}`);
     }
   }
-  const advisor = section(input, "advisor", ["model", "timeoutMs", "compactContext"]);
+  const advisor = section(input, "advisor", ["model", "timeoutMs", "compactContext", "maxTokens"]);
   const routing = section(input, "routing", [
     "mode",
     "models",
@@ -157,6 +159,10 @@ export function parseConfig(input: unknown): Config {
         advisor.compactContext === undefined
           ? DEFAULTS.advisor.compactContext
           : boolean(advisor.compactContext, "advisor.compactContext"),
+      maxTokens:
+        advisor.maxTokens === undefined
+          ? DEFAULTS.advisor.maxTokens
+          : number(advisor.maxTokens, "advisor.maxTokens", 1_000, 10_000_000, true),
     },
     routing: {
       mode,
