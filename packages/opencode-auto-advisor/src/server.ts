@@ -214,7 +214,9 @@ export default Plugin.define({
               current && "content" in current && Array.isArray(current.content)
                 ? [{ role: "assistant", content: current.content.map(storedPart) }]
                 : [];
-            const { config } = await loadConfig();
+            const { config, error } = await loadConfig();
+            // An invalid file falls back to defaults; consulting the Executor's model would hide that.
+            if (error) throw new Error(`invalid config: ${error}`);
             const { advice } = await review(
               { ...snapshot, messages: [...snapshot.messages, ...inflight] },
               config.advisor,

@@ -75,7 +75,7 @@ Remove the entry from `"plugins"` in `opencode.json(c)`. Optionally delete `~/.c
 
 ## Configuration
 
-Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OPENCODE_CONFIG_DIR/auto-advisor.json`, or `$XDG_CONFIG_HOME/opencode/auto-advisor.json`). A missing file means all defaults, an omitted key means its default, and an invalid file turns automatic reviews off (the explicit tool keeps working). Changes apply on the next step without a restart.
+Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OPENCODE_CONFIG_DIR/auto-advisor.json`, or `$XDG_CONFIG_HOME/opencode/auto-advisor.json`). A missing file means all defaults, an omitted key means its default, and an invalid file turns automatic reviews off and makes the `advisor()` tool return the error. Changes apply on the next step without a restart.
 
 ```json
 {
@@ -108,7 +108,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 
 - **Nothing happens automatically**: `routing.mode` defaults to `off`. Check `telemetry.jsonl` for the verdicts: `routine` and `low-consequence` mean the thresholds held the review back, and `no-decision` means no configured decision model answered.
 - **"Advisor unavailable" in the footer**: the consult failed or timed out. The agent carried on without advice.
-- **Your config is ignored**: an invalid file switches automatic reviews off. Fix the value named in the error; unknown keys are rejected.
+- **Your config is ignored**: an invalid file switches automatic reviews off, and `advisor()` returns `invalid config: …` naming the bad value; unknown keys are rejected. With a local checkout, run `bun run build` after pulling: OpenCode loads `dist/`, and an older build rejects newer keys.
 - **Observe mode logs fewer lines than steps**: while one Decision call is still running, later steps in the same session are skipped rather than queued.
 
 ## Contributing

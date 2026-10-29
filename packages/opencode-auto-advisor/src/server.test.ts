@@ -442,6 +442,18 @@ describe("explicit advisor()", () => {
     expect(host.textCalls[0].prompt).toContain("TOOL CALL advisor");
   });
 
+  test("an invalid config fails the call instead of using the Executor's model", async () => {
+    await writeConfig({ advisor: { model: "openai/gpt-6", unknown: true } });
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1"), ...step(1)]));
+    const result = await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "a-live", signal: new AbortController().signal });
+    expect(result.content).toContain("Advisor consultation failed");
+    expect(result.content).toContain("unknown key: advisor.unknown");
+    expect(host.textCalls).toHaveLength(0);
+  });
+
   test("is refused in child sessions", async () => {
     const host = await start();
     const result = await host
