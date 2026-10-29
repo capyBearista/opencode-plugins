@@ -126,6 +126,26 @@ describe("advisorTranscript", () => {
     expect(text).toContain("latest step");
   });
 
+  test("a newest message with several large parts is shortened, not dropped", () => {
+    const parallel: Message = {
+      role: "tool",
+      content: ["a", "b", "c"].map((name) => ({
+        type: "tool-result",
+        id: name,
+        name: "read",
+        result: { type: "text", value: name.repeat(1_000) },
+      })),
+    };
+    const text = advisorTranscript({
+      system: [{ text: "s".repeat(1_000) }],
+      tools: ["read"],
+      messages: [user("u1", "f".repeat(1_000)), result("read", "older step"), parallel],
+      budgetChars: 3_000,
+    });
+    expect(text.length).toBeLessThanOrEqual(3_000);
+    expect(text).toContain("TOOL RESULT read: aaa");
+  });
+
   test("over budget keeps the first request and the newest messages", () => {
     const messages = [
       user("u1", "original task"),

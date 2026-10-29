@@ -228,7 +228,7 @@ export function turnKey(
 /**
  * What the Advisor sees: system text, tool names and the transcript. Over budget it keeps the
  * system text, the first user message and as many of the newest messages as fit, with every part
- * capped at a quarter of the budget so no single message can crowd out the rest.
+ * and every message capped at a quarter of the budget so no single message can crowd out the rest.
  */
 export function advisorTranscript(input: {
   readonly system: readonly SystemText[];
@@ -246,7 +246,11 @@ export function advisorTranscript(input: {
       `SYSTEM PROMPT:\n${truncate(system, partMax)}`,
       `AVAILABLE TOOLS: ${input.tools.join(", ") || "(none)"}`,
     ].join("\n\n");
-    const blocks = messages.map((message) => renderMessage(message, partMax).join("\n"));
+    // Cap whole messages too: one step's parallel tool results share a message, and the
+    // newest message must still fit after the system text and the first request.
+    const blocks = messages.map((message) =>
+      truncate(renderMessage(message, partMax).join("\n"), partMax),
+    );
     return { head, blocks };
   };
 
