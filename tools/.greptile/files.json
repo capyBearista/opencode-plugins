@@ -3,18 +3,12 @@
     {
       "path": "release-channels.json",
       "description": "Canonical package release classes and dist-tag channel policy.",
-      "scope": [
-        "release-channel-guard.ts",
-        "release-channel-guard.test.ts"
-      ]
+      "scope": ["release-channel-guard.ts", "release-channel-guard.test.ts"]
     },
     {
       "path": "release-channel-guard.test.ts",
       "description": "Negative and recovery tests for the publication and version-policy guard.",
-      "scope": [
-        "release-channel-guard.ts",
-        "release-channels.json"
-      ]
+      "scope": ["release-channel-guard.ts", "release-channels.json"]
     }
   ]
 }

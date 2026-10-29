@@ -3,31 +3,19 @@
     {
       "id": "append-only-style-context",
       "rule": "Flag changes that mutate already-observed system text or reminders, cause a new style to apply to the wrong model step, or replace session metadata without preserving other owners' keys. Trace the prompt/context hook timing and one affected session.",
-      "scope": [
-        "src/server.ts",
-        "src/prompt.ts",
-        "src/styles.ts"
-      ],
+      "scope": ["src/server.ts", "src/prompt.ts", "src/styles.ts"],
       "severity": "high"
     },
     {
       "id": "server-tui-rpc-contract",
       "rule": "Flag incompatible server/TUI RPC inputs, outputs or event handling, including omitted location, stale state, missing session awareness, or lost cleanup. Demonstrate the calling path that fails.",
-      "scope": [
-        "src/rpc.ts",
-        "src/server.ts",
-        "src/tui.ts"
-      ],
+      "scope": ["src/rpc.ts", "src/server.ts", "src/tui.ts"],
       "severity": "high"
     },
     {
       "id": "style-discovery-precedence",
       "rule": "Flag changes that incorrectly select, shadow, or omit built-in, global, or project-local styles, or break published style asset lookup. Use an explicit conflicting-style or build-layout example.",
-      "scope": [
-        "src/styles.ts",
-        "src/server.ts",
-        "built-in-styles/**"
-      ],
+      "scope": ["src/styles.ts", "src/server.ts", "built-in-styles/**"],
       "severity": "medium"
     }
   ]

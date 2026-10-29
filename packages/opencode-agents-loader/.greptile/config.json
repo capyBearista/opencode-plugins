@@ -3,29 +3,19 @@
     {
       "id": "managed-link-ownership",
       "rule": "Flag a path that overwrites, follows, renames, or removes an unmanaged native OpenCode file or symlink. Only manifest-owned managed relative symlinks may be cleaned up; give a concrete filesystem state that violates that boundary.",
-      "scope": [
-        "src/command-bridge.ts",
-        "src/index.ts"
-      ],
+      "scope": ["src/command-bridge.ts", "src/index.ts"],
       "severity": "high"
     },
     {
       "id": "agent-authorization-preservation",
       "rule": "Flag decoding or linking changes that accept malformed/unsupported V1 or V2 agent metadata, silently widen effective permissions, or override an explicitly configured native OpenCode agent or command. Identify the candidate frontmatter or collision.",
-      "scope": [
-        "src/agent-source.ts",
-        "src/command-bridge.ts",
-        "src/index.ts"
-      ],
+      "scope": ["src/agent-source.ts", "src/command-bridge.ts", "src/index.ts"],
       "severity": "high"
     },
     {
       "id": "discovery-and-lock-safety",
       "rule": "Flag a reproducible path traversal, symlink-parent, lock-race, or watcher cleanup failure that crosses the declared discovery root, deletes another instance's state, or leaves unmanaged links behind. Distinguish a reload signal from a guaranteed host rescan.",
-      "scope": [
-        "src/command-bridge.ts",
-        "src/index.ts"
-      ],
+      "scope": ["src/command-bridge.ts", "src/index.ts"],
       "severity": "high"
     }
   ]

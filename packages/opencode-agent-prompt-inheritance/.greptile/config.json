@@ -14,12 +14,7 @@
     {
       "id": "generated-prompt-integrity",
       "rule": "Flag changes that desynchronize generated provider-prompt fixtures, the mapping that selects them, the upstream sync script, or the build's dist/prompt assets. Do not propose manual edits to generated upstream snapshots without a deliberate fixture update.",
-      "scope": [
-        "src/prompt/**",
-        "src/provider-prompt.ts",
-        "scripts/**",
-        "src/artifact.test.ts"
-      ],
+      "scope": ["src/prompt/**", "src/provider-prompt.ts", "scripts/**", "src/artifact.test.ts"],
       "severity": "medium"
     }
   ]

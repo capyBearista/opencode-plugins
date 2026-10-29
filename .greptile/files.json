@@ -34,16 +34,12 @@
     {
       "path": "docs/opencode-system-prompt-guide.md",
       "description": "Scoped V1 prompt-assembly reference; not a V2 API specification.",
-      "scope": [
-        "packages/opencode-agent-prompt-inheritance/**"
-      ]
+      "scope": ["packages/opencode-agent-prompt-inheritance/**"]
     },
     {
       "path": "docs/output-styles/v2-port-findings.md",
       "description": "Verified V2 output-style prompt, RPC and TUI runtime observations.",
-      "scope": [
-        "packages/opencode-output-styles/**"
-      ]
+      "scope": ["packages/opencode-output-styles/**"]
     },
     {
       "path": "tools/release-channels.json",
@@ -58,11 +54,7 @@
     {
       "path": "CONTRIBUTING.md",
       "description": "Canonical quality gates, isolated runtime tests and Changesets publication workflow.",
-      "scope": [
-        "tools/**",
-        ".github/workflows/**",
-        "packages/*/package.json"
-      ]
+      "scope": ["tools/**", ".github/workflows/**", "packages/*/package.json"]
     }
   ]
 }

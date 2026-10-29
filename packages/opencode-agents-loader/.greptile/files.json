@@ -3,27 +3,17 @@
     {
       "path": "src/command-bridge.ts",
       "description": "Reconciliation, ownership manifests, locks, symlink safety, and scope discovery.",
-      "scope": [
-        "src/index.ts",
-        "src/agent-source.ts"
-      ]
+      "scope": ["src/index.ts", "src/agent-source.ts"]
     },
     {
       "path": "src/agent-source.ts",
       "description": "V1/V2 frontmatter parsing and validation for agent links.",
-      "scope": [
-        "src/command-bridge.ts",
-        "src/index.ts"
-      ]
+      "scope": ["src/command-bridge.ts", "src/index.ts"]
     },
     {
       "path": "src/index.test.ts",
       "description": "Bridge, agent validation, native precedence, and entrypoint regressions.",
-      "scope": [
-        "src/command-bridge.ts",
-        "src/agent-source.ts",
-        "src/index.ts"
-      ]
+      "scope": ["src/command-bridge.ts", "src/agent-source.ts", "src/index.ts"]
     }
   ]
 }
