@@ -88,6 +88,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 | :--- | :--- | :--- |
 | `advisor.model` | `"inherit"` | `"provider/model"` of the Advisor, optionally with `#variant` for its reasoning level (`"openai/gpt-6#high"`). Without a variant, the provider's default applies. `"inherit"` uses the agent's own model and variant. |
 | `advisor.timeoutMs` | `300000` | Soft deadline for one consult. An automatic consult that runs out fails open; an explicit one returns an error. |
+| `advisor.compactContext` | `true` | Replaces OpenCode's Code Mode tool catalog, MCP server instructions and skill catalog with `[context-omitted: …]` markers in the Advisor's copy of the context. Your rules (AGENTS.md) and the conversation stay. The agent's own context is never changed. Incremental notices about tools, MCP servers or skills added mid-session are kept. `false` sends everything. |
 | `routing.mode` | `"off"` | `off`, `observe` (Decision model only, logged), or `active` (consults and delivers). |
 | `routing.models` | `["opencode/jev-1.13-free"]` | Ordered decision models, 1–8 `"provider/model[#variant]"` refs. On an availability or auth failure, the plugin tries the next one. |
 | `routing.momentThreshold` | `0.7` | Minimum probability that the step is not routine. |
@@ -97,7 +98,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 ## Privacy and cost
 
 - **Decision provider**: in `observe` and `active`, each step's latest request, recent tool calls and truncated results (no system prompt, no tool definitions) go to the configured decision model. The default, `opencode/jev-1.13-free`, is a limited-time free model on OpenCode Zen, built by TypeSafe AI. Check Zen's data-retention terms for it before using it with sensitive code.
-- **Advisor**: each consult sends the agent's full transcript (up to the model's context) to the Advisor model, uncached. It's billed at that model's rates.
+- **Advisor**: each consult sends the agent's transcript (system prompt with OpenCode's catalogs left out when `advisor.compactContext` is on, up to the model's context) to the Advisor model, uncached. It's billed at that model's rates.
 - **Latency**: in `active`, every step waits for one Decision call (about 0.1–0.4 s on Zen after a cold start). A consult pauses the agent until the Advisor answers.
 - **Cache**: installing the plugin adds the `advisor` tool, which costs one prompt-cache miss on the tools block. After that, reviews only add to the end of a request.
 - **Telemetry**: one JSON line per routing decision in `~/.local/share/opencode/auto-advisor/telemetry.jsonl` (capped at 5 MB, one rotation), with models, answers, verdicts and timings. Never transcript or advice text.

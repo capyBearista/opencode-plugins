@@ -50,3 +50,4 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
 4. Start `opencode serve --port <p>`, read the password from its output, then `OPENCODE_PASSWORD=… opencode run --server http://127.0.0.1:<p> "<prompt>" < /dev/null`. Without `< /dev/null`, `run` can hang on an open stdin.
 5. Decision calls can be sent directly: `POST /api/experimental/generate/decisions?directory=<project>` with basic auth `opencode:<password>`; the response wraps the result in `data`.
 6. Kill servers by pid, not `pkill -f`, which can match the shell running the command.
+7. After an OpenCode upgrade, check that `compactContext`'s strings in `src/transcript.ts` still match `core/src/codemode/instructions.ts`, `mcp/instructions.ts` and `skill/instructions.ts`: run one explicit `advisor()` consult and confirm the Advisor's prompt has the three `[context-omitted: …]` markers. A mismatch only stops the compaction.

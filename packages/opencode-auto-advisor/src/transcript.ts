@@ -22,6 +22,94 @@ export interface SystemText {
 export const OMISSION_MARKER =
   "[context-omitted: earlier messages were left out to fit the budget]";
 
+/** Markers for the host catalogs the Advisor does not need; see `compactContext`. */
+export const COMPACTED = {
+  codeMode: "[context-omitted: Code Mode tool catalog]",
+  mcp: "[context-omitted: MCP server instructions]",
+  skills: "[context-omitted: skill catalog]",
+} as const;
+
+const CODE_MODE_START = "# Code Mode\n\nUse the `execute` tool";
+const CODE_MODE_TOOLS = "## Available tools\n\n";
+const CODE_MODE_NOTICE =
+  "The Code Mode tool catalog has changed. This catalog supersedes the previous Code Mode tool catalog.\n\n";
+const SKILLS_START = "Skills provide specialized instructions and workflows for specific tasks.";
+
+interface Catalog {
+  readonly start: string;
+  readonly marker: string;
+  /** The span to replace for a start found at `at`, or undefined when its end is missing. */
+  readonly span: (text: string, at: number) => { start: number; end: number } | undefined;
+}
+
+const tagged = (close: string) => (text: string, at: number) => {
+  const end = text.indexOf(close, at);
+  return end < 0 ? undefined : { start: at, end: end + close.length };
+};
+
+/**
+ * Text OpenCode 2.2.0 renders for its instruction sources (`codemode/`, `mcp/` and
+ * `skill/instructions.ts`). Tool lines are joined with single newlines, so the Code Mode catalog
+ * ends at the first blank line after its tool header.
+ */
+const CATALOGS: readonly Catalog[] = [
+  {
+    start: CODE_MODE_START,
+    marker: COMPACTED.codeMode,
+    span: (text, at) => {
+      const tools = text.indexOf(CODE_MODE_TOOLS, at);
+      if (tools < 0) return undefined;
+      const blank = text.indexOf("\n\n", tools + CODE_MODE_TOOLS.length);
+      const notice = at - CODE_MODE_NOTICE.length;
+      return {
+        start: notice >= 0 && text.startsWith(CODE_MODE_NOTICE, notice) ? notice : at,
+        end: blank < 0 ? text.length : blank,
+      };
+    },
+  },
+  { start: "<mcp_instructions>", marker: COMPACTED.mcp, span: tagged("</mcp_instructions>") },
+  { start: SKILLS_START, marker: COMPACTED.skills, span: tagged("</available_skills>") },
+];
+
+/**
+ * Replaces the host's Code Mode, MCP and skill catalogs with markers. A block whose end is
+ * missing before the next copy starts is kept, so a change in the host's wording costs tokens,
+ * never other context.
+ */
+export function compactContext(text: string): string {
+  let out = text;
+  for (const catalog of CATALOGS) {
+    let from = 0;
+    for (let at = out.indexOf(catalog.start); at >= 0; at = out.indexOf(catalog.start, from)) {
+      // An end found past the next copy's start belongs to that copy: keep this broken one.
+      const next = out.indexOf(catalog.start, at + 1);
+      const span = catalog.span(out, at);
+      if (!span || (next >= 0 && span.end > next)) {
+        from = at + 1;
+        continue;
+      }
+      out = out.slice(0, span.start) + catalog.marker + out.slice(span.end);
+      from = span.start + catalog.marker.length;
+    }
+  }
+  return out;
+}
+
+const compactSystemMessage = (message: Message): Message => {
+  if (message.role !== "system") return message;
+  if (typeof message.content === "string") {
+    return { ...message, content: compactContext(message.content) };
+  }
+  return {
+    ...message,
+    content: message.content.map((part) =>
+      part.type === "text" && typeof part.text === "string"
+        ? { ...part, text: compactContext(part.text) }
+        : part,
+    ),
+  };
+};
+
 const json = (value: unknown) => {
   if (typeof value === "string") return value;
   try {
@@ -147,13 +235,18 @@ export function advisorTranscript(input: {
   readonly tools: readonly string[];
   readonly messages: readonly Message[];
   readonly budgetChars: number;
+  /** Replace the host catalogs in system text; user and tool content is never changed. */
+  readonly compact?: boolean;
 }): string {
+  const joined = input.system.map((part) => part.text).join("\n\n");
+  const system = input.compact ? compactContext(joined) : joined;
+  const messages = input.compact ? input.messages.map(compactSystemMessage) : input.messages;
   const render = (partMax: number) => {
     const head = [
-      `SYSTEM PROMPT:\n${truncate(input.system.map((part) => part.text).join("\n\n"), partMax)}`,
+      `SYSTEM PROMPT:\n${truncate(system, partMax)}`,
       `AVAILABLE TOOLS: ${input.tools.join(", ") || "(none)"}`,
     ].join("\n\n");
-    const blocks = input.messages.map((message) => renderMessage(message, partMax).join("\n"));
+    const blocks = messages.map((message) => renderMessage(message, partMax).join("\n"));
     return { head, blocks };
   };
 
@@ -162,7 +255,7 @@ export function advisorTranscript(input: {
   if (all.length <= input.budgetChars) return all;
 
   const { head, blocks } = render(Math.floor(input.budgetChars / 4));
-  const first = input.messages.findIndex(isUserPrompt);
+  const first = messages.findIndex(isUserPrompt);
   const firstBlock = first >= 0 ? blocks[first] : "";
   const kept: string[] = [];
   let used = head.length + firstBlock.length + OMISSION_MARKER.length + 6;

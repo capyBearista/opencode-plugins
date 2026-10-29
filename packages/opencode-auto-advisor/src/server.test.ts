@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fixtures from "./fixtures/s1-decisions.json";
 import server from "./server.js";
+import { COMPACTED } from "./transcript.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: loosely typed fake host context
 type Any = any;
@@ -456,5 +457,33 @@ describe("explicit advisor()", () => {
       .tool()
       .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
     expect(result.content).toBe("Advisor consultation failed: down");
+  });
+});
+
+describe("advisor context", () => {
+  const catalog =
+    '<mcp_instructions>\n  <server name="x">\n    Use it.\n  </server>\n</mcp_instructions>';
+  const consultWith = async (config: unknown) => {
+    await writeConfig(config);
+    const host = await start();
+    const event = request("s", [user("u1"), ...step(1)]);
+    event.system.push({ type: "text", text: catalog });
+    await host.hooks.context(event);
+    await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "a-live", signal: new AbortController().signal });
+    return { host, event };
+  };
+
+  test("compacts host catalogs in the Advisor's copy only", async () => {
+    const { host, event } = await consultWith({});
+    expect(host.textCalls[0].prompt).toContain(COMPACTED.mcp);
+    expect(host.textCalls[0].prompt).not.toContain("<mcp_instructions>");
+    expect(event.system.at(-1)?.text).toBe(catalog);
+  });
+
+  test("compactContext false sends the catalogs as they are", async () => {
+    const { host } = await consultWith({ advisor: { compactContext: false } });
+    expect(host.textCalls[0].prompt).toContain(catalog);
   });
 });

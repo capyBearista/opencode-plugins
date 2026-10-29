@@ -16,7 +16,7 @@ describe("parseConfig", () => {
 
   test("defaults match the agreed v1 values", () => {
     expect(DEFAULTS).toEqual({
-      advisor: { model: undefined, timeoutMs: 300_000 },
+      advisor: { model: undefined, timeoutMs: 300_000, compactContext: true },
       routing: {
         mode: "off",
         models: [{ providerID: "opencode", id: "jev-1.13-free" }],
@@ -25,6 +25,10 @@ describe("parseConfig", () => {
         maxConsultationsPerTurn: 2,
       },
     });
+  });
+
+  test("advisor.compactContext accepts a boolean", () => {
+    expect(parseConfig({ advisor: { compactContext: false } }).advisor.compactContext).toBe(false);
   });
 
   test("advisor.model accepts provider/model and inherit", () => {
@@ -64,6 +68,7 @@ describe("parseConfig", () => {
     [{ routing: { maxConsultationsPerTurn: 1.5 } }, "routing.maxConsultationsPerTurn"],
     [{ advisor: { timeoutMs: 0 } }, "advisor.timeoutMs"],
     [{ advisor: { model: "x" } }, "advisor.model"],
+    [{ advisor: { compactContext: "yes" } }, "advisor.compactContext"],
     [{ advisor: { other: 1 } }, "unknown key: advisor.other"],
     [[], "must be a JSON object"],
   ])("rejects %j", (input, message) => {

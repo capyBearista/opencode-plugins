@@ -16,6 +16,8 @@ export interface Config {
     /** Undefined means "use the Executor's model". */
     readonly model: ModelRef | undefined;
     readonly timeoutMs: number;
+    /** Replace the host's tool, MCP and skill catalogs in the Advisor's copy of the context. */
+    readonly compactContext: boolean;
   };
   readonly routing: {
     readonly mode: RoutingMode;
@@ -30,7 +32,7 @@ export const CONFIG_FILE = "auto-advisor.json";
 const MAX_MODELS = 8;
 
 export const DEFAULTS: Config = {
-  advisor: { model: undefined, timeoutMs: 300_000 },
+  advisor: { model: undefined, timeoutMs: 300_000, compactContext: true },
   routing: {
     mode: "off",
     models: [{ providerID: "opencode", id: "jev-1.13-free" }],
@@ -88,6 +90,11 @@ function number(value: unknown, name: string, min: number, max: number, integer 
   return value as number;
 }
 
+function boolean(value: unknown, name: string) {
+  if (typeof value !== "boolean") throw new ConfigError(`${name} must be true or false`);
+  return value;
+}
+
 /** Strict and sparse: omitted keys take defaults, invalid explicit values are errors. */
 export function parseConfig(input: unknown): Config {
   if (!isRecord(input)) throw new ConfigError("config must be a JSON object");
@@ -96,7 +103,7 @@ export function parseConfig(input: unknown): Config {
       throw new ConfigError(`unknown key: ${key}`);
     }
   }
-  const advisor = section(input, "advisor", ["model", "timeoutMs"]);
+  const advisor = section(input, "advisor", ["model", "timeoutMs", "compactContext"]);
   const routing = section(input, "routing", [
     "mode",
     "models",
@@ -146,6 +153,10 @@ export function parseConfig(input: unknown): Config {
         advisor.timeoutMs === undefined
           ? DEFAULTS.advisor.timeoutMs
           : number(advisor.timeoutMs, "advisor.timeoutMs", 1, 3_600_000, true),
+      compactContext:
+        advisor.compactContext === undefined
+          ? DEFAULTS.advisor.compactContext
+          : boolean(advisor.compactContext, "advisor.compactContext"),
     },
     routing: {
       mode,

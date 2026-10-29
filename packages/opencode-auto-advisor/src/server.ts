@@ -7,7 +7,7 @@ import {
   TOOL_DESCRIPTION,
   TOOL_NAME,
 } from "./advisor.js";
-import { createConfigLoader, type ModelRef, modelKey } from "./config.js";
+import { type Config, createConfigLoader, type ModelRef, modelKey } from "./config.js";
 import { createRouter, type GenerateDecisions } from "./decisions.js";
 import {
   ENTRY_KEY,
@@ -172,18 +172,21 @@ export default Plugin.define({
     /** One Advisor consult over a snapshot; the model defaults to the Executor's. */
     const review = async (
       snapshot: Snapshot,
-      advisorModel: ModelRef | undefined,
-      timeoutMs: number,
+      advisor: Config["advisor"],
       moment?: Review["moment"],
       signal?: AbortSignal,
     ) => {
-      const model = advisorModel ?? snapshot.model;
-      const transcript = advisorTranscript({ ...snapshot, budgetChars: await budgetChars(model) });
+      const model = advisor.model ?? snapshot.model;
+      const transcript = advisorTranscript({
+        ...snapshot,
+        budgetChars: await budgetChars(model),
+        compact: advisor.compactContext,
+      });
       const advice = await consult({
         generate: generateText,
         prompt: advisorPrompt(transcript, moment),
         model,
-        timeoutMs,
+        timeoutMs: advisor.timeoutMs,
         signal,
       });
       return { advice, model };
@@ -213,8 +216,7 @@ export default Plugin.define({
             const { config } = await loadConfig();
             const { advice } = await review(
               { ...snapshot, messages: [...snapshot.messages, ...inflight] },
-              config.advisor.model,
-              config.advisor.timeoutMs,
+              config.advisor,
               undefined,
               tool.signal,
             );
@@ -333,8 +335,7 @@ export default Plugin.define({
           try {
             const { advice } = await review(
               snapshot,
-              config.advisor.model,
-              config.advisor.timeoutMs,
+              config.advisor,
               verdict.reading.moment,
               abort.signal,
             );
