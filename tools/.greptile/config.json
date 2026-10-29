@@ -1,0 +1,26 @@
+{
+  "rules": [
+    {
+      "id": "release-guard-fail-closed",
+      "rule": "Flag any changed path that accepts unsupported releaseClass/version/channel combinations, fails open on malformed registry responses or unsafe npm configuration, or bypasses the authorization/CI gates required for publishing. Give a concrete rejected-before/accepted-after example.",
+      "scope": ["release-channel-guard.ts", "release-channels.json"],
+      "severity": "high"
+    },
+    {
+      "id": "publication-recovery-safety",
+      "rule": "Flag a path that publishes a mixed class-major batch, unconditionally moves dist-tags, leaks credentials, or treats partial npm publication as an atomic success. Trace the affected external side effect.",
+      "scope": ["release-channel-guard.ts", "release-channel-guard.test.ts"],
+      "severity": "high"
+    },
+    {
+      "id": "release-test-fixture-integrity",
+      "rule": "Flag a test or fixture update that masks a failure of the guard's class-major, registry, or Changesets checks, especially the pinned Changesets CLI/Bun workspace semantics. Require a concrete false-pass scenario.",
+      "scope": [
+        "release-channel-guard.test.ts",
+        "release-channel-guard.ts",
+        "release-channels.json"
+      ],
+      "severity": "medium"
+    }
+  ]
+}

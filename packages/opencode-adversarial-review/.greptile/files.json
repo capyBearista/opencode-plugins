@@ -1,0 +1,24 @@
+{
+  "files": [
+    {
+      "path": "src/prompt.ts",
+      "description": "Canonical source of the two reviewer system prompts and evidence rules.",
+      "scope": ["commands/**", "src/index.ts", "src/prompts/**"]
+    },
+    {
+      "path": "src/prompts/adversarial-review.md",
+      "description": "Lockstep adversarial prompt reference used to detect divergence.",
+      "scope": ["src/prompt.ts", "commands/adversarial-review.md"]
+    },
+    {
+      "path": "src/prompts/constructive-review.md",
+      "description": "Lockstep constructive prompt reference used to detect divergence.",
+      "scope": ["src/prompt.ts", "commands/constructive-review.md"]
+    },
+    {
+      "path": "src/index.test.ts",
+      "description": "Permission ordering, command ownership, template installation, and reviewer registration tests.",
+      "scope": ["src/index.ts", "commands/**"]
+    }
+  ]
+}

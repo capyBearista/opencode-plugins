@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {
+      "id": "escape-gesture-lifecycle",
+      "rule": "Flag a change that triggers the timeline after only one Escape, carries a pending gesture across a modal/session change, mishandles the exact 800 ms boundary, or fails to dispose timers/listeners. Show the event sequence and distinguish intended key-repeat behavior from regressions.",
+      "scope": ["src/escape-detector.ts", "src/index.ts", "src/index.test.ts", "test/**"],
+      "severity": "medium"
+    }
+  ]
+}

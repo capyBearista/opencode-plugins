@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "path": "src/rpc.ts",
+      "description": "Shared state, RPC input/output and event contract for server and TUI.",
+      "scope": ["src/server.ts", "src/tui.ts"]
+    },
+    {
+      "path": "src/prompt.ts",
+      "description": "Instruction-entry and reminder composition; same-turn and cache boundaries.",
+      "scope": ["src/server.ts", "src/tui.ts"]
+    },
+    {
+      "path": "src/styles.ts",
+      "description": "Discovery, parsing, built-in and custom style precedence.",
+      "scope": ["src/server.ts", "src/tui.ts", "built-in-styles/**"]
+    },
+    {
+      "path": "src/server.test.ts",
+      "description": "Hook, RPC, persistence, and session-state regressions.",
+      "scope": ["src/server.ts", "src/rpc.ts"]
+    },
+    {
+      "path": "src/tui.test.ts",
+      "description": "TUI RPC, command, and sidebar behavior.",
+      "scope": ["src/tui.ts", "src/rpc.ts"]
+    }
+  ]
+}

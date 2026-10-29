@@ -1,0 +1,24 @@
+{
+  "files": [
+    {
+      "path": "src/inheritance.ts",
+      "description": "Normalization and prepend/append semantics for inheritance options.",
+      "scope": ["src/index.ts", "src/provider-prompt.ts"]
+    },
+    {
+      "path": "src/provider-prompt.ts",
+      "description": "Provider/model mapping to the bundled prompt fixtures.",
+      "scope": ["src/index.ts", "scripts/**", "src/prompt/**"]
+    },
+    {
+      "path": "scripts/sync-upstream-prompts.ts",
+      "description": "Source-of-truth workflow for generated provider prompt snapshots.",
+      "scope": ["src/prompt/**", "src/provider-prompt.ts", "scripts/sync-upstream-prompts.test.ts"]
+    },
+    {
+      "path": "src/artifact.test.ts",
+      "description": "Checks build and shipped prompt assets.",
+      "scope": ["src/prompt/**", "src/index.ts", "scripts/**"]
+    }
+  ]
+}
