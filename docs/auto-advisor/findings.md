@@ -43,6 +43,12 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
 - Interrupt during a consult (`POST /api/session/:id/interrupt`, Advisor reply held 20 s): `session.execution.interrupted` aborted the consult after 4.4 s, telemetry recorded `stale`, nothing was delivered, and the interrupted step sent no model request.
 - Not covered live: compaction and child sessions. These are covered by `src/server.test.ts` only.
 
+## Live check of the decision fixes and the TUI (2026-10-30, OpenCode 2.2.0)
+- A failing shell command reached the model as `24 passed, 1 failed\n\nExited with code 1` (tool completed, no error), the string `SHELL_FAILURE` matches. Real Jev read that step as `stuck` 0.65, `done` 0.
+- With the per-turn budget spent, the next step logged `verdict: "blocked"`, `blocked: "budget"`, without a consult.
+- After a server restart, a synthetic message (`POST /api/session/:id/synthetic`) started a run: the turn stayed the real prompt's id, read from `ctx.session.context` (`type: "user"`), not the synthetic message's.
+- TUI (`opencode --server … -s <session>` in a 180-column tmux): the `sidebar.footer` widget showed `Advisor ✓ done 02:50`; a click (SGR mouse sequence) and `/advisor-review` opened the panel; the advice rendered as markdown and scrolled to its last line with the wheel; `f` toggled full screen, Esc closed it; `tui.sidebar: false` hid the widget while `/advisor-review` still worked.
+
 ## Re-verify recipe
 1. `npm i @opencode/cli@2.2.0` in a scratch dir. Set `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` to a scratch home.
 2. In the scratch `opencode.json`: `"plugins": ["<repo>/packages/opencode-auto-advisor"]`, a `mock` provider on `@opencode/ai/providers/openai-compatible` (or `/anthropic`) with `baseURL` at a local mock, and `"model": "mock/<id>"`.

@@ -38,7 +38,7 @@ Two paths reach the same stateless Advisor. The agent can call the `advisor()` t
 - **Advice on the same step**: the review reaches the waiting request immediately, and stays in the session as an instruction entry until a newer review replaces it.
 - **Cache-safe**: no system-prompt edits. Only the newest message of a request changes.
 - **Observe mode**: run the Decision model without consulting, and log what it would have done, to tune the thresholds.
-- **TUI status**: "Advisor reviewing…" in the prompt footer, and the latest review above the composer.
+- **TUI**: "Advisor reviewing…" in the prompt footer, and a compact Advisor status at the bottom of the session sidebar. Click it, or run `/advisor-review` (also in the command palette), to read the latest review in a scrollable panel: rendered markdown, its moment, model, duration and time.
 
 ## Install
 
@@ -96,6 +96,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 | `routing.consequenceThreshold` | `1.5` | Minimum stakes score (0 trivial … 4 critical), compared unrounded. |
 | `routing.maxConsultationsPerTurn` | `1` | Automatic consults per user turn. |
 | `routing.minStepsBetweenConsultations` | `10` | Agent steps after an automatic consult starts (whatever its outcome) before another may start, counted across turns. `0` turns the cooldown off. |
+| `tui.sidebar` | `true` | Shows the Advisor status at the bottom of the session sidebar. `false` hides it; `/advisor-review` still opens the review. |
 
 ## Privacy and cost
 
@@ -108,7 +109,9 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 ## Troubleshooting
 
 - **Nothing happens automatically**: check `telemetry.jsonl` for the verdicts. `routine` and `low-consequence` mean the thresholds held the review back, `blocked` means the per-turn limit or the cooldown did (the `blocked` field says which), and `no-decision` means no configured decision model answered.
-- **"Advisor unavailable" in the footer**: the consult failed or timed out. The agent carried on without advice.
+- **"Advisor unavailable" in the footer or sidebar**: the consult failed or timed out. The agent carried on without advice.
+- **No Advisor in the sidebar**: OpenCode shows the sidebar only in top-level sessions, and only on terminals wider than 120 columns unless you open it. While the review panel is open, it takes the sidebar's place. `/advisor-review` works either way.
+- **The review panel shows no model or duration**: they are kept in memory, so a review delivered before OpenCode restarted shows only its moment and text.
 - **Your config is ignored**: an invalid file switches automatic reviews off, and `advisor()` returns `invalid config: …` naming the bad value; unknown keys are rejected. With a local checkout, run `bun run build` after pulling: OpenCode loads `dist/`, and an older build rejects newer keys.
 - **Observe mode logs fewer lines than steps**: while one Decision call is still running, later steps in the same session are skipped rather than queued. The same holds in `active` while a limit blocks consults.
 

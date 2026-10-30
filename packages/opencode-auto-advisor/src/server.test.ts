@@ -428,11 +428,27 @@ describe("active (default)", () => {
     const host = await start();
     await host.hooks.context(request("s", [user("u1"), ...step(1)]));
     const status = await host.rpc().status({ sessionID: "s" });
-    expect(status).toMatchObject({ mode: "active", reviewing: false, configError: null });
+    expect(status).toMatchObject({
+      mode: "active",
+      sidebar: true,
+      reviewing: false,
+      configError: null,
+    });
     expect(status.latest).toMatchObject({
       moment: "stuck",
       advice: "Check the token clock skew first.",
+      details: { model: "mock/exec" },
     });
+    expect(typeof status.latest.details.ms).toBe("number");
+  });
+
+  test("after a restart the stored review has no details", async () => {
+    const first = await start();
+    await first.hooks.context(request("s", [user("u1"), ...step(1)]));
+    const host = await start();
+    host.entries.s = first.entries.s;
+    const status = await host.rpc().status({ sessionID: "s" });
+    expect(status.latest).toMatchObject({ moment: "stuck", details: null });
   });
 });
 

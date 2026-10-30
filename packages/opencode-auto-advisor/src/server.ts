@@ -18,7 +18,7 @@ import {
   reviewText,
 } from "./delivery.js";
 import { decide } from "./policy.js";
-import { AutoAdvisorRpc, type Status } from "./rpc.js";
+import { AutoAdvisorRpc, type ReviewDetails, type Status } from "./rpc.js";
 import { createTelemetry, type TelemetryRecord } from "./telemetry.js";
 import { advisorTranscript, decisionInput, type Message, type SystemText } from "./transcript.js";
 
@@ -63,6 +63,8 @@ interface SessionState {
   memo?: { key: string; review: Promise<Review | undefined> };
   /** Aborted when the run ends, so a pending consult stops waiting at once. */
   abort?: AbortController;
+  /** The latest delivered review's details; memory only, unlike the entry that holds its text. */
+  latest?: { id: string; details: ReviewDetails };
   observing: boolean;
   reviewing: boolean;
   failed: boolean;
@@ -156,7 +158,11 @@ export default Plugin.define({
     const latestReview = async (sessionID: string) => {
       try {
         const entries = await ctx.session.instructions.entry.list({ sessionID });
-        return parseReview(entries.find((entry) => entry.key === ENTRY_KEY)?.value) ?? null;
+        const review = parseReview(entries.find((entry) => entry.key === ENTRY_KEY)?.value);
+        const known = sessions.get(sessionID)?.latest;
+        return review
+          ? { ...review, details: known?.id === review.id ? known.details : null }
+          : null;
       } catch {
         return null;
       }
@@ -168,6 +174,7 @@ export default Plugin.define({
       return {
         sessionID,
         mode: config.routing.mode,
+        sidebar: config.tui.sidebar,
         configError: error ?? null,
         reviewing: session?.reviewing ?? false,
         failed: session?.failed ?? false,
@@ -396,6 +403,14 @@ export default Plugin.define({
             const text = reviewText(result);
             pushTail(messages, text);
             delivered = result;
+            session.latest = {
+              id: result.id,
+              details: {
+                at: new Date().toISOString(),
+                model: modelKey(advisorModel),
+                ms: Date.now() - start,
+              },
+            };
             record = {
               ...record,
               advisor: {

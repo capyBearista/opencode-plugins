@@ -25,6 +25,7 @@ describe("parseConfig", () => {
         maxConsultationsPerTurn: 1,
         minStepsBetweenConsultations: 10,
       },
+      tui: { sidebar: true },
     });
   });
 
@@ -35,6 +36,10 @@ describe("parseConfig", () => {
   test("routing.minStepsBetweenConsultations accepts 0 to turn the cooldown off", () => {
     const config = parseConfig({ routing: { minStepsBetweenConsultations: 0 } });
     expect(config.routing.minStepsBetweenConsultations).toBe(0);
+  });
+
+  test("tui.sidebar accepts a boolean", () => {
+    expect(parseConfig({ tui: { sidebar: false } }).tui.sidebar).toBe(false);
   });
 
   test("advisor.compactContext accepts a boolean", () => {
@@ -84,6 +89,8 @@ describe("parseConfig", () => {
     [{ advisor: { maxTokens: 64 } }, "advisor.maxTokens must be"],
     [{ advisor: { maxTokens: 1_500.5 } }, "advisor.maxTokens must be"],
     [{ advisor: { other: 1 } }, "unknown key: advisor.other"],
+    [{ tui: { sidebar: "yes" } }, "tui.sidebar"],
+    [{ tui: { footer: true } }, "unknown key: tui.footer"],
     [[], "must be a JSON object"],
   ])("rejects %j", (input, message) => {
     expect(() => parseConfig(input)).toThrow(message);

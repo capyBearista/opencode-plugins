@@ -30,6 +30,10 @@ export interface Config {
     /** Distinct Executor steps after an automatic consult starts before another may; 0 is off. */
     readonly minStepsBetweenConsultations: number;
   };
+  readonly tui: {
+    /** Show the Advisor widget at the bottom of the session sidebar. */
+    readonly sidebar: boolean;
+  };
 }
 
 export const CONFIG_FILE = "auto-advisor.json";
@@ -45,6 +49,7 @@ export const DEFAULTS: Config = {
     maxConsultationsPerTurn: 1,
     minStepsBetweenConsultations: 10,
   },
+  tui: { sidebar: true },
 };
 
 export class ConfigError extends Error {}
@@ -104,7 +109,7 @@ function boolean(value: unknown, name: string) {
 export function parseConfig(input: unknown): Config {
   if (!isRecord(input)) throw new ConfigError("config must be a JSON object");
   for (const key of Object.keys(input)) {
-    if (key !== "advisor" && key !== "routing" && key !== "$schema") {
+    if (key !== "advisor" && key !== "routing" && key !== "tui" && key !== "$schema") {
       throw new ConfigError(`unknown key: ${key}`);
     }
   }
@@ -117,6 +122,7 @@ export function parseConfig(input: unknown): Config {
     "maxConsultationsPerTurn",
     "minStepsBetweenConsultations",
   ]);
+  const tui = section(input, "tui", ["sidebar"]);
 
   let model = DEFAULTS.advisor.model;
   if (advisor.model !== undefined && advisor.model !== "inherit") {
@@ -199,6 +205,10 @@ export function parseConfig(input: unknown): Config {
               1_000,
               true,
             ),
+    },
+    tui: {
+      sidebar:
+        tui.sidebar === undefined ? DEFAULTS.tui.sidebar : boolean(tui.sidebar, "tui.sidebar"),
     },
   };
 }

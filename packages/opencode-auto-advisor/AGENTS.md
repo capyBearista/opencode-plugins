@@ -23,7 +23,7 @@
 - `src/transcript.ts`: the Decision projection (the real request, the turn's recent steps without system updates, and failure counts; no system prompt) and the Advisor transcript (system text, tool names, messages; compacted, then budgeted to `min(advisor.maxTokens, 75% of the window)` at 3 chars per token).
 - `src/advisor.ts`: prompts and the timeout-raced consult. `src/delivery.ts`: review text, marker, tail push.
 - `src/config.ts`: strict sparse `auto-advisor.json`, re-read when its mtime changes. `src/telemetry.ts`: JSONL with one rotation.
-- `src/tui.ts`: footer status and the composer panel, driven only by RPC events.
+- `src/tui.ts`: the footer status, a `sidebar.footer` widget (hidden by `tui.sidebar`), and a `session.panel` named `auto-advisor` with the full review, opened by a click or `/advisor-review`. State comes from RPC events, plus one `status` call per mounted widget or panel, so a stored review shows after a restart.
 - `src/rpc.ts` is the contract both halves import.
 
 ### Gotchas
@@ -41,6 +41,10 @@
 - **`compactContext` matches OpenCode 2.2.0's rendered text**, not keys: the host joins its instruction sources into one system part, so the keys are gone by the `context` hook. The start and end strings come from `core/src/codemode/instructions.ts`, `mcp/instructions.ts` and `skill/instructions.ts`. A block is replaced only when its end comes before the next copy's start, so a wording change in the host costs tokens, never other context. Only full renders are matched; the host's incremental notices ("New skills are available…" and the like) are kept, at their small cost. Recheck the strings after an OpenCode upgrade.
 - **Decision errors are plain objects with `_tag`.** A provider without credentials reports `Generate.ModelNotFoundError`, not an auth error. Shapes are in `src/fixtures/s1-decisions.json`.
 - **The host retries rate limits itself.** The router never retries; it skips a throttled model for 60 s instead of stalling every step.
+- **A slot's render body runs once, untracked** (`tui/src/plugin/render.tsx` at v2.2.0); its input stays reactive through getters. Read `input.sessionID` and `input.name` inside reactive functions, and choose the panel's content from `input.name` reactively. Opening a panel hides the sidebar, footer widget included.
+- **Never `insert` children into `markdown`**, not even `[]`: it removes the blocks rendered from `content`, and the panel stays blank in the real TUI. `testRender` parses later, so the unit tests pass anyway; only a live check catches it.
+- **`bun run build` starts with `rm -rf dist`.** A running OpenCode watches the local plugin, reloads mid-build, and drops the plugin (server and TUI) if `dist/` is missing or the build fails. Restart OpenCode after rebuilding.
+- **The TUI can't reach the host's markdown syntax style** or the `PanelInput` type. `markdownStyle` mirrors the markdown subset of `theme/src/tui/syntax.ts` from the public `context.theme.markdown` tokens, as ram-monitor does.
 - **One `opencode.json` entry loads both halves**; `cli.json` needs none. The TUI gets `context.options = {}`, so configuration stays server-side.
 - **Neither hook may throw into the user's request.** Failures are swallowed.
 

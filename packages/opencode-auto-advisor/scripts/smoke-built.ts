@@ -70,8 +70,14 @@ const tui = await load(entrypoints.tui, "tui.js");
 assert(tui.id === "capybearista.opencode-auto-advisor.tui", "tui id mismatch");
 
 const slots: string[] = [];
+const commands: string[] = [];
 await tui.setup({
   client: { rpc: () => ({ events: { on: () => () => {} } }) },
+  keymap: {
+    layer: (factory: () => { commands: Array<{ id: string }> }) => {
+      for (const command of factory().commands) commands.push(command.id);
+    },
+  },
   ui: {
     slot: (claim: { append: string }) => {
       slots.push(claim.append);
@@ -81,8 +87,9 @@ await tui.setup({
   theme: { text: {} },
 });
 assert(
-  slots.join(",") === "prompt.footer.status,session.composer.top",
+  slots.join(",") === "prompt.footer.status,sidebar.footer,session.panel",
   `unexpected TUI slots: ${slots.join(",")}`,
 );
+assert(commands.join(",") === "advisor.review", `unexpected TUI commands: ${commands.join(",")}`);
 
 process.stdout.write("smoke: built server and TUI entries loaded and registered\n");
