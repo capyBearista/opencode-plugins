@@ -20,13 +20,7 @@ import {
 import { decide } from "./policy.js";
 import { AutoAdvisorRpc, type Status } from "./rpc.js";
 import { createTelemetry, type TelemetryRecord } from "./telemetry.js";
-import {
-  advisorTranscript,
-  decisionInput,
-  type Message,
-  type SystemText,
-  turnKey,
-} from "./transcript.js";
+import { advisorTranscript, decisionInput, type Message, type SystemText } from "./transcript.js";
 
 export const PLUGIN_ID = "capybearista.opencode-auto-advisor";
 
@@ -34,7 +28,6 @@ export const PLUGIN_ID = "capybearista.opencode-auto-advisor";
 const DEFAULT_CONTEXT_TOKENS = 128_000;
 /** Conservative chars-per-token, so the transcript fits even token-dense content. */
 const CHARS_PER_TOKEN = 3;
-const MAX_PROMPTS = 32;
 
 interface Snapshot {
   readonly system: readonly SystemText[];
@@ -49,13 +42,25 @@ interface SessionState {
   last?: Snapshot;
   /** Bumped when a run ends, so a consult that outlives its step never delivers. */
   epoch: number;
+  /**
+   * Id of the latest real user prompt: from the `prompt` hook, or read once from the stored
+   * history when the session predates this process.
+   */
+  prompt?: string;
+  hydrated: boolean;
   turn?: string;
+  /** Steps this turn, for telemetry. */
   step: number;
+  /** Distinct steps this session; retries don't count. */
+  steps: number;
+  /** `stateKey` of the last step seen, so a retry is not counted as a new step. */
+  lastKey?: string;
+  /** `steps` when the last automatic consult started, for the cooldown. */
+  consultedAt?: number;
+  /** Automatic consults started this turn. */
   started: number;
   /** Identity of the last evaluated state, so a retried step reuses its outcome. */
   memo?: { key: string; review: Promise<Review | undefined> };
-  /** Ids of real user prompts, from the `prompt` hook. */
-  prompts: Set<string>;
   /** Aborted when the run ends, so a pending consult stops waiting at once. */
   abort?: AbortController;
   observing: boolean;
@@ -89,9 +94,10 @@ export default Plugin.define({
       if (!found) {
         found = {
           epoch: 0,
+          hydrated: false,
           step: 0,
+          steps: 0,
           started: 0,
-          prompts: new Set(),
           observing: false,
           reviewing: false,
           failed: false,
@@ -111,6 +117,21 @@ export default Plugin.define({
         session.child = Boolean(info.parentID);
       }
       return session.child;
+    };
+
+    /**
+     * Synthetic notices, subagent results and shell notices reach the `context` hook as
+     * `role: "user"` too; only the stored history keeps their `type`.
+     */
+    const latestPrompt = async (sessionID: string, session: SessionState) => {
+      if (session.prompt === undefined && !session.hydrated) {
+        session.hydrated = true;
+        try {
+          const stored = await ctx.session.context({ sessionID });
+          session.prompt = stored.findLast((message) => message.type === "user")?.id;
+        } catch {}
+      }
+      return session.prompt;
     };
 
     const contextTokens = new Map<string, number>();
@@ -236,10 +257,7 @@ export default Plugin.define({
     });
 
     const promptHook = await ctx.session.hook("prompt", async (event) => {
-      const { prompts } = state(event.sessionID);
-      prompts.add(event.messageID);
-      // Only the latest prompts matter for the turn key.
-      if (prompts.size > MAX_PROMPTS) prompts.delete(prompts.values().next().value as string);
+      state(event.sessionID).prompt = event.messageID;
     });
 
     const contextHook = await ctx.session.hook("context", async (event) => {
@@ -271,14 +289,19 @@ export default Plugin.define({
             pushTail(messages, reviewText(prior));
           return;
         }
+        // A retry of a step that was evaluated without a consult: nothing new to decide.
+        if (session.lastKey === key) return;
+        session.lastKey = key;
 
-        const turn = turnKey(messages, session.prompts) ?? "";
+        const prompt = await latestPrompt(event.sessionID, session);
+        const turn = prompt ?? "";
         if (session.turn !== turn) {
           session.turn = turn;
           session.step = 0;
           session.started = 0;
         }
         session.step++;
+        session.steps++;
         const base = {
           ts: new Date().toISOString(),
           session: event.sessionID,
@@ -286,19 +309,34 @@ export default Plugin.define({
           step: session.step,
         };
 
-        if (mode === "observe") {
+        const { routing } = config;
+        const cooling =
+          session.consultedAt !== undefined &&
+          session.steps - session.consultedAt < routing.minStepsBetweenConsultations;
+        const blocked =
+          mode !== "active"
+            ? undefined
+            : session.started >= routing.maxConsultationsPerTurn
+              ? ("budget" as const)
+              : cooling
+                ? ("cooldown" as const)
+                : undefined;
+
+        if (mode === "observe" || blocked) {
+          // Decide without consulting, so telemetry still shows what the Decision model saw.
           if (session.observing) return;
           session.observing = true;
-          const text = decisionInput(messages, session.prompts);
-          void route(config.routing.models, text)
+          void route(routing.models, decisionInput(messages, prompt))
             .then((routed) => {
               const verdict = routed.ok
-                ? decide({ answers: routed.result.answers, routing: config.routing })
+                ? decide({ answers: routed.result.answers, routing })
                 : undefined;
               telemetry.record({
                 ...base,
                 mode,
                 ...summary(routed, verdict),
+                ...(blocked ? { blocked } : {}),
+                ...(blocked && verdict?.consult ? { verdict: "blocked" } : {}),
                 delivered: false,
               });
             })
@@ -309,7 +347,6 @@ export default Plugin.define({
           return;
         }
 
-        if (session.started >= config.routing.maxConsultationsPerTurn) return;
         const epoch = session.epoch;
         const abort = new AbortController();
         session.abort = abort;
@@ -318,18 +355,16 @@ export default Plugin.define({
         let delivered: Review | undefined;
         let record: TelemetryRecord | undefined;
         try {
-          const routed = await route(
-            config.routing.models,
-            decisionInput(messages, session.prompts),
-          );
+          const routed = await route(routing.models, decisionInput(messages, prompt));
           const verdict = routed.ok
-            ? decide({ answers: routed.result.answers, routing: config.routing })
+            ? decide({ answers: routed.result.answers, routing })
             : undefined;
           record = { ...base, mode, ...summary(routed, verdict), delivered: false };
           // The run may have ended while the Decision model answered: don't pay for a consult.
           if (!verdict?.consult || session.epoch !== epoch) return;
 
           session.started++;
+          session.consultedAt = session.steps;
           session.reviewing = true;
           session.failed = false;
           emit("review.started", event.sessionID);

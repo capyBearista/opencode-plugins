@@ -125,6 +125,13 @@ export function truncate(text: string, max: number): string {
     : `${text.slice(0, max)}… [${text.length - max} chars truncated]`;
 }
 
+/** Like `truncate`, but keeps the end: a tool's outcome (an exit code, a test summary) is last. */
+function truncateStart(text: string, max: number): string {
+  return text.length <= max
+    ? text
+    : `[${text.length - max} chars truncated] …${text.slice(text.length - max)}`;
+}
+
 const parts = (message: Message): readonly Part[] =>
   typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content;
 
@@ -139,7 +146,7 @@ function renderPart(role: string, part: Part, max: number): string | undefined {
     case "tool-result": {
       const result = part.result as { type?: string; value?: unknown } | undefined;
       const status = result?.type === "error" ? " (error)" : "";
-      return `TOOL RESULT ${String(part.name)}${status}: ${truncate(json(result?.value), max)}`;
+      return `TOOL RESULT ${String(part.name)}${status}: ${truncateStart(json(result?.value), max)}`;
     }
     case "media":
     case "file":
@@ -166,25 +173,16 @@ export function renderMessage(message: Message, max = Number.POSITIVE_INFINITY):
 const isUserPrompt = (message: Message) =>
   message.role === "user" && parts(message).some((part) => part.type === "text");
 
-function lastUserIndex(messages: readonly Message[]): number {
-  for (let i = messages.length - 1; i >= 0; i--) if (isUserPrompt(messages[i])) return i;
-  return -1;
-}
-
 /**
- * Index of the latest real user prompt. Synthetic, skill, shell and compaction messages are
- * `role: "user"` too, so when the ids of real prompts are known (recorded by the `prompt` hook)
- * only those count.
+ * OpenCode 2.2.0's shell notices (`core/src/shell/result.ts`). A non-zero exit, a kill or a
+ * timeout still completes the tool, so the result is not marked as an error.
  */
-function promptIndex(messages: readonly Message[], prompts?: ReadonlySet<string>): number {
-  if (prompts?.size) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const id = messages[i].id;
-      if (messages[i].role === "user" && id && prompts.has(id)) return i;
-    }
-  }
-  return lastUserIndex(messages);
-}
+const SHELL_FAILURE = /Exited with code [1-9]|Killed by |Timed out before completion/;
+
+const failed = (part: Part) => {
+  const result = part.result as { type?: string; value?: unknown } | undefined;
+  return result?.type === "error" || SHELL_FAILURE.test(json(result?.value));
+};
 
 export const DECISION_INPUT_MAX_CHARS = 32_000;
 const DECISION_RECENT_LINES = 12;
@@ -192,37 +190,31 @@ const DECISION_LINE_MAX = 1_000;
 const DECISION_REQUEST_MAX = 4_000;
 
 /**
- * What the Decision model sees: the latest request, the current turn's recent steps and two
- * counts. No system prompt or tool definitions: this goes to a third-party decision provider.
+ * What the Decision model sees: the latest real request, the current turn's recent steps and
+ * their outcomes. `prompt` is the id of the latest real user prompt: subagent results, shell
+ * notices and other synthetic messages are `role: "user"` too, so they are never the request.
+ * System updates (instruction entries, including earlier reviews) are left out. No system prompt
+ * or tool definitions: this goes to a third-party decision provider.
  */
-export function decisionInput(messages: readonly Message[], prompts?: ReadonlySet<string>): string {
-  const start = promptIndex(messages, prompts);
+export function decisionInput(messages: readonly Message[], prompt?: string): string {
+  const start = prompt
+    ? messages.findLastIndex((message) => message.role === "user" && message.id === prompt)
+    : -1;
   const request = start >= 0 ? renderMessage(messages[start], DECISION_REQUEST_MAX).join("\n") : "";
-  const turn = messages.slice(start + 1);
+  const turn = messages.slice(start + 1).filter((message) => message.role !== "system");
   const steps = turn.filter((message) => message.role === "assistant").length;
-  const errors = turn
-    .flatMap(parts)
-    .filter(
-      (part) => part.type === "tool-result" && (part.result as { type?: string })?.type === "error",
-    ).length;
+  const results = turn.flatMap(parts).filter((part) => part.type === "tool-result");
+  const latest = results.at(-1);
   const recent = turn
     .flatMap((message) => renderMessage(message, DECISION_LINE_MAX))
     .slice(-DECISION_RECENT_LINES);
   const text = [
-    `Latest user request:\n${request || "(none)"}`,
+    `Latest user request:\n${request || "(not in context)"}`,
     `Recent steps this turn:\n${recent.join("\n") || "(none yet)"}`,
-    `Steps this turn: ${steps}. Tool errors this turn: ${errors}.`,
+    `Steps this turn: ${steps}. Failed tool calls this turn: ${results.filter(failed).length}. ` +
+      `Latest tool result: ${latest ? (failed(latest) ? "failed" : "ok") : "none"}.`,
   ].join("\n\n");
   return truncate(text, DECISION_INPUT_MAX_CHARS);
-}
-
-/** The id of the latest real user prompt: the key the per-turn budget counts against. */
-export function turnKey(
-  messages: readonly Message[],
-  prompts?: ReadonlySet<string>,
-): string | undefined {
-  const index = promptIndex(messages, prompts);
-  return index >= 0 ? (messages[index].id ?? `index:${index}`) : undefined;
 }
 
 /**

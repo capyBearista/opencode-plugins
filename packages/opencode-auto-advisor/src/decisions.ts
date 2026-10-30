@@ -12,12 +12,12 @@ const MOMENTS: ReadonlyArray<{ value: Moment; description: string }> = [
   {
     value: "stuck",
     description:
-      "The agent is repeating a failing action, the same error keeps recurring, or it is changing approach after failures.",
+      "The agent is repeating a failing action, the same error keeps recurring, or it is changing approach after failures. A first failure the agent is now fixing is routine.",
   },
   {
     value: "done",
     description:
-      "The work looks finished: changes are made and checks ran, so the next step is likely reporting completion.",
+      "The whole user request looks complete: the latest checks passed, no failure is unresolved, and the next step is reporting to the user. A finished subtask, a returned subagent, a loaded skill or a failed or partial check is not done.",
   },
   {
     value: "routine",

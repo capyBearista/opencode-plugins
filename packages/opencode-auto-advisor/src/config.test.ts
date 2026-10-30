@@ -14,21 +14,27 @@ describe("parseConfig", () => {
     expect(config.advisor).toEqual(DEFAULTS.advisor);
   });
 
-  test("defaults match the agreed v1 values", () => {
+  test("defaults match the agreed values", () => {
     expect(DEFAULTS).toEqual({
       advisor: { model: undefined, timeoutMs: 300_000, compactContext: true, maxTokens: 64_000 },
       routing: {
-        mode: "off",
+        mode: "active",
         models: [{ providerID: "opencode", id: "jev-1.13-free" }],
         momentThreshold: 0.7,
         consequenceThreshold: 1.5,
-        maxConsultationsPerTurn: 2,
+        maxConsultationsPerTurn: 1,
+        minStepsBetweenConsultations: 10,
       },
     });
   });
 
   test("advisor.maxTokens accepts an integer of at least 1000", () => {
     expect(parseConfig({ advisor: { maxTokens: 1_000 } }).advisor.maxTokens).toBe(1_000);
+  });
+
+  test("routing.minStepsBetweenConsultations accepts 0 to turn the cooldown off", () => {
+    const config = parseConfig({ routing: { minStepsBetweenConsultations: 0 } });
+    expect(config.routing.minStepsBetweenConsultations).toBe(0);
   });
 
   test("advisor.compactContext accepts a boolean", () => {
@@ -70,6 +76,8 @@ describe("parseConfig", () => {
     [{ routing: { consequenceThreshold: 5 } }, "routing.consequenceThreshold"],
     [{ routing: { maxConsultationsPerTurn: 0 } }, "routing.maxConsultationsPerTurn"],
     [{ routing: { maxConsultationsPerTurn: 1.5 } }, "routing.maxConsultationsPerTurn"],
+    [{ routing: { minStepsBetweenConsultations: -1 } }, "routing.minStepsBetweenConsultations"],
+    [{ routing: { minStepsBetweenConsultations: 2.5 } }, "routing.minStepsBetweenConsultations"],
     [{ advisor: { timeoutMs: 0 } }, "advisor.timeoutMs"],
     [{ advisor: { model: "x" } }, "advisor.model"],
     [{ advisor: { compactContext: "yes" } }, "advisor.compactContext"],

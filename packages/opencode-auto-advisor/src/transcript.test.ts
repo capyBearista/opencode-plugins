@@ -8,7 +8,6 @@ import {
   type Message,
   OMISSION_MARKER,
   renderMessage,
-  turnKey,
 } from "./transcript.js";
 
 const user = (id: string, text: string): Message => ({
@@ -66,31 +65,51 @@ describe("renderMessage", () => {
 
 describe("decisionInput", () => {
   test("summarizes only the current turn with counts", () => {
-    const text = decisionInput([user("u0", "old request"), result("bash", "old"), ...turn]);
+    const text = decisionInput([user("u0", "old request"), result("bash", "old"), ...turn], "u1");
     expect(text).toContain("Latest user request:\nUSER: Fix the failing login test");
     expect(text).not.toContain("old request");
-    expect(text).toContain("Steps this turn: 2. Tool errors this turn: 1.");
+    expect(text).toContain(
+      "Steps this turn: 2. Failed tool calls this turn: 1. Latest tool result: ok.",
+    );
     expect(text).toContain("TOOL RESULT bash (error)");
   });
 
-  test("prefers the latest real prompt over a synthetic user message", () => {
-    const text = decisionInput([...turn, user("skill-1", "skill output")], new Set(["u1"]));
+  test("leaves out system updates, including an earlier review", () => {
+    const review = {
+      role: "system",
+      content: [
+        { type: "text", text: "[auto-advisor review r1] Automatic review (moment: done)." },
+      ],
+    };
+    const text = decisionInput([...turn, review], "u1");
+    expect(text).not.toContain("SYSTEM UPDATE");
+    expect(text).not.toContain("auto-advisor review");
+  });
+
+  test("a non-zero shell exit counts as a failure even when the tool completed", () => {
+    const log = `${"ok line\n".repeat(400)}24 passed, 1 failed\n\nExited with code 1`;
+    const text = decisionInput([user("u1", "Make the tests pass"), result("shell", log)], "u1");
+    expect(text).toContain("Failed tool calls this turn: 1. Latest tool result: failed.");
+    // Truncation keeps the end of a tool result, where the outcome is.
+    expect(text).toContain("Exited with code 1");
+  });
+
+  test("the request is the real prompt, never a later synthetic user message", () => {
+    const text = decisionInput([...turn, user("syn-1", '<subagent state="completed">')], "u1");
     expect(text).toContain("Latest user request:\nUSER: Fix the failing login test");
-    expect(text).toContain("USER: skill output");
+    expect(text).toContain('USER: <subagent state="completed">');
+  });
+
+  test("without the real prompt in the window it says so instead of guessing", () => {
+    const text = decisionInput([user("syn-1", "<subagent>"), result("bash", "ok")], "u-old");
+    expect(text).toContain("Latest user request:\n(not in context)");
+    expect(text).toContain("USER: <subagent>");
   });
 
   test("stays under the provider input cap", () => {
     const big = Array.from({ length: 200 }, (_, i) => result("read", "x".repeat(5_000 + i)));
-    const text = decisionInput([user("u1", "y".repeat(50_000)), ...big]);
+    const text = decisionInput([user("u1", "y".repeat(50_000)), ...big], "u1");
     expect(text.length).toBeLessThanOrEqual(DECISION_INPUT_MAX_CHARS + 40);
-  });
-});
-
-describe("turnKey", () => {
-  test("is the id of the latest user prompt, ignoring tool and system messages", () => {
-    expect(turnKey(turn)).toBe("u1");
-    expect(turnKey([...turn, user("u2", "next")])).toBe("u2");
-    expect(turnKey([])).toBeUndefined();
   });
 });
 
@@ -112,7 +131,7 @@ describe("advisorTranscript", () => {
     ];
     const text = advisorTranscript({ ...base, messages, budgetChars: 4_000 });
     expect(text.length).toBeLessThanOrEqual(4_000);
-    expect(text).toContain("TOOL RESULT read: qqq");
+    expect(text).toMatch(/TOOL RESULT read: \[\d+ chars truncated\] …qqq/);
   });
 
   test("an oversized system prompt and first request still fit the budget", () => {
@@ -143,7 +162,7 @@ describe("advisorTranscript", () => {
       budgetChars: 3_000,
     });
     expect(text.length).toBeLessThanOrEqual(3_000);
-    expect(text).toContain("TOOL RESULT read: aaa");
+    expect(text).toMatch(/TOOL RESULT read: \[\d+ chars truncated\] …aaa/);
   });
 
   test("over budget keeps the first request and the newest messages", () => {

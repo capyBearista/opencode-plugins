@@ -165,7 +165,7 @@ Includes Claude Code's built-in `Proactive`, `Concise`, `Explanatory`, and `Lear
 
 **A Claude Code-style Advisor for your agent.**
 
-Your agent can call a zero-argument `advisor()` tool to have a stronger model review its work. Optionally, a fast Decision model watches each step and brings in the Advisor on its own when the agent is about to commit to an approach, is stuck, or is finishing, and a mistake would be costly. Reviews never edit the system prompt, so the prompt cache stays intact.
+Your agent can call a zero-argument `advisor()` tool to have a stronger model review its work. By default, a fast Decision model also watches each step and brings in the Advisor on its own, at most once per turn and once per 10 steps, when the agent is about to commit to an approach, is stuck, or is finishing, and a mistake would be costly. Reviews never edit the system prompt, so the prompt cache stays intact.
 
 ## Quick Start (OpenCode V2)
 

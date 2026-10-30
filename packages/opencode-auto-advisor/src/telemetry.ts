@@ -18,6 +18,8 @@ export interface TelemetryRecord {
   readonly moment?: Record<string, number>;
   readonly consequence?: number;
   readonly verdict: string;
+  /** Set when the per-turn budget or the cooldown kept an automatic consult from starting. */
+  readonly blocked?: "budget" | "cooldown";
   readonly advisor?: {
     readonly model: string;
     readonly ms: number;

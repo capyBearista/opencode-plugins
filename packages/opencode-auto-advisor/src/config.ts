@@ -27,6 +27,8 @@ export interface Config {
     readonly momentThreshold: number;
     readonly consequenceThreshold: number;
     readonly maxConsultationsPerTurn: number;
+    /** Distinct Executor steps after an automatic consult starts before another may; 0 is off. */
+    readonly minStepsBetweenConsultations: number;
   };
 }
 
@@ -36,11 +38,12 @@ const MAX_MODELS = 8;
 export const DEFAULTS: Config = {
   advisor: { model: undefined, timeoutMs: 300_000, compactContext: true, maxTokens: 64_000 },
   routing: {
-    mode: "off",
+    mode: "active",
     models: [{ providerID: "opencode", id: "jev-1.13-free" }],
     momentThreshold: 0.7,
     consequenceThreshold: 1.5,
-    maxConsultationsPerTurn: 2,
+    maxConsultationsPerTurn: 1,
+    minStepsBetweenConsultations: 10,
   },
 };
 
@@ -112,6 +115,7 @@ export function parseConfig(input: unknown): Config {
     "momentThreshold",
     "consequenceThreshold",
     "maxConsultationsPerTurn",
+    "minStepsBetweenConsultations",
   ]);
 
   let model = DEFAULTS.advisor.model;
@@ -183,6 +187,16 @@ export function parseConfig(input: unknown): Config {
               "routing.maxConsultationsPerTurn",
               1,
               100,
+              true,
+            ),
+      minStepsBetweenConsultations:
+        routing.minStepsBetweenConsultations === undefined
+          ? DEFAULTS.routing.minStepsBetweenConsultations
+          : number(
+              routing.minStepsBetweenConsultations,
+              "routing.minStepsBetweenConsultations",
+              0,
+              1_000,
               true,
             ),
     },

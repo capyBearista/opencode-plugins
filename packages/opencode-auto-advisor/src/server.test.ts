@@ -53,6 +53,8 @@ interface Setup {
   decision?: () => Promise<Any>;
   advice?: () => Promise<{ text: string }>;
   parent?: string;
+  /** The session's stored history, as `ctx.session.context` returns it. */
+  stored?: Any[];
 }
 
 async function start(setup: Setup = {}) {
@@ -90,6 +92,7 @@ async function start(setup: Setup = {}) {
         parentID: sessionID === "child" ? "root" : undefined,
       }),
       context: async () => [
+        ...(setup.stored ?? [{ id: "u1", type: "user" }]),
         {
           id: "a-live",
           type: "assistant",
@@ -201,8 +204,9 @@ const telemetryLines = async () => {
 
 const tail = (event: Any) => event.messages.at(-1);
 
-describe("off (default)", () => {
+describe("off", () => {
   test("registers the advisor tool and never calls the Decision model", async () => {
+    await writeConfig({ routing: { mode: "off" } });
     const host = await start();
     expect(host.tool().name).toBe("advisor");
     const event = request("s", [user("u1"), ...step(1)]);
@@ -212,9 +216,7 @@ describe("off (default)", () => {
   });
 });
 
-describe("active", () => {
-  beforeEach(() => writeConfig({ routing: { mode: "active" } }));
-
+describe("active (default)", () => {
   test("an accepted moment delivers the review now and stores it for later steps", async () => {
     const host = await start();
     const event = request("s", [user("u1"), ...step(1)]);
@@ -262,30 +264,71 @@ describe("active", () => {
     expect((await telemetryLines())[0].verdict).toBe("routine");
   });
 
-  test("the per-turn budget caps consults at 2 and resets on the next prompt", async () => {
+  test("the per-turn budget caps consults at 1 and resets on the next prompt", async () => {
+    await writeConfig({ routing: { minStepsBetweenConsultations: 0 } });
     const host = await start();
     const history: Any[] = [user("u1")];
     for (let n = 1; n <= 3; n++) {
       history.push(...step(n));
       await host.hooks.context(request("s", [...history]));
+      await Bun.sleep(10);
     }
-    expect(host.textCalls).toHaveLength(2);
-    expect(host.decisionCalls).toHaveLength(2);
+    expect(host.textCalls).toHaveLength(1);
+    await host.hooks.prompt({ sessionID: "s", messageID: "u2", delivery: "steer" });
     await host.hooks.context(request("s", [...history, user("u2", "next")]));
-    expect(host.textCalls).toHaveLength(3);
+    expect(host.textCalls).toHaveLength(2);
+    const lines = await telemetryLines();
+    expect(lines.map((line) => line.blocked)).toEqual([undefined, "budget", "budget", undefined]);
+    expect(lines[1].verdict).toBe("blocked");
   });
 
-  test("a synthetic user message mid-turn does not reset the budget", async () => {
+  test("after a restart, a synthetic user message is neither the turn nor the request", async () => {
+    await writeConfig({ routing: { minStepsBetweenConsultations: 0 } });
+    // The plugin starts mid-session: no `prompt` hook has fired, the stored history has types.
+    const host = await start({
+      stored: [
+        { id: "u1", type: "user" },
+        { id: "syn-1", type: "synthetic" },
+      ],
+    });
+    const history: Any[] = [user("u1"), ...step(1)];
+    await host.hooks.context(request("s", [...history]));
+    history.push(user("syn-1", '<subagent state="completed">done</subagent>'), ...step(2));
+    await host.hooks.context(request("s", [...history]));
+    await Bun.sleep(10);
+    expect(host.textCalls).toHaveLength(1);
+    const input = host.decisionCalls.at(-1).input[0].text;
+    expect(input).toContain("Latest user request:\nUSER: Fix the login test");
+    expect((await telemetryLines()).map((line) => line.turn)).toEqual(["u1", "u1"]);
+  });
+
+  test("the cooldown counts distinct steps across turns, not retries", async () => {
+    await writeConfig({
+      routing: { maxConsultationsPerTurn: 100, minStepsBetweenConsultations: 3 },
+    });
     const host = await start();
-    await host.hooks.prompt({ sessionID: "s", messageID: "u1", delivery: "steer" });
-    const history: Any[] = [user("u1")];
-    for (let n = 1; n <= 2; n++) {
+    const history: Any[] = [user("u1"), ...step(1)];
+    await host.hooks.context(request("s", [...history]));
+    for (let n = 2; n <= 3; n++) {
       history.push(...step(n));
       await host.hooks.context(request("s", [...history]));
+      await Bun.sleep(10);
+      // A retried step is not a new step.
+      await host.hooks.context(request("s", [...history]));
+      await Bun.sleep(10);
     }
-    history.push(user("synthetic-1", "skill output"), ...step(3));
-    await host.hooks.context(request("s", [...history]));
+    expect(host.textCalls).toHaveLength(1);
+    // A new turn resets the budget but not the cooldown: this is the 4th distinct step.
+    await host.hooks.prompt({ sessionID: "s", messageID: "u2", delivery: "steer" });
+    await host.hooks.context(request("s", [...history, user("u2", "next")]));
     expect(host.textCalls).toHaveLength(2);
+    const lines = await telemetryLines();
+    expect(lines.map((line) => line.blocked)).toEqual([
+      undefined,
+      "cooldown",
+      "cooldown",
+      undefined,
+    ]);
   });
 
   test("a retried step reuses its review and never adds it twice", async () => {
@@ -427,10 +470,7 @@ describe("invalid config", () => {
 
 describe("explicit advisor()", () => {
   test("reviews the last request plus the in-flight call, without spending the budget", async () => {
-    await writeConfig({
-      routing: { mode: "active", maxConsultationsPerTurn: 1 },
-      advisor: { model: "openai/gpt-6#high" },
-    });
+    await writeConfig({ advisor: { model: "openai/gpt-6#high" } });
     const host = await start({ decision: async () => ROUTINE });
     await host.hooks.context(request("s", [user("u1"), ...step(1)]));
     const result = await host
@@ -452,6 +492,16 @@ describe("explicit advisor()", () => {
     expect(result.content).toContain("Advisor consultation failed");
     expect(result.content).toContain("unknown key: advisor.unknown");
     expect(host.textCalls).toHaveLength(0);
+  });
+
+  test("ignores the per-turn budget and the cooldown", async () => {
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1"), ...step(1)]));
+    expect(host.textCalls).toHaveLength(1);
+    const call = { sessionID: "s", messageID: "a-live", signal: new AbortController().signal };
+    await host.tool().execute({}, call);
+    await host.tool().execute({}, call);
+    expect(host.textCalls).toHaveLength(3);
   });
 
   test("is refused in child sessions", async () => {

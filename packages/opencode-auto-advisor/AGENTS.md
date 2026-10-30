@@ -18,9 +18,9 @@
 
 ## Architecture
 
-- `src/server.ts` wires everything: the `advisor` tool, a `prompt` hook that records real prompt ids, the `context` hook (route → consult → deliver), an event subscription that ends stale consults, the `auto-advisor` RPC and telemetry.
+- `src/server.ts` wires everything: the `advisor` tool, a `prompt` hook that records the latest real prompt id, the `context` hook (route → consult → deliver, within the per-turn budget and the session step cooldown), an event subscription that ends stale consults, the `auto-advisor` RPC and telemetry.
 - `src/decisions.ts`: the two Decision questions and the router over `routing.models`. `src/policy.ts`: the pure consult verdict.
-- `src/transcript.ts`: the Decision projection (small, no system prompt) and the Advisor transcript (system text, tool names, messages; compacted, then budgeted to `min(advisor.maxTokens, 75% of the window)` at 3 chars per token).
+- `src/transcript.ts`: the Decision projection (the real request, the turn's recent steps without system updates, and failure counts; no system prompt) and the Advisor transcript (system text, tool names, messages; compacted, then budgeted to `min(advisor.maxTokens, 75% of the window)` at 3 chars per token).
 - `src/advisor.ts`: prompts and the timeout-raced consult. `src/delivery.ts`: review text, marker, tail push.
 - `src/config.ts`: strict sparse `auto-advisor.json`, re-read when its mtime changes. `src/telemetry.ts`: JSONL with one rotation.
 - `src/tui.ts`: footer status and the composer panel, driven only by RPC events.
@@ -32,7 +32,10 @@
 - **Never append to the last message.** On a continuation step it is a `tool` message, and the Anthropic lowering accepts only tool-result parts there.
 - **The `context` hook re-fires on a retried step.** The retry may already carry the entry from the failed attempt. `stateKey` ignores system messages and memoizes the outcome; the marker stops a second copy.
 - **Hooks and `generate.*` calls can't be cancelled.** A consult that outlives its run is dropped by the session epoch, which is bumped on `session.execution.{succeeded,failed,interrupted}`.
-- **Synthetic, skill, shell and compaction messages are `role: "user"` too.** The turn key prefers ids recorded by the `prompt` hook.
+- **Synthetic, skill, shell and compaction messages are `role: "user"` too**, and their metadata is dropped (`core/src/session/runner/to-llm-message.ts` at v2.2.0). A background subagent's result is one of them. The turn key and the Decision request use only the latest real prompt id: from the `prompt` hook, or, when the session predates the process (an OpenCode restart), the newest `type: "user"` message in `ctx.session.context`. Never fall back to the latest `role: "user"` message.
+- **Our own reviews come back as system updates.** The Decision input leaves out system messages; otherwise a delivered review (`moment: done`) primes the next decision.
+- **A failing shell command is not a tool error.** A non-zero exit, a kill or a timeout completes the tool with a notice at the end of the output (`core/src/shell/result.ts` at v2.2.0). The Decision input matches those notices (`SHELL_FAILURE`), and tool results are truncated from the start so the notice survives. Recheck the strings after an OpenCode upgrade.
+- **The cooldown counts distinct steps.** A retry re-fires the `context` hook with the same `stateKey`; it is skipped, not counted.
 - **`generate.text` without a model uses the global default**, not the agent's. Always pass the agent's `event.model` for "inherit".
 - **A model ref without a variant gets no reasoning overlay** (the provider's default), not the agent's variant. `event.model` carries the agent's variant, so "inherit" keeps it; an unknown `#variant` fails the call with `InvalidRequestError` (`field: model.variant`).
 - **`compactContext` matches OpenCode 2.2.0's rendered text**, not keys: the host joins its instruction sources into one system part, so the keys are gone by the `context` hook. The start and end strings come from `core/src/codemode/instructions.ts`, `mcp/instructions.ts` and `skill/instructions.ts`. A block is replaced only when its end comes before the next copy's start, so a wording change in the host costs tokens, never other context. Only full renders are matched; the host's incremental notices ("New skills are available…" and the like) are kept, at their small cost. Recheck the strings after an OpenCode upgrade.

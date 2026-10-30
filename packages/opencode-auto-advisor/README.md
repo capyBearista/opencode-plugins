@@ -34,7 +34,7 @@ Two paths reach the same stateless Advisor. The agent can call the `advisor()` t
 ## Features
 
 - **Explicit `advisor()` tool**: zero arguments. The Advisor reads the agent's system prompt, tool list and transcript, and returns concise, actionable advice as the tool result.
-- **Automatic reviews (opt-in)**: a Decision model classifies each step as `approach`, `stuck`, `done` or `routine`, and scores how costly a mistake would be (0–4). The plugin consults the Advisor when both pass your thresholds.
+- **Automatic reviews (on by default)**: a Decision model classifies each step as `approach`, `stuck`, `done` or `routine`, and scores how costly a mistake would be (0–4). The plugin consults the Advisor when both pass your thresholds.
 - **Advice on the same step**: the review reaches the waiting request immediately, and stays in the session as an instruction entry until a newer review replaces it.
 - **Cache-safe**: no system-prompt edits. Only the newest message of a request changes.
 - **Observe mode**: run the Decision model without consulting, and log what it would have done, to tune the thresholds.
@@ -69,9 +69,9 @@ Remove the entry from `"plugins"` in `opencode.json(c)`. Optionally delete `~/.c
 ## Usage
 
 - **Ask for a review**: the agent sees the `advisor()` tool and its guidance (consult after orienting, when stuck, before declaring done). You can also say "consult the advisor before you continue".
-- **Turn on automatic reviews**: set `routing.mode` to `observe` first, watch the telemetry for a while, then switch to `active`.
+- **Automatic reviews are on by default** (`routing.mode` `active`). Without `advisor.model`, they consult the agent's own model and are billed at its rates; set `advisor.model`, or set `routing.mode` to `observe` or `off`, if that's not what you want.
 - Automatic reviews run in top-level sessions only. Subagent sessions don't get the tool or automatic reviews.
-- Automatic reviews are capped per user turn (`routing.maxConsultationsPerTurn`, default 2). Explicit `advisor()` calls don't count against the cap.
+- Automatic reviews are limited to one per user turn (`routing.maxConsultationsPerTurn`) and to one per 10 agent steps across the session (`routing.minStepsBetweenConsultations`). The step count carries over to the next turn, and a retried step doesn't count. Explicit `advisor()` calls ignore both limits.
 
 ## Configuration
 
@@ -90,26 +90,27 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 | `advisor.timeoutMs` | `300000` | Soft deadline for one consult. An automatic consult that runs out fails open; an explicit one returns an error. |
 | `advisor.compactContext` | `true` | Replaces OpenCode's Code Mode tool catalog, MCP server instructions and skill catalog with `[context-omitted: …]` markers in the Advisor's copy of the context. Your rules (AGENTS.md) and the conversation stay. The agent's own context is never changed. Incremental notices about tools, MCP servers or skills added mid-session are kept. `false` sends everything. |
 | `advisor.maxTokens` | `64000` | Approximate ceiling on the transcript sent per consult, at least `1000` (the tool-name list is never trimmed). The Advisor model's context window lowers it further (75% of the window). Over budget, older turns in the middle are left out; the system prompt, the first request and the newest steps stay. Counted at 3 characters per token, so the real token count is usually lower. |
-| `routing.mode` | `"off"` | `off`, `observe` (Decision model only, logged), or `active` (consults and delivers). |
+| `routing.mode` | `"active"` | `off`, `observe` (Decision model only, logged), or `active` (consults and delivers). |
 | `routing.models` | `["opencode/jev-1.13-free"]` | Ordered decision models, 1–8 `"provider/model[#variant]"` refs. On an availability or auth failure, the plugin tries the next one. |
 | `routing.momentThreshold` | `0.7` | Minimum probability that the step is not routine. |
 | `routing.consequenceThreshold` | `1.5` | Minimum stakes score (0 trivial … 4 critical), compared unrounded. |
-| `routing.maxConsultationsPerTurn` | `2` | Automatic consults per user turn. |
+| `routing.maxConsultationsPerTurn` | `1` | Automatic consults per user turn. |
+| `routing.minStepsBetweenConsultations` | `10` | Agent steps after an automatic consult starts (whatever its outcome) before another may start, counted across turns. `0` turns the cooldown off. |
 
 ## Privacy and cost
 
-- **Decision provider**: in `observe` and `active`, each step's latest request, recent tool calls and truncated results (no system prompt, no tool definitions) go to the configured decision model. The default, `opencode/jev-1.13-free`, is a limited-time free model on OpenCode Zen, built by TypeSafe AI. Check Zen's data-retention terms for it before using it with sensitive code.
-- **Advisor**: each consult sends the agent's transcript (system prompt with OpenCode's catalogs left out when `advisor.compactContext` is on, up to `advisor.maxTokens`) to the Advisor model, uncached. It's billed at that model's rates.
-- **Latency**: in `active`, every step waits for one Decision call (about 0.1–0.4 s on Zen after a cold start). A consult pauses the agent until the Advisor answers.
+- **Decision provider**: in `observe` and `active`, each step's latest user request, recent tool calls and truncated results (no system prompt, no tool definitions) go to the configured decision model. The default, `opencode/jev-1.13-free`, is a limited-time free model on OpenCode Zen, built by TypeSafe AI. Check Zen's data-retention terms for it before using it with sensitive code.
+- **Advisor**: automatic reviews are on by default and, without `advisor.model`, use the agent's own model. Each consult sends the agent's transcript (system prompt with OpenCode's catalogs left out when `advisor.compactContext` is on, up to `advisor.maxTokens`) to the Advisor model, uncached. It's billed at that model's rates.
+- **Latency**: in `active`, every step waits for one Decision call (about 0.1–0.4 s on Zen after a cold start), except while a limit blocks consults: then the call runs in the background, as in `observe`. A consult pauses the agent until the Advisor answers.
 - **Cache**: installing the plugin adds the `advisor` tool, which costs one prompt-cache miss on the tools block. After that, reviews only add to the end of a request.
 - **Telemetry**: one JSON line per routing decision in `~/.local/share/opencode/auto-advisor/telemetry.jsonl` (capped at 5 MB, one rotation), with models, answers, verdicts and timings. Never transcript or advice text.
 
 ## Troubleshooting
 
-- **Nothing happens automatically**: `routing.mode` defaults to `off`. Check `telemetry.jsonl` for the verdicts: `routine` and `low-consequence` mean the thresholds held the review back, and `no-decision` means no configured decision model answered.
+- **Nothing happens automatically**: check `telemetry.jsonl` for the verdicts. `routine` and `low-consequence` mean the thresholds held the review back, `blocked` means the per-turn limit or the cooldown did (the `blocked` field says which), and `no-decision` means no configured decision model answered.
 - **"Advisor unavailable" in the footer**: the consult failed or timed out. The agent carried on without advice.
 - **Your config is ignored**: an invalid file switches automatic reviews off, and `advisor()` returns `invalid config: …` naming the bad value; unknown keys are rejected. With a local checkout, run `bun run build` after pulling: OpenCode loads `dist/`, and an older build rejects newer keys.
-- **Observe mode logs fewer lines than steps**: while one Decision call is still running, later steps in the same session are skipped rather than queued.
+- **Observe mode logs fewer lines than steps**: while one Decision call is still running, later steps in the same session are skipped rather than queued. The same holds in `active` while a limit blocks consults.
 
 ## Contributing
 
