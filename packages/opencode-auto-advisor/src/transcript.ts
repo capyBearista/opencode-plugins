@@ -171,14 +171,18 @@ export function renderMessage(message: Message, max = Number.POSITIVE_INFINITY):
 }
 
 /**
- * OpenCode 2.2.0's shell notices (`core/src/shell/result.ts`). A non-zero exit, a kill or a
- * timeout still completes the tool, so the result is not marked as an error.
+ * OpenCode's shell notices (`core/src/shell/result.ts`, unchanged through 2.2.5). A non-zero exit,
+ * a kill or a timeout still completes the tool, so the result is not marked as an error. Only the
+ * shell tool appends them; another tool's output (a read log) can contain the same words.
  */
 const SHELL_FAILURE = /Exited with code [1-9]|Killed by |Timed out before completion/;
+/** `bash` runs the shell tool on 2.2.5, and the call keeps the name the model used. */
+const SHELL_TOOLS = new Set(["shell", "bash"]);
 
 const failed = (part: Part) => {
   const result = part.result as { type?: string; value?: unknown } | undefined;
-  return result?.type === "error" || SHELL_FAILURE.test(json(result?.value));
+  if (result?.type === "error") return true;
+  return SHELL_TOOLS.has(String(part.name)) && SHELL_FAILURE.test(json(result?.value));
 };
 
 const DECISION_RECENT_LINES = 12;

@@ -159,6 +159,21 @@ describe("decisionInput", () => {
     expect(text).not.toContain("auto-advisor review");
   });
 
+  test("exit notices count only on shell results; a read of the same text succeeded", () => {
+    const fixture = "24 passed, 1 failed\n\nExited with code 1";
+    const read = decisionInput(
+      [user("u1", "Inspect the CI log"), result("read", fixture)],
+      requests(["u1"]),
+    );
+    expect(read).toContain("Failed tool calls this turn: 0. Latest tool result: ok.");
+    // A model that calls `bash` runs the shell tool on 2.2.5 but keeps the name it used.
+    const bash = decisionInput(
+      [user("u1", "Run the tests"), result("bash", fixture)],
+      requests(["u1"]),
+    );
+    expect(bash).toContain("Failed tool calls this turn: 1. Latest tool result: failed.");
+  });
+
   test("a non-zero shell exit counts as a failure even when the tool completed", () => {
     const log = `${"ok line\n".repeat(400)}24 passed, 1 failed\n\nExited with code 1`;
     const text = decisionInput(
