@@ -828,3 +828,47 @@ describe("decision context in telemetry", () => {
     expect(line.input).toContain("Recent steps this turn:");
   });
 });
+
+describe("advisor chain, failures", () => {
+  test("an interrupt ends the chain; the next model is never asked", async () => {
+    await writeConfig({ advisor: { model: ["inherit", "mock/small"] } });
+    let release: () => void = () => {};
+    const host = await start({
+      advice: () => new Promise((resolve) => (release = () => resolve({ text: "late" }))),
+    });
+    const pending = host.hooks.context(request("s", [user("u1"), ...step(1)]));
+    await Bun.sleep(5);
+    await host.send({ type: "session.execution.interrupted", data: { sessionID: "s" } });
+    await pending;
+    release();
+    await Bun.sleep(20);
+    expect(host.textCalls.map((call) => call.model.id)).toEqual(["exec"]);
+    expect((await telemetryLines())[0].advisor.outcome).toBe("stale");
+  });
+
+  test("a chain that timed out reports a timeout even when a later model was skipped", async () => {
+    await writeConfig({ advisor: { model: ["inherit", "mock/small"], timeoutMs: 40 } });
+    let first = true;
+    const host = await start({
+      advice: (input) => {
+        // The first consult makes mock/small time out and skips it for 60 s.
+        if (first && input.model.id === "exec")
+          return Promise.reject({ _tag: "Generate.UnavailableError" });
+        return new Promise(() => {});
+      },
+    });
+    await writeConfig({
+      advisor: { model: ["inherit", "mock/small"], timeoutMs: 40 },
+      routing: { minStepsBetweenConsultations: 0 },
+    });
+    const history: Any[] = [user("u1"), ...step(1)];
+    await host.hooks.context(request("s", [...history]));
+    first = false;
+    history.push(...step(2));
+    await host.hooks.context(request("s", [...history]));
+    await Bun.sleep(20);
+    const [, second] = await telemetryLines();
+    expect(second.advisor.attempts.map((a: Any) => a.outcome)).toEqual(["timeout", "skipped"]);
+    expect(second.advisor.outcome).toBe("timeout");
+  });
+});

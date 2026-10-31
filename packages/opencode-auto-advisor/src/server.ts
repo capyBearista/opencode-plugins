@@ -470,7 +470,11 @@ export default Plugin.define({
                 model: last?.model ?? "unknown",
                 attempts,
                 ms: Date.now() - start,
-                outcome: stale ? "stale" : last?.outcome === "timeout" ? "timeout" : "error",
+                outcome: stale
+                  ? "stale"
+                  : attempts.some((attempt) => attempt.outcome === "timeout")
+                    ? "timeout"
+                    : "error",
               },
             };
           } finally {

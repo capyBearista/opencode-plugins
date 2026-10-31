@@ -6,6 +6,7 @@ import {
   type DecisionRequest,
   type DecisionResult,
   QUESTIONS,
+  TOTAL_TIMEOUT_MS,
 } from "./decisions.js";
 import { SKIP_MS } from "./fallback.js";
 import fixtures from "./fixtures/s1-decisions.json";
@@ -35,6 +36,10 @@ function fakeGenerate(script: Record<string, unknown[]>) {
 }
 
 describe("router", () => {
+  test("each model gets 5 s, the chain 10 s", () => {
+    expect([ATTEMPT_TIMEOUT_MS, TOTAL_TIMEOUT_MS]).toEqual([5_000, 10_000]);
+  });
+
   test("sends the two questions and the projection to the first model", async () => {
     const { generate, calls } = fakeGenerate({ "opencode/jev-1.13-free": [ok] });
     const result = await createRouter(generate)([free], "state");
@@ -76,8 +81,12 @@ describe("router", () => {
   });
 
   test("an unknown error stops", async () => {
-    const { generate } = fakeGenerate({ "opencode/jev-1.13-free": [{ _tag: "SchemaError" }] });
+    const { generate, calls } = fakeGenerate({
+      "opencode/jev-1.13-free": [{ _tag: "SchemaError" }],
+      "opencode/jev-1.13": [ok],
+    });
     expect((await createRouter(generate)([free, paid], "state")).ok).toBe(false);
+    expect(calls).toHaveLength(1);
   });
 
   test("a rate-limited model is skipped until the skip window passes", async () => {
@@ -116,8 +125,12 @@ describe("router", () => {
 
   test("a response missing an answer is not a selection", async () => {
     const partial = { answers: [ok.answers[0]] };
-    const { generate } = fakeGenerate({ "opencode/jev-1.13-free": [partial] });
-    expect((await createRouter(generate)([free], "state")).ok).toBe(false);
+    const { generate, calls } = fakeGenerate({
+      "opencode/jev-1.13-free": [partial],
+      "opencode/jev-1.13": [ok],
+    });
+    expect((await createRouter(generate)([free, paid], "state")).ok).toBe(false);
+    expect(calls).toHaveLength(1);
   });
 });
 

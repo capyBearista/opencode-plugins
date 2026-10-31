@@ -23,15 +23,19 @@ export const SKIP_MS = 60_000;
  * OpenCode 2.2.0's generate errors (`core/src/generate.ts`, spike S1). A provider's
  * `invalid_request` moves on: it is how a context overflow arrives (the host drops its
  * `context-overflow` classification), and a parameter one model rejects says nothing about the
- * next. A content filter would see the same content anywhere, and `Generate.InvalidRequestError`
- * is a config error such as a bad `#variant`: both stop, so they fail loudly.
+ * next. A `Generate.InvalidRequestError` without a `field` is the same rejection reported
+ * mid-stream (no HTTP status), so it moves on too. With a `field` it is a config error such as a
+ * bad `#variant`; that and a content filter, which would see the same content anywhere, stop,
+ * so they fail loudly.
  */
 export function classify(error: unknown): {
   action: "next" | "stop";
   skip: boolean;
   error: string;
 } {
-  const value = error as { _tag?: string; reason?: string; message?: unknown } | undefined;
+  const value = error as
+    | { _tag?: string; reason?: string; field?: string; message?: unknown }
+    | undefined;
   const tag = value?._tag;
   if (!tag) {
     const message = typeof value?.message === "string" ? value.message : String(error);
@@ -42,6 +46,9 @@ export function classify(error: unknown): {
     if (value.reason === "content_filter") return { action: "stop", skip: false, error: label };
     const skip = value.reason === "rate_limit" || value.reason === "overloaded";
     return { action: "next", skip, error: label };
+  }
+  if (tag === "Generate.InvalidRequestError") {
+    return { action: value.field ? "stop" : "next", skip: false, error: tag };
   }
   if (
     tag === "Generate.ModelNotFoundError" ||

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classify, createWalker } from "./fallback.js";
+import { classify, createWalker, SKIP_MS } from "./fallback.js";
 
 const provider = (reason: string) => ({ _tag: "Generate.ProviderRequestError", reason });
 const key = (entry: string) => entry;
@@ -17,6 +17,8 @@ describe("classify", () => {
     [{ _tag: "Generate.UnavailableError" }, "next", false],
     [{ _tag: "Advisor.EmptyAdvice" }, "next", false],
     [{ _tag: "Generate.InvalidRequestError", field: "model.variant" }, "stop", false],
+    // No field: the provider rejected it mid-stream, such as a context overflow.
+    [{ _tag: "Generate.InvalidRequestError", message: "prompt is too long" }, "next", false],
     [new Error("boom"), "stop", false],
   ])("%j → %s (skip %s)", (error, action, skip) => {
     expect(classify(error)).toMatchObject({ action, skip });
@@ -27,6 +29,10 @@ describe("classify", () => {
       "Generate.ProviderRequestError (rate_limit)",
     );
   });
+});
+
+test("the skip window is 60 s", () => {
+  expect(SKIP_MS).toBe(60_000);
 });
 
 describe("walker", () => {
