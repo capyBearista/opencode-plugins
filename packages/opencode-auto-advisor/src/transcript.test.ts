@@ -104,7 +104,7 @@ describe("decisionInput", () => {
     expect(text).toContain("Steps this turn: 1.");
   });
 
-  test("a long plan followed by a short correction keeps the plan, uncapped by default", () => {
+  test("a long plan followed by a short correction keeps the plan, uncapped with -1", () => {
     const plan = `PLAN START ${"step ".repeat(6_000)}PLAN END`;
     const messages = [
       user("u1", plan),

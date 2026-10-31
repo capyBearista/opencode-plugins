@@ -97,12 +97,12 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 | `routing.maxConsultationsPerTurn` | `2` | Automatic consults per user turn. |
 | `routing.minStepsBetweenConsultations` | `10` | Agent steps after an automatic consult starts (whatever its outcome) before another may start, counted across turns. `0` turns the cooldown off. |
 | `routing.requests` | `3` | How many of your latest requests the Decision model sees, oldest first, from `1` to `20`. Subagent results and other notices are never counted as requests. |
-| `routing.requestMaxChars` | `-1` | Characters kept from each request (its start), from `100`; `-1` sends them whole. Without a cap a long request can exceed a small decision model's window; the next model in `routing.models` then answers. |
+| `routing.requestMaxChars` | `60000` | Characters kept from each request sent to the decision model (its start), from `100`; `-1` sends them whole. A request that is still too long for a decision model's window makes it fail over to the next model in `routing.models`. |
 | `tui.sidebar` | `true` | Shows the Advisor status at the bottom of the session sidebar. `false` hides it; `/advisor-review` still opens the review. |
 
 ## Privacy and cost
 
-- **Decision provider**: in `observe` and `active`, each step's last `routing.requests` user requests (whole, unless `routing.requestMaxChars` caps them), recent tool calls and truncated results (no system prompt, no tool definitions) go to the configured decision model. The default, `opencode/jev-1.13-free`, is a limited-time free model on OpenCode Zen, built by TypeSafe AI. Check Zen's data-retention terms for it before using it with sensitive code.
+- **Decision provider**: in `observe` and `active`, each step's last `routing.requests` user requests (up to 60,000 characters each by default; see `routing.requestMaxChars`), recent tool calls and truncated results (no system prompt, no tool definitions) go to the configured decision model. The default, `opencode/jev-1.13-free`, is a limited-time free model on OpenCode Zen, built by TypeSafe AI. Check Zen's data-retention terms for it before using it with sensitive code.
 - **Advisor**: automatic reviews are on by default and, without `advisor.model`, use the agent's own model. Each consult sends the agent's transcript (system prompt with OpenCode's catalogs left out when `advisor.compactContext` is on, up to `advisor.maxTokens`) to the Advisor model, uncached. It's billed at that model's rates.
 - **Latency**: in `active`, every step waits for one Decision call (about 0.1–0.4 s on Zen after a cold start), except while a limit blocks consults: then the call runs in the background, as in `observe`. A consult pauses the agent until the Advisor answers.
 - **Cache**: installing the plugin adds the `advisor` tool, which costs one prompt-cache miss on the tools block. After that, reviews only add to the end of a request.

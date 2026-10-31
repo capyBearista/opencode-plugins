@@ -25,7 +25,7 @@ describe("parseConfig", () => {
         maxConsultationsPerTurn: 2,
         minStepsBetweenConsultations: 10,
         requests: 3,
-        requestMaxChars: -1,
+        requestMaxChars: 60_000,
       },
       tui: { sidebar: true },
     });
