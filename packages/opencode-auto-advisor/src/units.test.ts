@@ -65,10 +65,26 @@ describe("advisorPrompt", () => {
     expect(prompt).not.toContain("They've asked for your advice");
   });
 
-  test("an explicit call says the agent asked", () => {
+  test.each([
+    ["approach", "about to commit to an approach"],
+    ["stuck", "stuck"],
+    ["done", "finishing"],
+  ] as const)("the %s hint reads as %s", (moment, phrase) => {
+    expect(advisorPrompt("x", moment)).toContain(`judged them to be ${phrase}.`);
+  });
+
+  test("an explicit call says the agent asked, and points at a question in its last message", () => {
     expect(advisorPrompt("USER: hi")).toContain(
-      "They've asked for your advice but haven't formulated a specific question.",
+      "They've asked for your advice. If their latest message poses a question, answer it",
     );
+  });
+
+  test("explains every label and marker the transcript uses", () => {
+    const prompt = advisorPrompt("x");
+    for (const label of ["USER lines", "SUBAGENT lines", "NOTICE lines", "SYSTEM UPDATE lines"])
+      expect(prompt).toContain(label);
+    expect(prompt).toContain("COMPACTED HISTORY SUMMARY");
+    expect(prompt).toContain("only those catalogs");
   });
 });
 
@@ -77,7 +93,15 @@ describe("TOOL_DESCRIPTION", () => {
     expect(TOOL_DESCRIPTION).toContain("Call advisor BEFORE substantive work");
     expect(TOOL_DESCRIPTION).toContain("make your deliverable durable");
     expect(TOOL_DESCRIPTION).toContain("Your hidden reasoning is not forwarded");
-    expect(TOOL_DESCRIPTION).toContain("[auto-advisor review");
+    // The marker the description names is the one delivered reviews carry.
+    expect(reviewText({ id: "r", moment: "done", advice: "a" })).toStartWith(
+      "[auto-advisor review ",
+    );
+    expect(TOOL_DESCRIPTION).toContain('"[auto-advisor review ...]"');
+    // The default Advisor is the agent's own model: never promise a stronger one.
+    expect(TOOL_DESCRIPTION).not.toContain("Consult a stronger reviewer");
+    expect(TOOL_DESCRIPTION).toContain("long results may be shortened");
+    expect(TOOL_DESCRIPTION).toContain("write the question in your message, then call advisor");
     expect(TOOL_DESCRIPTION).toContain("which constraint breaks the tie?");
     expect(TOOL_DESCRIPTION).toContain("The user's constraints always come first.");
   });

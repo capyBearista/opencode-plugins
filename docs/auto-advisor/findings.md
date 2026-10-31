@@ -72,4 +72,4 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
 
 ## Known limitations
 - A prompt that a summary compaction absorbs before any step sees it never starts its own turn. The turn is the newest real prompt present in the request (`server.ts`); when none is present it carries on from the last one, so the earlier turn's spent budget and step count continue and the Decision requests block reads `(not in context)` until the next prompt. Accepted as rare and fail-closed (fewer consults, never more).
-- `opencode-ram-monitor` builds its modal with `insert(markdown, [])`, the call that blanked this plugin's panel. On 2.2.0 the `/ram` modal still renders its text (checked live 2026-10-31), presumably because its content is reactive and redraws on each poll; not changed.
+- `opencode-ram-monitor` builds its modal with `insert(markdown, [])`, the call that blanked this plugin's panel. On 2.2.0 the `/ram` modal still renders its text (checked live 2026-10-31), because its content changes once, when the async load finishes after the insert, which redraws the blocks; not changed.

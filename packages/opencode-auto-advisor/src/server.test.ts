@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TOOL_DESCRIPTION } from "./advisor.js";
 import fixtures from "./fixtures/s1-decisions.json";
 import server from "./server.js";
 import { COMPACTED, OMISSION_MARKER } from "./transcript.js";
@@ -212,6 +213,7 @@ describe("off", () => {
     await writeConfig({ routing: { mode: "off" } });
     const host = await start();
     expect(host.tool().name).toBe("advisor");
+    expect(host.tool().description).toBe(TOOL_DESCRIPTION);
     const event = request("s", [user("u1"), ...step(1)]);
     await host.hooks.context(event);
     expect(host.decisionCalls).toHaveLength(0);
@@ -615,7 +617,7 @@ describe("explicit advisor()", () => {
       .execute({}, { sessionID: "s", messageID: "a-live", signal: new AbortController().signal });
     expect(result.content).toBe("Check the token clock skew first.");
     expect(host.textCalls[0].model).toEqual({ providerID: "openai", id: "gpt-6", variant: "high" });
-    expect(host.textCalls[0].prompt).toContain("They've asked for your advice");
+    expect(host.textCalls[0].prompt).toContain("They've asked for your advice.");
     expect(host.textCalls[0].prompt).toContain("TOOL CALL advisor");
   });
 
