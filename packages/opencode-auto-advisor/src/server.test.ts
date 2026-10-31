@@ -365,6 +365,64 @@ describe("active (default)", () => {
     ]);
   });
 
+  test("a compaction that drops the prompt keeps the turn and its budget", async () => {
+    await writeConfig({
+      routing: { maxConsultationsPerTurn: 1, minStepsBetweenConsultations: 0 },
+    });
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1"), ...step(1)]));
+    await Bun.sleep(10);
+    // The window now starts at the compaction summary; the prompt is no longer in it.
+    const summary = {
+      role: "user",
+      id: "cmp-1",
+      content: [{ type: "compaction", text: "Summary of the work so far." }],
+    };
+    await host.hooks.context(request("s", [summary, ...step(2)]));
+    await Bun.sleep(10);
+    expect(host.textCalls).toHaveLength(1);
+    const lines = await telemetryLines();
+    expect(lines.map((line) => [line.turn, line.step, line.blocked])).toEqual([
+      ["u1", 1, undefined],
+      ["u1", 2, "budget"],
+    ]);
+  });
+
+  test("a queued prompt does not reset the budget before it is delivered", async () => {
+    await writeConfig({
+      routing: { maxConsultationsPerTurn: 1, minStepsBetweenConsultations: 0 },
+    });
+    const host = await start();
+    const history: Any[] = [user("u1"), ...step(1)];
+    await host.hooks.context(request("s", [...history]));
+    await Bun.sleep(10);
+    await host.hooks.prompt({ sessionID: "s", messageID: "u2", delivery: "queue" });
+    history.push(...step(2));
+    await host.hooks.context(request("s", [...history]));
+    await Bun.sleep(10);
+    expect(host.textCalls).toHaveLength(1);
+    expect((await telemetryLines()).at(-1).blocked).toBe("budget");
+  });
+
+  test("a failed history read is retried on the next step", async () => {
+    await writeConfig({ routing: { mode: "observe" } });
+    const host = await start({ stored: [{ id: "u1", type: "user" }] });
+    const read = host.ctx.session.context;
+    let calls = 0;
+    host.ctx.session.context = async (input: Any) => {
+      calls++;
+      if (calls === 1) throw new Error("busy");
+      return read(input);
+    };
+    const history: Any[] = [user("u1", "The stored plan"), ...step(1)];
+    await host.hooks.context(request("s", [...history]));
+    await Bun.sleep(10);
+    history.push(...step(2));
+    await host.hooks.context(request("s", [...history]));
+    await Bun.sleep(10);
+    expect(host.decisionCalls.at(-1).input[0].text).toContain("USER: The stored plan");
+  });
+
   test("the cooldown counts distinct steps across turns, not retries", async () => {
     await writeConfig({
       routing: { maxConsultationsPerTurn: 100, minStepsBetweenConsultations: 3 },

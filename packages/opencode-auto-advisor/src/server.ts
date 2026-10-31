@@ -136,12 +136,14 @@ export default Plugin.define({
      */
     const realPrompts = async (sessionID: string, session: SessionState) => {
       if (!session.hydrated) {
-        session.hydrated = true;
         try {
           const stored = await ctx.session.context({ sessionID });
           for (const message of stored)
             if (message.type === "user") session.prompts.add(message.id);
-        } catch {}
+          session.hydrated = true;
+        } catch {
+          // Retried on the next step.
+        }
       }
       return session.prompts;
     };
@@ -329,7 +331,11 @@ export default Plugin.define({
           requests: routing.requests,
           requestMaxChars: routing.requestMaxChars,
         };
-        const turn = messages.findLast((message) => isRequest(message, requests.prompts))?.id ?? "";
+        // A compaction can drop the prompt from the window; the turn goes on until a new one.
+        const turn =
+          messages.findLast((message) => isRequest(message, requests.prompts))?.id ??
+          session.turn ??
+          "";
         const input = decisionInput(messages, requests);
         if (session.turn !== turn) {
           session.turn = turn;
