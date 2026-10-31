@@ -19,7 +19,7 @@
 ## Architecture
 
 - `src/server.ts` wires everything: the `advisor` tool, a `prompt` hook that records real prompt ids, the `context` hook (route → consult → deliver, within the per-turn budget and the session step cooldown), an event subscription that ends stale consults, the `auto-advisor` RPC and telemetry.
-- `src/decisions.ts`: the two Decision questions and the router over `routing.models`. `src/policy.ts`: the pure consult verdict.
+- `src/fallback.ts`: the model-chain walker shared by the Decision router and the Advisor chain (error policy, skip map, shared deadline). `src/decisions.ts`: the two Decision questions and the router over `routing.models`. `src/policy.ts`: the pure consult verdict.
 - `src/transcript.ts`: the Decision projection (the last `routing.requests` real prompts, the turn's recent steps without system updates, with subagent results and other user-role notices labelled `SUBAGENT`/`NOTICE`, and failure counts; no system prompt and no total cap) and the Advisor transcript (system text, tool names, messages; compacted, then budgeted to `min(advisor.maxTokens, 75% of the window)` at 3 chars per token).
 - `src/advisor.ts`: prompts and the timeout-raced consult. `src/delivery.ts`: review text, marker, tail push.
 - `src/config.ts`: strict sparse `auto-advisor.json`, re-read when its mtime changes. `src/telemetry.ts`: JSONL with one rotation.

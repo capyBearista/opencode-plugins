@@ -13,8 +13,9 @@ export interface ModelRef {
 
 export interface Config {
   readonly advisor: {
-    /** Undefined means "use the Executor's model". */
-    readonly model: ModelRef | undefined;
+    /** Tried in order until one answers; `inherit` is the Executor's model and variant. */
+    readonly models: readonly (ModelRef | "inherit")[];
+    /** One deadline for the whole chain; -1 leaves hang detection to the host's HTTP timeouts. */
     readonly timeoutMs: number;
     /** Replace the host's tool, MCP and skill catalogs in the Advisor's copy of the context. */
     readonly compactContext: boolean;
@@ -44,7 +45,7 @@ export const CONFIG_FILE = "auto-advisor.json";
 const MAX_MODELS = 8;
 
 export const DEFAULTS: Config = {
-  advisor: { model: undefined, timeoutMs: 300_000, compactContext: true, maxTokens: 64_000 },
+  advisor: { models: ["inherit"], timeoutMs: -1, compactContext: true, maxTokens: 64_000 },
   routing: {
     mode: "active",
     models: [{ providerID: "opencode", id: "jev-1.13-free" }],
@@ -106,13 +107,27 @@ function number(value: unknown, name: string, min: number, max: number, integer 
   return value as number;
 }
 
-/** -1 (no cap) or an integer in `min..max`. */
+/** 1..MAX_MODELS distinct entries, each a model ref or, where allowed, "inherit". */
+function modelList(list: unknown, inherit: boolean): (ModelRef | "inherit")[] | undefined {
+  if (!Array.isArray(list) || list.length === 0 || list.length > MAX_MODELS) return undefined;
+  if (new Set(list).size !== list.length) return undefined;
+  const refs = list.map((item) =>
+    inherit && item === "inherit"
+      ? "inherit"
+      : typeof item === "string"
+        ? parseModelRef(item)
+        : undefined,
+  );
+  return refs.every(Boolean) ? (refs as (ModelRef | "inherit")[]) : undefined;
+}
+
+/** -1 (no limit) or an integer in `min..max`. */
 function noCapOr(value: unknown, name: string, min: number, max: number) {
   if (value === -1) return -1;
   if (typeof value === "number" && Number.isInteger(value) && value >= min && value <= max) {
     return value;
   }
-  throw new ConfigError(`${name} must be -1 (no cap) or an integer in ${min}..${max}`);
+  throw new ConfigError(`${name} must be -1 (no limit) or an integer in ${min}..${max}`);
 }
 
 function boolean(value: unknown, name: string) {
@@ -141,11 +156,18 @@ export function parseConfig(input: unknown): Config {
   ]);
   const tui = section(input, "tui", ["sidebar"]);
 
-  let model = DEFAULTS.advisor.model;
-  if (advisor.model !== undefined && advisor.model !== "inherit") {
-    model = typeof advisor.model === "string" ? parseModelRef(advisor.model) : undefined;
-    if (!model)
-      throw new ConfigError('advisor.model must be "inherit" or "provider/model[#variant]"');
+  let advisorModels = DEFAULTS.advisor.models;
+  if (advisor.model !== undefined) {
+    const list = modelList(
+      typeof advisor.model === "string" ? [advisor.model] : advisor.model,
+      true,
+    );
+    if (!list) {
+      throw new ConfigError(
+        `advisor.model must be "inherit", "provider/model[#variant]" or a list of 1..${MAX_MODELS} distinct such entries`,
+      );
+    }
+    advisorModels = list;
   }
 
   let mode = DEFAULTS.routing.mode;
@@ -158,30 +180,22 @@ export function parseConfig(input: unknown): Config {
 
   let models = DEFAULTS.routing.models;
   if (routing.models !== undefined) {
-    const list = routing.models;
-    const refs = Array.isArray(list)
-      ? list.map((item) => (typeof item === "string" ? parseModelRef(item) : undefined))
-      : [];
-    const valid =
-      refs.length > 0 &&
-      refs.length <= MAX_MODELS &&
-      refs.every(Boolean) &&
-      new Set(list as string[]).size === refs.length;
-    if (!valid) {
+    const list = modelList(routing.models, false);
+    if (!list) {
       throw new ConfigError(
         `routing.models must list 1..${MAX_MODELS} distinct "provider/model[#variant]" decision models`,
       );
     }
-    models = refs as ModelRef[];
+    models = list as ModelRef[];
   }
 
   return {
     advisor: {
-      model,
+      models: advisorModels,
       timeoutMs:
         advisor.timeoutMs === undefined
           ? DEFAULTS.advisor.timeoutMs
-          : number(advisor.timeoutMs, "advisor.timeoutMs", 1, 3_600_000, true),
+          : noCapOr(advisor.timeoutMs, "advisor.timeoutMs", 1, 3_600_000),
       compactContext:
         advisor.compactContext === undefined
           ? DEFAULTS.advisor.compactContext

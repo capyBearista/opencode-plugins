@@ -1,6 +1,6 @@
 import { Plugin } from "@opencode/plugin";
 import {
-  AdvisorTimeoutError,
+  AdvisorChainError,
   advisorPrompt,
   consult,
   type GenerateText,
@@ -17,6 +17,7 @@ import {
   type Review,
   reviewText,
 } from "./delivery.js";
+import { createWalker } from "./fallback.js";
 import { decide } from "./policy.js";
 import { AutoAdvisorRpc, type ReviewDetails, type Status } from "./rpc.js";
 import { createTelemetry, type TelemetryRecord } from "./telemetry.js";
@@ -206,27 +207,39 @@ export default Plugin.define({
         .catch(() => {});
     };
 
-    /** One Advisor consult over a snapshot; the model defaults to the Executor's. */
+    const advisorChain = createWalker();
+    /**
+     * One Advisor consult over a snapshot, walking `advisor.models` until one answers. Each model
+     * gets a transcript sized to its own window. With `timeoutMs` -1 only the host's HTTP
+     * timeouts end a silent model, so one that is still reasoning is never cut off.
+     */
     const review = async (
       snapshot: Snapshot,
       advisor: Config["advisor"],
       moment?: Review["moment"],
       signal?: AbortSignal,
     ) => {
-      const model = advisor.model ?? snapshot.model;
-      const transcript = advisorTranscript({
-        ...snapshot,
-        budgetChars: await budgetChars(model, advisor.maxTokens),
-        compact: advisor.compactContext,
+      const walked = await advisorChain({
+        entries: advisor.models.map((entry) => (entry === "inherit" ? snapshot.model : entry)),
+        key: modelKey,
+        attemptMs: Number.POSITIVE_INFINITY,
+        totalMs: advisor.timeoutMs < 0 ? Number.POSITIVE_INFINITY : advisor.timeoutMs,
+        call: async (model) => {
+          const transcript = advisorTranscript({
+            ...snapshot,
+            budgetChars: await budgetChars(model, advisor.maxTokens),
+            compact: advisor.compactContext,
+          });
+          return consult({
+            generate: generateText,
+            prompt: advisorPrompt(transcript, moment),
+            model,
+            signal,
+          });
+        },
       });
-      const advice = await consult({
-        generate: generateText,
-        prompt: advisorPrompt(transcript, moment),
-        model,
-        timeoutMs: advisor.timeoutMs,
-        signal,
-      });
-      return { advice, model };
+      if (!walked.ok) throw new AdvisorChainError(walked.attempts);
+      return { advice: walked.value, model: walked.model, attempts: walked.attempts };
     };
 
     const toolRegistration = await ctx.tool.transform((editor) => {
@@ -350,7 +363,7 @@ export default Plugin.define({
           void route(routing.models, decisionInput(messages, requests))
             .then((routed) => {
               const verdict = routed.ok
-                ? decide({ answers: routed.result.answers, routing })
+                ? decide({ answers: routed.value.answers, routing })
                 : undefined;
               telemetry.record({
                 ...base,
@@ -378,7 +391,7 @@ export default Plugin.define({
         try {
           const routed = await route(routing.models, decisionInput(messages, requests));
           const verdict = routed.ok
-            ? decide({ answers: routed.result.answers, routing })
+            ? decide({ answers: routed.value.answers, routing })
             : undefined;
           record = { ...base, mode, ...summary(routed, verdict), delivered: false };
           // The run may have ended while the Decision model answered: don't pay for a consult.
@@ -390,29 +403,25 @@ export default Plugin.define({
           session.failed = false;
           emit("review.started", event.sessionID);
           const start = Date.now();
-          const advisorModel = config.advisor.model ?? event.model;
           try {
-            const { advice } = await review(
+            const consulted = await review(
               snapshot,
               config.advisor,
               verdict.reading.moment,
               abort.signal,
             );
+            const advisor = { model: consulted.model, attempts: consulted.attempts };
             if (session.epoch !== epoch) {
               record = {
                 ...record,
-                advisor: {
-                  model: modelKey(advisorModel),
-                  ms: Date.now() - start,
-                  outcome: "stale",
-                },
+                advisor: { ...advisor, ms: Date.now() - start, outcome: "stale" },
               };
               return;
             }
             const result: Review = {
               id: crypto.randomUUID(),
               moment: verdict.reading.moment,
-              advice,
+              advice: consulted.advice,
             };
             const text = reviewText(result);
             pushTail(messages, text);
@@ -421,17 +430,17 @@ export default Plugin.define({
               id: result.id,
               details: {
                 at: new Date().toISOString(),
-                model: modelKey(advisorModel),
+                model: consulted.model,
                 ms: Date.now() - start,
               },
             };
             record = {
               ...record,
               advisor: {
-                model: modelKey(advisorModel),
+                ...advisor,
                 ms: Date.now() - start,
                 outcome: "ok",
-                chars: advice.length,
+                chars: consulted.advice.length,
               },
               delivered: true,
             };
@@ -441,14 +450,16 @@ export default Plugin.define({
               .catch(() => {});
           } catch (cause) {
             const stale = session.epoch !== epoch;
-            const timeout = cause instanceof AdvisorTimeoutError;
             if (!stale) session.failed = true;
+            const attempts = cause instanceof AdvisorChainError ? cause.attempts : [];
+            const last = attempts.at(-1);
             record = {
               ...record,
               advisor: {
-                model: modelKey(advisorModel),
+                model: last?.model ?? "unknown",
+                attempts,
                 ms: Date.now() - start,
-                outcome: stale ? "stale" : timeout ? "timeout" : "error",
+                outcome: stale ? "stale" : last?.outcome === "timeout" ? "timeout" : "error",
               },
             };
           } finally {
@@ -525,11 +536,11 @@ function summary(
   verdict: ReturnType<typeof decide> | undefined,
 ): Pick<TelemetryRecord, "attempts" | "model" | "cost" | "moment" | "consequence" | "verdict"> {
   if (!routed.ok) return { attempts: routed.attempts, verdict: "no-decision" };
-  const moment = routed.result.answers.find((answer) => answer.name === "moment");
+  const moment = routed.value.answers.find((answer) => answer.name === "moment");
   return {
     attempts: routed.attempts,
     model: routed.model,
-    cost: routed.result.cost,
+    cost: routed.value.cost,
     moment: Object.fromEntries(
       (moment?.probabilities ?? []).map((item) => [String(item.value), item.probability]),
     ),

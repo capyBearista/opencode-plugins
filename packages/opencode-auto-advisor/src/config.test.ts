@@ -16,7 +16,7 @@ describe("parseConfig", () => {
 
   test("defaults match the agreed values", () => {
     expect(DEFAULTS).toEqual({
-      advisor: { model: undefined, timeoutMs: 300_000, compactContext: true, maxTokens: 64_000 },
+      advisor: { models: ["inherit"], timeoutMs: -1, compactContext: true, maxTokens: 64_000 },
       routing: {
         mode: "active",
         models: [{ providerID: "opencode", id: "jev-1.13-free" }],
@@ -57,16 +57,29 @@ describe("parseConfig", () => {
   });
 
   test("advisor.model accepts provider/model and inherit", () => {
-    expect(parseConfig({ advisor: { model: "openai/gpt-6" } }).advisor.model).toEqual({
-      providerID: "openai",
-      id: "gpt-6",
+    expect(parseConfig({ advisor: { model: "openai/gpt-6" } }).advisor.models).toEqual([
+      { providerID: "openai", id: "gpt-6" },
+    ]);
+    expect(parseConfig({ advisor: { model: "inherit" } }).advisor.models).toEqual(["inherit"]);
+    expect(parseConfig({ advisor: { model: "openai/gpt-6#high" } }).advisor.models).toEqual([
+      { providerID: "openai", id: "gpt-6", variant: "high" },
+    ]);
+  });
+
+  test("advisor.model accepts an ordered fallback list, inherit included", () => {
+    const config = parseConfig({
+      advisor: { model: ["opencode-go/deepseek#max", "openrouter/meta/muse#xhigh", "inherit"] },
     });
-    expect(parseConfig({ advisor: { model: "inherit" } }).advisor.model).toBeUndefined();
-    expect(parseConfig({ advisor: { model: "openai/gpt-6#high" } }).advisor.model).toEqual({
-      providerID: "openai",
-      id: "gpt-6",
-      variant: "high",
-    });
+    expect(config.advisor.models).toEqual([
+      { providerID: "opencode-go", id: "deepseek", variant: "max" },
+      { providerID: "openrouter", id: "meta/muse", variant: "xhigh" },
+      "inherit",
+    ]);
+  });
+
+  test("advisor.timeoutMs is -1 for no limit or a positive total deadline", () => {
+    expect(parseConfig({ advisor: { timeoutMs: -1 } }).advisor.timeoutMs).toBe(-1);
+    expect(parseConfig({ advisor: { timeoutMs: 600_000 } }).advisor.timeoutMs).toBe(600_000);
   });
 
   test("routing.models keeps order and splits on the first slash", () => {
@@ -86,6 +99,7 @@ describe("parseConfig", () => {
     [{ routing: { models: ["a/b", "a/b"] } }, "routing.models"],
     [{ routing: { models: Array.from({ length: 9 }, (_, i) => `p/m${i}`) } }, "routing.models"],
     [{ routing: { models: ["noslash"] } }, "routing.models"],
+    [{ routing: { models: ["inherit"] } }, "routing.models"],
     [{ routing: { momentThreshold: 1.2 } }, "routing.momentThreshold"],
     [{ routing: { consequenceThreshold: -1 } }, "routing.consequenceThreshold"],
     [{ routing: { consequenceThreshold: 5 } }, "routing.consequenceThreshold"],
@@ -102,6 +116,12 @@ describe("parseConfig", () => {
     [{ routing: { requestMaxChars: 150.5 } }, "routing.requestMaxChars"],
     [{ advisor: { timeoutMs: 0 } }, "advisor.timeoutMs"],
     [{ advisor: { model: "x" } }, "advisor.model"],
+    [{ advisor: { model: [] } }, "advisor.model"],
+    [{ advisor: { model: ["a/b", "a/b"] } }, "advisor.model"],
+    [{ advisor: { model: ["inherit", "inherit"] } }, "advisor.model"],
+    [{ advisor: { model: ["a/b", "x"] } }, "advisor.model"],
+    [{ advisor: { model: Array.from({ length: 9 }, (_, i) => `p/m${i}`) } }, "advisor.model"],
+    [{ advisor: { timeoutMs: -2 } }, "advisor.timeoutMs"],
     [{ advisor: { compactContext: "yes" } }, "advisor.compactContext"],
     [{ advisor: { maxTokens: 64 } }, "advisor.maxTokens must be"],
     [{ advisor: { maxTokens: 1_500.5 } }, "advisor.maxTokens must be"],

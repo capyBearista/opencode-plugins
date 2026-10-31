@@ -86,12 +86,12 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 
 | Key | Default | Description |
 | :--- | :--- | :--- |
-| `advisor.model` | `"inherit"` | `"provider/model"` of the Advisor, optionally with `#variant` for its reasoning level (`"openai/gpt-6#high"`). Without a variant, the provider's default applies. `"inherit"` uses the agent's own model and variant. |
-| `advisor.timeoutMs` | `300000` | Soft deadline for one consult. An automatic consult that runs out fails open; an explicit one returns an error. |
+| `advisor.model` | `"inherit"` | `"provider/model"` of the Advisor, optionally with `#variant` for its reasoning level (`"openai/gpt-6#high"`). Without a variant, the provider's default applies. `"inherit"` uses the agent's own model and variant. A list of 1–8 entries is a fallback chain, tried in order: an unreachable model, an exhausted quota, an overload, a missing model or a request the model rejects (such as one over its context window) moves to the next at once. A content filter or an invalid `#variant` stops the chain. A rate-limited, overloaded or timed-out model is skipped for 60 s. Each model gets a transcript sized to its own window. |
+| `advisor.timeoutMs` | `-1` | One deadline for the whole `advisor.model` chain, or `-1` for none. With none, a model that is still reasoning is never cut off; OpenCode's own provider timeouts (`headerTimeout`, 5 min without a response; `chunkTimeout`, 15 min without any data) end a silent one, and the chain moves on. A consult that runs out fails open; an explicit one returns an error. Esc (interrupt) ends a consult at once. |
 | `advisor.compactContext` | `true` | Replaces OpenCode's Code Mode tool catalog, MCP server instructions and skill catalog with `[context-omitted: …]` markers in the Advisor's copy of the context. Your rules (AGENTS.md) and the conversation stay. The agent's own context is never changed. Incremental notices about tools, MCP servers or skills added mid-session are kept. `false` sends everything. |
 | `advisor.maxTokens` | `64000` | Approximate ceiling on the transcript sent per consult, at least `1000` (the tool-name list is never trimmed). The Advisor model's context window lowers it further (75% of the window). Over budget, older turns in the middle are left out; the system prompt, the first request and the newest steps stay. Counted at 3 characters per token, so the real token count is usually lower. |
 | `routing.mode` | `"active"` | `off`, `observe` (Decision model only, logged), or `active` (consults and delivers). |
-| `routing.models` | `["opencode/jev-1.13-free"]` | Ordered decision models, 1–8 `"provider/model[#variant]"` refs. On an availability or auth failure, the plugin tries the next one. |
+| `routing.models` | `["opencode/jev-1.13-free"]` | Ordered decision models, 1–8 `"provider/model[#variant]"` refs. On an availability or auth failure, or a request the model rejects (such as one over its context window), the plugin tries the next one, so a small, fast model can go first. Each model gets 5 s, the whole chain 10 s. |
 | `routing.momentThreshold` | `0.7` | Minimum probability that the step is not routine. |
 | `routing.consequenceThreshold` | `1.5` | Minimum stakes score (0 trivial … 4 critical), compared unrounded. |
 | `routing.maxConsultationsPerTurn` | `2` | Automatic consults per user turn. |
@@ -111,7 +111,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 ## Troubleshooting
 
 - **Nothing happens automatically**: check `telemetry.jsonl` for the verdicts. `routine` and `low-consequence` mean the thresholds held the review back, `blocked` means the cooldown or the per-turn limit did (the `blocked` field says which; a step both block is logged as `cooldown`), and `no-decision` means no configured decision model answered.
-- **"Advisor unavailable" in the footer or sidebar**: the consult failed or timed out. The agent carried on without advice.
+- **"Advisor unavailable" in the footer or sidebar**: every Advisor model failed or the deadline ran out. The agent carried on without advice. `advisor.attempts` in `telemetry.jsonl` lists each model's outcome.
 - **No Advisor in the sidebar**: OpenCode shows the sidebar only in top-level sessions, and only on terminals wider than 120 columns unless you open it. While the review panel is open, it takes the sidebar's place. `/advisor-review` works either way.
 - **The review panel shows no model or duration**: they are kept in memory, so a review delivered before OpenCode restarted shows only its moment and text.
 - **Your config is ignored**: an invalid file switches automatic reviews off, and `advisor()` returns `invalid config: …` naming the bad value; unknown keys are rejected. With a local checkout, run `bun run build` after pulling: OpenCode loads `dist/`, and an older build rejects newer keys.

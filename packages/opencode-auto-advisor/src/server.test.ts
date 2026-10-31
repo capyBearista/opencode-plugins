@@ -51,7 +51,7 @@ const ROUTINE = {
 
 interface Setup {
   decision?: () => Promise<Any>;
-  advice?: () => Promise<{ text: string }>;
+  advice?: (input: Any) => Promise<{ text: string }>;
   parent?: string;
   /** The session's stored history, as `ctx.session.context` returns it. */
   stored?: Any[];
@@ -77,13 +77,16 @@ async function start(setup: Setup = {}) {
         },
         text: async (input: Any) => {
           textCalls.push(input);
-          return setup.advice ? setup.advice() : { text: "Check the token clock skew first." };
+          return setup.advice ? setup.advice(input) : { text: "Check the token clock skew first." };
         },
       },
     },
     model: {
       list: async () => ({
-        data: [{ providerID: "mock", id: "exec", limit: { context: 50_000 } }],
+        data: [
+          { providerID: "mock", id: "exec", limit: { context: 50_000 } },
+          { providerID: "mock", id: "small", limit: { context: 1_000 } },
+        ],
       }),
     },
     session: {
@@ -594,7 +597,7 @@ describe("explicit advisor()", () => {
     const result = await host
       .tool()
       .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
-    expect(result.content).toBe("Advisor consultation failed: down");
+    expect(result.content).toBe("Advisor consultation failed: all models failed (mock/exec: down)");
   });
 });
 
@@ -657,5 +660,81 @@ describe("advisor budget", () => {
     expect(transcript.length).toBeLessThanOrEqual(112_500 + 30);
     expect(transcript.length).toBeGreaterThan(100_000);
     expect(transcript).toContain(OMISSION_MARKER);
+  });
+});
+
+describe("advisor chain", () => {
+  const providerError = (reason: string) => ({ _tag: "Generate.ProviderRequestError", reason });
+
+  test("an Advisor that fails hands over to the next; the answering model is reported", async () => {
+    // Neither is the Executor's model, so the report cannot fall back to it.
+    await writeConfig({ advisor: { model: ["mock/dead", "mock/small"] } });
+    const host = await start({
+      advice: async (input) =>
+        input.model.id === "dead"
+          ? Promise.reject(providerError("rate_limit"))
+          : { text: "Check the token clock skew first." },
+    });
+    const event = request("s", [user("u1"), ...step(1)]);
+    await host.hooks.context(event);
+    expect(host.textCalls.map((call) => call.model.id)).toEqual(["dead", "small"]);
+    expect(tail(event).content[0].text).toContain("Check the token clock skew first.");
+    await Bun.sleep(20);
+    const [line] = await telemetryLines();
+    expect(line.advisor).toMatchObject({ model: "mock/small", outcome: "ok" });
+    expect(line.advisor.attempts.map((a: Any) => [a.model, a.outcome])).toEqual([
+      ["mock/dead", "next"],
+      ["mock/small", "ok"],
+    ]);
+    expect((await host.rpc().status({ sessionID: "s" })).latest.details.model).toBe("mock/small");
+  });
+
+  test("the explicit tool names every model's failure", async () => {
+    // Routing off: an automatic consult would rate-limit mock/a first, and it would be skipped.
+    await writeConfig({ advisor: { model: ["mock/a", "inherit"] }, routing: { mode: "off" } });
+    const host = await start({
+      advice: async (input) =>
+        Promise.reject(
+          input.model.id === "a"
+            ? providerError("rate_limit")
+            : { _tag: "Generate.UnavailableError" },
+        ),
+    });
+    await host.hooks.context(request("s", [user("u1")]));
+    const result = await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
+    expect(result.content).toBe(
+      "Advisor consultation failed: all models failed (mock/a: Generate.ProviderRequestError (rate_limit), mock/exec: Generate.UnavailableError)",
+    );
+  });
+
+  test("the transcript is rebuilt for each model's window", async () => {
+    await writeConfig({ advisor: { model: ["inherit", "mock/small"] } });
+    const host = await start({
+      advice: async (input) =>
+        input.model.id === "exec"
+          ? Promise.reject(providerError("provider"))
+          : { text: "Small model advice." },
+    });
+    const big = {
+      role: "assistant",
+      id: "big",
+      content: [{ type: "text", text: "x".repeat(4_000) }],
+    };
+    await host.hooks.context(request("s", [user("u1"), big, ...step(1)]));
+    expect(host.textCalls[0].prompt).not.toContain(OMISSION_MARKER);
+    expect(host.textCalls[1].prompt).toContain(OMISSION_MARKER);
+  });
+
+  test("timeoutMs is one deadline for the chain; running out is a timeout", async () => {
+    await writeConfig({ advisor: { model: ["inherit", "mock/small"], timeoutMs: 50 } });
+    const host = await start({ advice: () => new Promise(() => {}) });
+    await host.hooks.context(request("s", [user("u1"), ...step(1)]));
+    await Bun.sleep(20);
+    const [line] = await telemetryLines();
+    expect(line.advisor.outcome).toBe("timeout");
+    expect(line.advisor.attempts.map((a: Any) => a.outcome)).toEqual(["timeout"]);
+    expect((await host.rpc().status({ sessionID: "s" })).failed).toBe(true);
   });
 });

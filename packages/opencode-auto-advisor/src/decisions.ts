@@ -1,4 +1,5 @@
 import { type ModelRef, modelKey } from "./config.js";
+import { createWalker, type WalkResult } from "./fallback.js";
 
 export type Moment = "approach" | "stuck" | "done" | "routine";
 
@@ -80,107 +81,34 @@ export interface DecisionResult {
 
 export type GenerateDecisions = (request: DecisionRequest) => Promise<DecisionResult>;
 
-export type AttemptOutcome = "ok" | "next" | "stop" | "timeout" | "skipped";
-
-export interface Attempt {
-  readonly model: string;
-  readonly outcome: AttemptOutcome;
-  readonly ms: number;
-  readonly error?: string;
-}
-
-export type RouteResult =
-  | {
-      readonly ok: true;
-      readonly model: string;
-      readonly result: DecisionResult;
-      readonly attempts: Attempt[];
-    }
-  | { readonly ok: false; readonly attempts: Attempt[] };
+export type RouteResult = WalkResult<DecisionResult>;
 
 export const ATTEMPT_TIMEOUT_MS = 5_000;
 export const TOTAL_TIMEOUT_MS = 10_000;
-export const SKIP_MS = 60_000;
-
-/**
- * Host error tags seen on 2.2.0 (spike S1). The host already retries rate limits, overload and
- * unsent requests, so a failure here moves to the next model or stops; it never retries.
- */
-function classify(error: unknown): { action: "next" | "stop"; skip: boolean; tag: string } {
-  const tag = (error as { _tag?: string } | undefined)?._tag ?? "unknown";
-  const reason = (error as { reason?: string } | undefined)?.reason;
-  if (tag === "Generate.ProviderRequestError") {
-    if (reason === "invalid_request" || reason === "content_filter")
-      return { action: "stop", skip: false, tag };
-    return { action: "next", skip: reason === "rate_limit" || reason === "overloaded", tag };
-  }
-  if (
-    tag === "Generate.ModelNotFoundError" ||
-    tag === "Generate.UnsupportedModelError" ||
-    tag === "Generate.UnavailableError"
-  ) {
-    return { action: "next", skip: false, tag };
-  }
-  return { action: "stop", skip: false, tag };
-}
-
-const TIMEOUT = Symbol("timeout");
-
-function race<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMEOUT> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<typeof TIMEOUT>((resolve) => {
-    timer = setTimeout(() => resolve(TIMEOUT), ms);
-  });
-  // A late rejection from an abandoned call must not surface as unhandled.
-  promise.catch(() => {});
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
 
 const answered = (result: DecisionResult) =>
   QUESTIONS.every((question) => result.answers.some((answer) => answer.name === question.name));
 
 /**
- * Walks the configured models once and takes the first valid response. A model that was rate
- * limited, overloaded or timed out is skipped for `SKIP_MS`, so a throttled free model does not
- * stall every step while the host keeps retrying it.
+ * Walks the configured Decision models once and takes the first complete response. An
+ * incomplete one stops the walk: the questions, not the model, are the likely cause.
  */
 export function createRouter(generate: GenerateDecisions, now: () => number = Date.now) {
-  const skipUntil = new Map<string, number>();
-  return async (models: readonly ModelRef[], text: string): Promise<RouteResult> => {
-    const attempts: Attempt[] = [];
-    const deadline = now() + TOTAL_TIMEOUT_MS;
-    for (const ref of models) {
-      const model = modelKey(ref);
-      if ((skipUntil.get(model) ?? 0) > now()) {
-        attempts.push({ model, outcome: "skipped", ms: 0 });
-        continue;
-      }
-      const remaining = deadline - now();
-      if (remaining <= 0) break;
-      const start = now();
-      try {
-        const result = await race(
-          generate({ model: ref, input: [{ type: "text", text }], questions: QUESTIONS }),
-          Math.min(ATTEMPT_TIMEOUT_MS, remaining),
-        );
-        if (result === TIMEOUT) {
-          attempts.push({ model, outcome: "timeout", ms: now() - start });
-          skipUntil.set(model, now() + SKIP_MS);
-          continue;
-        }
-        if (!answered(result)) {
-          attempts.push({ model, outcome: "stop", ms: now() - start, error: "missing answers" });
-          return { ok: false, attempts };
-        }
-        attempts.push({ model, outcome: "ok", ms: now() - start });
-        return { ok: true, model, result, attempts };
-      } catch (error) {
-        const { action, skip, tag } = classify(error);
-        attempts.push({ model, outcome: action, ms: now() - start, error: tag });
-        if (skip) skipUntil.set(model, now() + SKIP_MS);
-        if (action === "stop") return { ok: false, attempts };
-      }
-    }
-    return { ok: false, attempts };
-  };
+  const walk = createWalker(now);
+  return (models: readonly ModelRef[], text: string): Promise<RouteResult> =>
+    walk({
+      entries: models,
+      key: modelKey,
+      attemptMs: ATTEMPT_TIMEOUT_MS,
+      totalMs: TOTAL_TIMEOUT_MS,
+      call: async (model) => {
+        const result = await generate({
+          model,
+          input: [{ type: "text", text }],
+          questions: QUESTIONS,
+        });
+        if (!answered(result)) throw { _tag: "Decision.MissingAnswers" };
+        return result;
+      },
+    });
 }

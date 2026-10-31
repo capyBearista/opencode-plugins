@@ -1,5 +1,6 @@
 import type { ModelRef } from "./config.js";
 import type { Moment } from "./decisions.js";
+import type { Attempt } from "./fallback.js";
 
 export const TOOL_NAME = "advisor";
 
@@ -57,40 +58,48 @@ export type GenerateText = (input: {
   model: ModelRef;
 }) => Promise<{ text: string }>;
 
-export class AdvisorTimeoutError extends Error {
-  constructor(ms: number) {
-    super(`the Advisor did not answer within ${ms} ms`);
+/** Every Advisor model failed; `attempts` says how, in chain order. */
+export class AdvisorChainError extends Error {
+  constructor(readonly attempts: readonly Attempt[]) {
+    const failures = attempts.map(
+      (attempt) => `${attempt.model}: ${attempt.error ?? attempt.outcome}`,
+    );
+    super(`all models failed (${failures.join(", ")})`);
+  }
+}
+
+/** No text back: the next model in the chain may still answer. */
+export class EmptyAdviceError extends Error {
+  readonly _tag = "Advisor.EmptyAdvice";
+  constructor() {
+    super("the Advisor returned no advice");
   }
 }
 
 /**
- * One stateless consult. Host generate calls cannot be cancelled, so a timeout abandons the
- * call; `signal` (the explicit tool's) abandons it early.
+ * One stateless consult. Host generate calls cannot be cancelled, so `signal` abandons the call;
+ * the fallback chain owns the deadline.
  */
 export async function consult(input: {
   readonly generate: GenerateText;
   readonly prompt: string;
   readonly model: ModelRef;
-  readonly timeoutMs: number;
   readonly signal?: AbortSignal;
 }): Promise<string> {
   const call = input.generate({ prompt: input.prompt, model: input.model });
   call.catch(() => {});
-  let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
-  const stop = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new AdvisorTimeoutError(input.timeoutMs)), input.timeoutMs);
+  const cancelled = new Promise<never>((_, reject) => {
     onAbort = () => reject(new Error("the consultation was cancelled"));
     if (input.signal?.aborted) onAbort();
     input.signal?.addEventListener("abort", onAbort, { once: true });
   });
   try {
-    const { text } = await Promise.race([call, stop]);
+    const { text } = await Promise.race([call, cancelled]);
     const advice = text.trim();
-    if (!advice) throw new Error("the Advisor returned no advice");
+    if (!advice) throw new EmptyAdviceError();
     return advice;
   } finally {
-    clearTimeout(timer);
     if (onAbort) input.signal?.removeEventListener("abort", onAbort);
   }
 }

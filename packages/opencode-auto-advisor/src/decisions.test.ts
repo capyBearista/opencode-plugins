@@ -6,8 +6,8 @@ import {
   type DecisionRequest,
   type DecisionResult,
   QUESTIONS,
-  SKIP_MS,
 } from "./decisions.js";
+import { SKIP_MS } from "./fallback.js";
 import fixtures from "./fixtures/s1-decisions.json";
 import { decide, read } from "./policy.js";
 
@@ -54,14 +54,24 @@ describe("router", () => {
     expect(result.attempts.map((a) => a.outcome)).toEqual(["next", "ok"]);
   });
 
-  test("an invalid request stops without trying other models", async () => {
-    const invalid = { ...rateLimited, reason: "invalid_request" };
+  test("a provider invalid request, such as a context overflow, moves to the next model", async () => {
+    const overflow = { ...rateLimited, reason: "invalid_request", message: "prompt is too long" };
     const { generate, calls } = fakeGenerate({
-      "opencode/jev-1.13-free": [invalid],
+      "opencode/jev-1.13-free": [overflow],
       "opencode/jev-1.13": [ok],
     });
     const result = await createRouter(generate)([free, paid], "state");
-    expect(result.ok).toBe(false);
+    expect(result.ok && result.model).toBe("opencode/jev-1.13");
+    expect(calls).toHaveLength(2);
+  });
+
+  test("a bad variant stops without trying other models", async () => {
+    const variant = { _tag: "Generate.InvalidRequestError", field: "model.variant" };
+    const { generate, calls } = fakeGenerate({
+      "opencode/jev-1.13-free": [variant],
+      "opencode/jev-1.13": [ok],
+    });
+    expect((await createRouter(generate)([free, paid], "state")).ok).toBe(false);
     expect(calls).toHaveLength(1);
   });
 

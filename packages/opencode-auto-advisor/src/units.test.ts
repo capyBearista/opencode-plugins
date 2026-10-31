@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AdvisorTimeoutError, advisorPrompt, consult } from "./advisor.js";
+import { advisorPrompt, consult } from "./advisor.js";
 import { hasReview, pushTail, reviewText } from "./delivery.js";
 import { createTelemetry, resolveTelemetryPath, type TelemetryRecord } from "./telemetry.js";
 import type { Message } from "./transcript.js";
@@ -19,20 +19,9 @@ describe("consult", () => {
       },
       prompt: "p",
       model,
-      timeoutMs: 1_000,
     });
     expect(advice).toBe("check the migration");
     expect(calls).toEqual([{ prompt: "p", model }]);
-  });
-
-  test("times out instead of waiting forever", async () => {
-    const pending = consult({
-      generate: () => new Promise(() => {}),
-      prompt: "p",
-      model,
-      timeoutMs: 20,
-    });
-    await expect(pending).rejects.toBeInstanceOf(AdvisorTimeoutError);
   });
 
   test("an aborted signal abandons the call", async () => {
@@ -41,7 +30,6 @@ describe("consult", () => {
       generate: () => new Promise(() => {}),
       prompt: "p",
       model,
-      timeoutMs: 10_000,
       signal: controller.signal,
     });
     controller.abort();
@@ -53,9 +41,8 @@ describe("consult", () => {
       generate: async () => ({ text: " " }),
       prompt: "p",
       model,
-      timeoutMs: 100,
     });
-    await expect(pending).rejects.toThrow("no advice");
+    await expect(pending).rejects.toMatchObject({ _tag: "Advisor.EmptyAdvice" });
   });
 });
 

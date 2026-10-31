@@ -1,7 +1,7 @@
 import { mkdir, open, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { Attempt } from "./decisions.js";
+import type { Attempt } from "./fallback.js";
 
 export const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -25,6 +25,8 @@ export interface TelemetryRecord {
     readonly ms: number;
     readonly outcome: "ok" | "error" | "timeout" | "stale";
     readonly chars?: number;
+    /** One per Advisor model tried, in chain order. */
+    readonly attempts?: readonly Attempt[];
   };
   readonly delivered: boolean;
 }
