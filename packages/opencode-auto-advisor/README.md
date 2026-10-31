@@ -71,7 +71,7 @@ Remove the entry from `"plugins"` in `opencode.json(c)`. Optionally delete `~/.c
 - **Ask for a review**: the agent sees the `advisor()` tool and its guidance (consult after orienting, when stuck, before declaring done). You can also say "consult the advisor before you continue".
 - **Automatic reviews are on by default** (`routing.mode` `active`). Without `advisor.model`, they consult the agent's own model and are billed at its rates; set `advisor.model`, or set `routing.mode` to `observe` or `off`, if that's not what you want.
 - Automatic reviews run in top-level sessions only. Subagent sessions don't get the tool or automatic reviews.
-- Automatic reviews are limited to one per user turn (`routing.maxConsultationsPerTurn`) and to one per 10 agent steps across the session (`routing.minStepsBetweenConsultations`). The step count carries over to the next turn, and a retried step doesn't count. Explicit `advisor()` calls ignore both limits.
+- Automatic reviews are limited to two per user turn (`routing.maxConsultationsPerTurn`) and to one per 10 agent steps across the session (`routing.minStepsBetweenConsultations`). The step count carries over to the next turn, and a retried step doesn't count. Explicit `advisor()` calls ignore both limits.
 
 ## Configuration
 
@@ -94,7 +94,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 | `routing.models` | `["opencode/jev-1.13-free"]` | Ordered decision models, 1–8 `"provider/model[#variant]"` refs. On an availability or auth failure, the plugin tries the next one. |
 | `routing.momentThreshold` | `0.7` | Minimum probability that the step is not routine. |
 | `routing.consequenceThreshold` | `1.5` | Minimum stakes score (0 trivial … 4 critical), compared unrounded. |
-| `routing.maxConsultationsPerTurn` | `1` | Automatic consults per user turn. |
+| `routing.maxConsultationsPerTurn` | `2` | Automatic consults per user turn. |
 | `routing.minStepsBetweenConsultations` | `10` | Agent steps after an automatic consult starts (whatever its outcome) before another may start, counted across turns. `0` turns the cooldown off. |
 | `routing.requests` | `3` | How many of your latest requests the Decision model sees, oldest first, from `1` to `20`. Subagent results and other notices are never counted as requests. |
 | `routing.requestMaxChars` | `-1` | Characters kept from each request (its start), from `100`; `-1` sends them whole. Without a cap a long request can exceed a small decision model's window; the next model in `routing.models` then answers. |
@@ -110,7 +110,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 
 ## Troubleshooting
 
-- **Nothing happens automatically**: check `telemetry.jsonl` for the verdicts. `routine` and `low-consequence` mean the thresholds held the review back, `blocked` means the per-turn limit or the cooldown did (the `blocked` field says which), and `no-decision` means no configured decision model answered.
+- **Nothing happens automatically**: check `telemetry.jsonl` for the verdicts. `routine` and `low-consequence` mean the thresholds held the review back, `blocked` means the cooldown or the per-turn limit did (the `blocked` field says which; a step both block is logged as `cooldown`), and `no-decision` means no configured decision model answered.
 - **"Advisor unavailable" in the footer or sidebar**: the consult failed or timed out. The agent carried on without advice.
 - **No Advisor in the sidebar**: OpenCode shows the sidebar only in top-level sessions, and only on terminals wider than 120 columns unless you open it. While the review panel is open, it takes the sidebar's place. `/advisor-review` works either way.
 - **The review panel shows no model or duration**: they are kept in memory, so a review delivered before OpenCode restarted shows only its moment and text.

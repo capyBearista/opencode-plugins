@@ -333,13 +333,14 @@ export default Plugin.define({
         const cooling =
           session.consultedAt !== undefined &&
           session.steps - session.consultedAt < routing.minStepsBetweenConsultations;
+        // Cooldown first, so `budget` appears only once the cooldown has expired.
         const blocked =
           mode !== "active"
             ? undefined
-            : session.started >= routing.maxConsultationsPerTurn
-              ? ("budget" as const)
-              : cooling
-                ? ("cooldown" as const)
+            : cooling
+              ? ("cooldown" as const)
+              : session.started >= routing.maxConsultationsPerTurn
+                ? ("budget" as const)
                 : undefined;
 
         if (mode === "observe" || blocked) {

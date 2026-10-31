@@ -264,7 +264,7 @@ describe("active (default)", () => {
     expect((await telemetryLines())[0].verdict).toBe("routine");
   });
 
-  test("the per-turn budget caps consults at 1 and resets on the next prompt", async () => {
+  test("the per-turn budget caps consults at 2 and resets on the next prompt", async () => {
     await writeConfig({ routing: { minStepsBetweenConsultations: 0 } });
     const host = await start();
     const history: Any[] = [user("u1")];
@@ -273,17 +273,41 @@ describe("active (default)", () => {
       await host.hooks.context(request("s", [...history]));
       await Bun.sleep(10);
     }
-    expect(host.textCalls).toHaveLength(1);
+    expect(host.textCalls).toHaveLength(2);
     await host.hooks.prompt({ sessionID: "s", messageID: "u2", delivery: "steer" });
     await host.hooks.context(request("s", [...history, user("u2", "next")]));
-    expect(host.textCalls).toHaveLength(2);
+    expect(host.textCalls).toHaveLength(3);
     const lines = await telemetryLines();
-    expect(lines.map((line) => line.blocked)).toEqual([undefined, "budget", "budget", undefined]);
-    expect(lines[1].verdict).toBe("blocked");
+    expect(lines.map((line) => line.blocked)).toEqual([undefined, undefined, "budget", undefined]);
+    expect(lines[2].verdict).toBe("blocked");
+  });
+
+  test("a step blocked by both limits reports the cooldown; the budget shows after it", async () => {
+    await writeConfig({
+      routing: { maxConsultationsPerTurn: 1, minStepsBetweenConsultations: 3 },
+    });
+    const host = await start();
+    const history: Any[] = [user("u1")];
+    for (let n = 1; n <= 4; n++) {
+      history.push(...step(n));
+      await host.hooks.context(request("s", [...history]));
+      await Bun.sleep(10);
+    }
+    expect(host.textCalls).toHaveLength(1);
+    const lines = await telemetryLines();
+    expect(lines.map((line) => line.blocked)).toEqual([
+      undefined,
+      "cooldown",
+      "cooldown",
+      "budget",
+    ]);
   });
 
   test("after a restart, a synthetic user message is neither the turn nor the request", async () => {
-    await writeConfig({ routing: { minStepsBetweenConsultations: 0 } });
+    // One consult per turn: a second one would mean the synthetic message started a turn.
+    await writeConfig({
+      routing: { maxConsultationsPerTurn: 1, minStepsBetweenConsultations: 0 },
+    });
     // The plugin starts mid-session: no `prompt` hook has fired, the stored history has types.
     const host = await start({
       stored: [

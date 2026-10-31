@@ -22,7 +22,7 @@ describe("parseConfig", () => {
         models: [{ providerID: "opencode", id: "jev-1.13-free" }],
         momentThreshold: 0.7,
         consequenceThreshold: 1.5,
-        maxConsultationsPerTurn: 1,
+        maxConsultationsPerTurn: 2,
         minStepsBetweenConsultations: 10,
         requests: 3,
         requestMaxChars: -1,
