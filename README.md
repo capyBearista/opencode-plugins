@@ -46,6 +46,7 @@
 | [⏱️ Double-Tap Timeline](./packages/opencode-double-tap-timeline/) | Open the session timeline with two Escape presses. |
 | [🛠️ Agents Loader](./packages/opencode-agents-loader/) | Reuse agents and commands across AI coding tools. |
 | [🗣️ Output Styles](./packages/opencode-output-styles/) | Customize how your agents approach conversations. |
+| [🧭 Auto Advisor](./packages/opencode-auto-advisor/) | Get a stronger model's review at the moments that matter. |
 | [💬 Agent Prompt Inheritance](./packages/opencode-agent-prompt-inheritance/) | **V1 only:** Preserve base model instructions when customizing agents. |
 
 ## Meet the Plugins
@@ -156,6 +157,16 @@ Switch between persistent response styles without repeating the same instruction
 
 Includes Claude Code's built-in `Proactive`, `Concise`, `Explanatory`, and `Learning` styles, plus custom project-local and global styles. Use `/output-style`, the picker, or the clickable sidebar line to switch; each session keeps its own style, with a global setting for the rest.
 
+### 🧭 Auto Advisor [[opencode-auto-advisor]](./packages/opencode-auto-advisor/)
+
+<p>
+  <img src=".github/assets/opencode-v2.svg" alt="OpenCode V2 compatible" height="20" />
+</p>
+
+**A Claude Code-style Advisor for your agent.**
+
+Your agent can call a zero-argument `advisor()` tool to have a stronger model review its work. By default, a fast Decision model also watches each step and brings in the Advisor on its own, at most once per turn and once per 10 steps, when the agent is about to commit to an approach, is stuck, or is finishing, and a mistake would be costly. Reviews never edit the system prompt, so the prompt cache stays intact.
+
 ## Quick Start (OpenCode V2)
 
 <p>
@@ -176,12 +187,13 @@ Add your selected server plugins to `opencode.json` or `opencode.jsonc`:
   "plugins": [
     "@capybearista/opencode-adversarial-review@latest",
     "@capybearista/opencode-agents-loader@latest",
-    "@capybearista/opencode-output-styles@latest"
+    "@capybearista/opencode-output-styles@latest",
+    "@capybearista/opencode-auto-advisor@latest"
   ]
 }
 ```
 
-A plugin with both a server and a TUI half, such as Output Styles, needs only this one entry; its TUI half loads automatically, so it does not belong in `cli.json`.
+A plugin with both a server and a TUI half, such as Output Styles or Auto Advisor, needs only this one entry; its TUI half loads automatically, so it does not belong in `cli.json`.
 
 ### 2. TUI plugins
 
@@ -213,6 +225,7 @@ The repository supports both OpenCode V2 and V1, but plugin availability and con
 | [Double-Tap Timeline](./packages/opencode-double-tap-timeline/) | `@latest` · `cli.json` | 2.0.0 | `@1.0.1` · `tui.json(c)` |
 | [RAM Monitor](./packages/opencode-ram-monitor/) | `@latest` · `cli.json` | 2.1.0 | `@1.1.0` · `opencode.json(c)` and `tui.json(c)` |
 | [Output Styles](./packages/opencode-output-styles/) | `@latest` · `opencode.json(c)` | 2.2.0 | `@1` · `opencode.json(c)` |
+| [Auto Advisor](./packages/opencode-auto-advisor/) | `@latest` · `opencode.json(c)` | 2.2.5 | Not available |
 | [Agent Prompt Inheritance](./packages/opencode-agent-prompt-inheritance/) | Not yet ported | — | `@latest` · `opencode.json(c)` |
 
 **Using OpenCode V1?** See the [V1 Plugin Guide](./docs/v1-plugins.md) for installation, version pinning, and upgrade instructions.
