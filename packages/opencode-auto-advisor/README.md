@@ -68,7 +68,7 @@ Remove the entry from `"plugins"` in `opencode.json(c)`. Optionally delete `~/.c
 
 ## Usage
 
-- **Ask for a review**: the agent sees the `advisor()` tool and its guidance (consult after orienting, when stuck, before declaring done). You can also say "consult the advisor before you continue".
+- **Ask for a review**: the agent sees the `advisor()` tool and its guidance: consult after orienting and before substantive work, when stuck or changing approach, and before declaring done (after saving the work). An automatic review counts as a consultation already made. You can also say "consult the advisor before you continue".
 - **Automatic reviews are on by default** (`routing.mode` `active`). Without `advisor.model`, they consult the agent's own model and are billed at its rates; set `advisor.model`, or set `routing.mode` to `observe` or `off`, if that's not what you want.
 - Automatic reviews run in top-level sessions only. Subagent sessions don't get the tool or automatic reviews.
 - Automatic reviews are limited to two per user turn (`routing.maxConsultationsPerTurn`) and to one per 10 agent steps across the session (`routing.minStepsBetweenConsultations`). The step count carries over to the next turn, and a retried step doesn't count. Explicit `advisor()` calls ignore both limits.

@@ -227,7 +227,7 @@ describe("active (default)", () => {
 
     expect(host.decisionCalls[0].model).toEqual({ providerID: "opencode", id: "jev-1.13-free" });
     expect(host.textCalls[0].model).toEqual({ providerID: "mock", id: "exec" });
-    expect(host.textCalls[0].prompt).toContain("stuck on a recurring failure");
+    expect(host.textCalls[0].prompt).toContain("judged them to be stuck");
     expect(host.textCalls[0].prompt).toContain("SYSTEM PROMPT:\nYou are a coding agent.");
     expect(tail(event).role).toBe("system");
     expect(tail(event).content[0].text).toContain("Check the token clock skew first.");
@@ -615,7 +615,7 @@ describe("explicit advisor()", () => {
       .execute({}, { sessionID: "s", messageID: "a-live", signal: new AbortController().signal });
     expect(result.content).toBe("Check the token clock skew first.");
     expect(host.textCalls[0].model).toEqual({ providerID: "openai", id: "gpt-6", variant: "high" });
-    expect(host.textCalls[0].prompt).toContain("The Executor asked for this review.");
+    expect(host.textCalls[0].prompt).toContain("They've asked for your advice");
     expect(host.textCalls[0].prompt).toContain("TOOL CALL advisor");
   });
 
