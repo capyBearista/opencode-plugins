@@ -304,20 +304,32 @@ describe("advisorTranscript", () => {
   });
 });
 
-/** Shaped like OpenCode 2.2.0's renderers: codemode/, mcp/ and skill/instructions.ts. */
+/** Shaped like OpenCode 2.2.5's renderers: codemode/, mcp/ and skill/instructions.ts. */
 const CODE_MODE = [
   "# Code Mode",
   "",
-  "Use the `execute` tool to call the tools listed below. They cannot be called directly, and neither can `search`. Both only work inside code you pass to `execute`.",
+  "The tools listed below, and `search`, cannot be called directly: they only work as JavaScript inside the `execute` tool. Every other tool you have is a normal tool call: call it directly, never inside `execute`.",
   "",
-  "The catalog is partial. Inside `execute`, use `search(...)` to find a tool.",
+  "The catalog is partial. Before calling a tool that is not listed below, find it with the global `search(...)` function. Do not guess tool names.",
   "",
   "- search({\n  query?: string,\n}): { items: Array<string> }",
   "",
-  "## Available tools",
+  "## Code Mode tools (call only inside `execute`)",
   "",
   "- deepwiki (3 tools)",
   "  - tools.deepwiki.ask({\n  /** Repo. */\n  repoName: string,\n}): Promise<unknown> // Ask a question",
+].join("\n");
+/** The variant without `search`, when every Code Mode tool is listed. */
+const CODE_MODE_COMPLETE = [
+  "# Code Mode",
+  "",
+  "The tools listed below cannot be called directly: they only work as JavaScript inside the `execute` tool. Every other tool you have is a normal tool call: call it directly, never inside `execute`.",
+  "",
+  "The catalog is complete. Do not guess tool names.",
+  "",
+  "## Code Mode tools (call only inside `execute`)",
+  "",
+  "- read_file({ path: string }): Promise<string> // Read a file",
 ].join("\n");
 const CODE_MODE_UPDATE = `The Code Mode tool catalog has changed. This catalog supersedes the previous Code Mode tool catalog.\n\n${CODE_MODE}`;
 const MCP = [
@@ -345,6 +357,12 @@ const DCP =
   "You operate in a context-constrained environment.\n<dcp-system-reminder>keep</dcp-system-reminder>";
 
 describe("compactContext", () => {
+  test("replaces the complete Code Mode catalog too (no search)", () => {
+    expect(compactContext(`Role prompt.\n\n${CODE_MODE_COMPLETE}\n\n${AGENTS}`)).toBe(
+      `Role prompt.\n\n${COMPACTED.codeMode}\n\n${AGENTS}`,
+    );
+  });
+
   test("replaces each host catalog with a marker and keeps everything else", () => {
     const text = ["Role prompt.", CODE_MODE, MCP, SKILLS, AGENTS, DCP].join("\n\n");
     expect(compactContext(text)).toBe(
@@ -364,13 +382,13 @@ describe("compactContext", () => {
   test("leaves a block without its end untouched", () => {
     const text = [
       "<mcp_instructions>\n  half",
-      CODE_MODE.replace("## Available tools", "## Tools"),
+      CODE_MODE.replace("## Code Mode tools (call only inside `execute`)", "## Tools"),
       SKILLS.replace("</available_skills>", ""),
     ].join("\n\n");
     expect(compactContext(text)).toBe(text);
   });
   test("a block without its end does not stop later blocks", () => {
-    const broken = CODE_MODE.replace("## Available tools", "## Tools");
+    const broken = CODE_MODE.replace("## Code Mode tools (call only inside `execute`)", "## Tools");
     expect(compactContext(`${broken}\n\n${CODE_MODE}`)).toBe(`${broken}\n\n${COMPACTED.codeMode}`);
   });
 
@@ -405,7 +423,7 @@ describe("advisorTranscript compaction", () => {
     expect(text).toContain(`SYSTEM UPDATE: ${COMPACTED.codeMode}`);
     expect(text).toContain(`USER: Explain this:\n${MCP}`);
     expect(text).toContain("<available_skills>");
-    expect(text).not.toContain("## Available tools");
+    expect(text).not.toContain("## Code Mode tools");
   });
 
   test("without compact the text is unchanged", () => {

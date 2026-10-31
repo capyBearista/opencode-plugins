@@ -29,8 +29,8 @@ export const COMPACTED = {
   skills: "[context-omitted: skill catalog]",
 } as const;
 
-const CODE_MODE_START = "# Code Mode\n\nUse the `execute` tool";
-const CODE_MODE_TOOLS = "## Available tools\n\n";
+const CODE_MODE_START = "# Code Mode\n\nThe tools listed below";
+const CODE_MODE_TOOLS = "## Code Mode tools (call only inside `execute`)\n\n";
 const CODE_MODE_NOTICE =
   "The Code Mode tool catalog has changed. This catalog supersedes the previous Code Mode tool catalog.\n\n";
 const SKILLS_START = "Skills provide specialized instructions and workflows for specific tasks.";
@@ -48,7 +48,7 @@ const tagged = (close: string) => (text: string, at: number) => {
 };
 
 /**
- * Text OpenCode 2.2.0 renders for its instruction sources (`codemode/`, `mcp/` and
+ * Text OpenCode 2.2.5 renders for its instruction sources (`codemode/`, `mcp/` and
  * `skill/instructions.ts`). Tool lines are joined with single newlines, so the Code Mode catalog
  * ends at the first blank line after its tool header.
  */

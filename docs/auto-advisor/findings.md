@@ -70,6 +70,26 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
 - TUI: the sidebar widget is one line (`Advisor ✓ approach 11:03`); a click opened the panel.
 - `bun run timeline <session>` read the telemetry and `opencode api get …/message` and wrote the page; each step listed the messages since the previous one.
 
+## Recheck on OpenCode 2.2.5 (2026-10-31)
+- Diffed v2.2.0..v2.2.5 for every host file the plugin relies on.
+  - **Changed:** the Code Mode catalog text (`core/src/codemode/instructions.ts`). It now starts "The tools listed below… cannot be called directly", and its header is now `## Code Mode tools (call only inside \`execute\`)`. With the 2.2.0 strings, compaction of that catalog silently stopped. The plugin now requires 2.2.5 and matches the new text.
+  - **Unchanged:**
+    - shell notices (`shell/result.ts`);
+    - the subagent wrapper;
+    - the `prompt` hook;
+    - message ids and the lowering of user, synthetic, skill and shell messages;
+    - the generate errors, `retryOneShot`, and the header and chunk timeouts;
+    - the message list API (a cursor still can't be combined with `order`);
+    - the event stream closing after a read error;
+    - the MCP and skill catalog text.
+  - **New, not used yet:** the instructions system part keeps each source as `metadata.experimental.instructions` (`{key, text}`).
+  - **Also new:** a tool call named `bash` runs `shell` but keeps the name `bash`.
+- Live, on `@opencode/cli@2.2.5`, with a probe MCP server (Code Mode on) and a probe skill:
+  - The Advisor prompt had all three `[context-omitted …]` markers and no raw Code Mode, MCP or skill catalog text.
+  - A shell command that exited 3 reached the hook as a two-part content result (`(no output)`, `Exited with code 3`) and counted as failed.
+  - A `read` of a file containing `Exited with code 1` counted as ok (`Latest tool result: ok`). The 2.2.5 `read` argument is `path`.
+  - TUI (OpenTUI 0.8): the one-line widget showed `Advisor ✓ stuck 15:28`, a click opened the panel, and the markdown advice rendered.
+
 ## Known limitations
 - A prompt that a summary compaction absorbs before any step sees it never starts its own turn. The turn is the newest real prompt present in the request (`server.ts`); when none is present it carries on from the last one, so the earlier turn's spent budget and step count continue and the Decision requests block reads `(not in context)` until the next prompt. Accepted as rare and fail-closed (fewer consults, never more).
 - `opencode-ram-monitor` builds its modal with `insert(markdown, [])`, the call that blanked this plugin's panel. On 2.2.0 the `/ram` modal still renders its text (checked live 2026-10-31), because its content changes once, when the async load finishes after the insert, which redraws the blocks; not changed.

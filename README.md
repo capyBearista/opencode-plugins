@@ -225,7 +225,7 @@ The repository supports both OpenCode V2 and V1, but plugin availability and con
 | [Double-Tap Timeline](./packages/opencode-double-tap-timeline/) | `@latest` · `cli.json` | 2.0.0 | `@1.0.1` · `tui.json(c)` |
 | [RAM Monitor](./packages/opencode-ram-monitor/) | `@latest` · `cli.json` | 2.1.0 | `@1.1.0` · `opencode.json(c)` and `tui.json(c)` |
 | [Output Styles](./packages/opencode-output-styles/) | `@latest` · `opencode.json(c)` | 2.2.0 | `@1` · `opencode.json(c)` |
-| [Auto Advisor](./packages/opencode-auto-advisor/) | `@latest` · `opencode.json(c)` | 2.2.0 | Not available |
+| [Auto Advisor](./packages/opencode-auto-advisor/) | `@latest` · `opencode.json(c)` | 2.2.5 | Not available |
 | [Agent Prompt Inheritance](./packages/opencode-agent-prompt-inheritance/) | Not yet ported | — | `@latest` · `opencode.json(c)` |
 
 **Using OpenCode V1?** See the [V1 Plugin Guide](./docs/v1-plugins.md) for installation, version pinning, and upgrade instructions.

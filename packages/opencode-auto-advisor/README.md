@@ -44,7 +44,7 @@ Two paths reach the same stateless Advisor. The agent can call the `advisor()` t
 
 ### OpenCode V2
 
-Requires OpenCode **2.2.0** or later.
+Requires OpenCode **2.2.5** or later.
 
 This plugin has a Server component + TUI component.
 
@@ -60,7 +60,7 @@ The TUI half loads automatically, so `cli.json` needs no entry.
 
 ### OpenCode V1
 
-Not available. The plugin depends on OpenCode 2.2.0's Decision and instruction-entry APIs.
+Not available. The plugin depends on OpenCode 2.2's Decision and instruction-entry APIs, and on the 2.2.5 host text it compacts.
 
 ### Uninstall
 

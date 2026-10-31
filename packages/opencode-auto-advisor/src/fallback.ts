@@ -20,7 +20,7 @@ export type WalkResult<T> =
 export const SKIP_MS = 60_000;
 
 /**
- * OpenCode 2.2.0's generate errors (`core/src/generate.ts`, spike S1). A provider's
+ * OpenCode's generate errors (2.2.0 through 2.2.5) (`core/src/generate.ts`, spike S1). A provider's
  * `invalid_request` moves on: it is how a context overflow arrives (the host drops its
  * `context-overflow` classification), and a parameter one model rejects says nothing about the
  * next. A `Generate.InvalidRequestError` without a `field` is a provider rejection that carries
