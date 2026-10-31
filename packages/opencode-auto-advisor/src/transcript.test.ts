@@ -3,7 +3,6 @@ import {
   advisorTranscript,
   COMPACTED,
   compactContext,
-  DECISION_INPUT_MAX_CHARS,
   decisionInput,
   type Message,
   OMISSION_MARKER,
@@ -63,15 +62,89 @@ describe("renderMessage", () => {
   });
 });
 
+const requests = (ids: string[], more: { requests?: number; requestMaxChars?: number } = {}) => ({
+  prompts: new Set(ids),
+  requests: 3,
+  requestMaxChars: -1,
+  ...more,
+});
+
 describe("decisionInput", () => {
   test("summarizes only the current turn with counts", () => {
-    const text = decisionInput([user("u0", "old request"), result("bash", "old"), ...turn], "u1");
-    expect(text).toContain("Latest user request:\nUSER: Fix the failing login test");
+    const text = decisionInput(
+      [user("u0", "old request"), result("bash", "old"), ...turn],
+      requests(["u0", "u1"], { requests: 1 }),
+    );
+    expect(text).toContain(
+      "User requests (oldest first; the last is the latest):\nUSER: Fix the failing login test",
+    );
     expect(text).not.toContain("old request");
     expect(text).toContain(
       "Steps this turn: 2. Failed tool calls this turn: 1. Latest tool result: ok.",
     );
     expect(text).toContain("TOOL RESULT bash (error)");
+  });
+
+  test("shows the last N real requests, oldest first", () => {
+    const messages = [
+      user("u0", "zero"),
+      ...turn.slice(1, 3),
+      user("u1", "one"),
+      user("u2", "two"),
+      result("bash", "ok"),
+      user("u3", "three"),
+      call("a9", "read", { file: "x" }),
+    ];
+    const text = decisionInput(messages, requests(["u0", "u1", "u2", "u3"]));
+    expect(text).toContain(
+      "User requests (oldest first; the last is the latest):\nUSER: one\n\nUSER: two\n\nUSER: three\n\nRecent steps",
+    );
+    expect(text).not.toContain("zero");
+    // The turn starts at the latest request.
+    expect(text).toContain("Steps this turn: 1.");
+  });
+
+  test("a long plan followed by a short correction keeps the plan, uncapped by default", () => {
+    const plan = `PLAN START ${"step ".repeat(6_000)}PLAN END`;
+    const messages = [
+      user("u1", plan),
+      ...turn.slice(1, 5),
+      user("u2", "Leave .slim/deepwork/ unignored."),
+      call("a5", "task_message", { message: "go" }),
+      user("syn-1", '<subagent sessionID="ses_1" state="completed">\nDone.\n</subagent>'),
+    ];
+    const text = decisionInput(messages, requests(["u1", "u2"]));
+    expect(text).toContain("PLAN START");
+    expect(text).toContain("PLAN END");
+    expect(text).toContain("USER: Leave .slim/deepwork/ unignored.");
+    expect(text).toContain('SUBAGENT: <subagent sessionID="ses_1" state="completed">');
+    expect(text).not.toContain("USER: <subagent");
+  });
+
+  test("requestMaxChars caps each request and keeps its start", () => {
+    const text = decisionInput(
+      [user("u1", `BEGIN ${"x".repeat(5_000)} FINISH`)],
+      requests(["u1"], { requestMaxChars: 200 }),
+    );
+    expect(text).toContain("USER: BEGIN");
+    expect(text).not.toContain("FINISH");
+    expect(text).toMatch(/chars truncated\]/);
+  });
+
+  test("other user-role messages in the turn are notices, not the user", () => {
+    const text = decisionInput(
+      [...turn, user("sk-1", "Skill instructions: be careful"), user("sh-1", "Plan mode ended")],
+      requests(["u1"]),
+    );
+    expect(text).toContain("NOTICE: Skill instructions: be careful");
+    expect(text).toContain("NOTICE: Plan mode ended");
+    expect(text).not.toContain("USER: Skill");
+  });
+
+  test("a prompt admitted but not delivered yet does not start the turn", () => {
+    const text = decisionInput(turn, requests(["u1", "u9"]));
+    expect(text).toContain("USER: Fix the failing login test");
+    expect(text).toContain("Steps this turn: 2.");
   });
 
   test("leaves out system updates, including an earlier review", () => {
@@ -81,35 +154,38 @@ describe("decisionInput", () => {
         { type: "text", text: "[auto-advisor review r1] Automatic review (moment: done)." },
       ],
     };
-    const text = decisionInput([...turn, review], "u1");
+    const text = decisionInput([...turn, review], requests(["u1"]));
     expect(text).not.toContain("SYSTEM UPDATE");
     expect(text).not.toContain("auto-advisor review");
   });
 
   test("a non-zero shell exit counts as a failure even when the tool completed", () => {
     const log = `${"ok line\n".repeat(400)}24 passed, 1 failed\n\nExited with code 1`;
-    const text = decisionInput([user("u1", "Make the tests pass"), result("shell", log)], "u1");
+    const text = decisionInput(
+      [user("u1", "Make the tests pass"), result("shell", log)],
+      requests(["u1"]),
+    );
     expect(text).toContain("Failed tool calls this turn: 1. Latest tool result: failed.");
     // Truncation keeps the end of a tool result, where the outcome is.
     expect(text).toContain("Exited with code 1");
   });
 
-  test("the request is the real prompt, never a later synthetic user message", () => {
-    const text = decisionInput([...turn, user("syn-1", '<subagent state="completed">')], "u1");
-    expect(text).toContain("Latest user request:\nUSER: Fix the failing login test");
-    expect(text).toContain('USER: <subagent state="completed">');
+  test("without a real prompt in the window it says so instead of guessing", () => {
+    const text = decisionInput(
+      [user("syn-1", '<subagent state="completed">'), result("bash", "ok")],
+      requests(["u-old"]),
+    );
+    expect(text).toContain(
+      "User requests (oldest first; the last is the latest):\n(not in context)",
+    );
+    expect(text).toContain("SUBAGENT: <subagent state=");
   });
 
-  test("without the real prompt in the window it says so instead of guessing", () => {
-    const text = decisionInput([user("syn-1", "<subagent>"), result("bash", "ok")], "u-old");
-    expect(text).toContain("Latest user request:\n(not in context)");
-    expect(text).toContain("USER: <subagent>");
-  });
-
-  test("stays under the provider input cap", () => {
-    const big = Array.from({ length: 200 }, (_, i) => result("read", "x".repeat(5_000 + i)));
-    const text = decisionInput([user("u1", "y".repeat(50_000)), ...big], "u1");
-    expect(text.length).toBeLessThanOrEqual(DECISION_INPUT_MAX_CHARS + 40);
+  test("a huge request never pushes out the steps or the counts", () => {
+    const big = Array.from({ length: 20 }, (_, i) => result("read", "x".repeat(5_000 + i)));
+    const text = decisionInput([user("u1", "y".repeat(100_000)), ...big], requests(["u1"]));
+    expect(text).toContain("y".repeat(100_000));
+    expect(text).toEndWith("Latest tool result: ok.");
   });
 });
 

@@ -12,7 +12,7 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
   - provider without credentials (openrouter, no key) → `Generate.ModelNotFoundError` (provider not in catalog), not an auth error
   - bad request shape → `SchemaError` (client-side, before the host)
   - input too large → `Generate.ProviderRequestError` `reason: "invalid_request"` (HTTP 400 `max_tokens`)
-- Input size: 100k chars accepted; 250k rejected. Cap the projection well below (~32k chars).
+- Input size: 100k chars accepted; 250k rejected. The projection has no total cap since round 3: a request too large for one decision model fails over to the next in `routing.models`; `routing.requestMaxChars` caps each request when needed.
 - S1b (8 synthetic cases, smoke only): moment 8/8 correct. Consequence: prod migration 3.81, key rotation 2.8, rate-limit design 2.1, both "stuck" cases ~1.85, CLI flag done 0.52, routine 0.4–1.1.
 
 ## S2 — delivery timing (OpenAI chat mock)

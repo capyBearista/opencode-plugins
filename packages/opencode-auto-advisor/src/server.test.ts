@@ -298,8 +298,44 @@ describe("active (default)", () => {
     await Bun.sleep(10);
     expect(host.textCalls).toHaveLength(1);
     const input = host.decisionCalls.at(-1).input[0].text;
-    expect(input).toContain("Latest user request:\nUSER: Fix the login test");
+    expect(input).toContain(
+      "User requests (oldest first; the last is the latest):\nUSER: Fix the login test\n\nRecent",
+    );
+    expect(input).toContain("SUBAGENT: <subagent");
     expect((await telemetryLines()).map((line) => line.turn)).toEqual(["u1", "u1"]);
+  });
+
+  test("requests from before a restart and from the prompt hook are both shown", async () => {
+    await writeConfig({ routing: { mode: "observe" } });
+    const host = await start({ stored: [{ id: "u1", type: "user" }] });
+    await host.hooks.prompt({ sessionID: "s", messageID: "u2", delivery: "steer" });
+    await host.hooks.context(
+      request("s", [user("u1", "The big plan"), ...step(1), user("u2", "A small fix"), ...step(2)]),
+    );
+    await Bun.sleep(10);
+    const input = host.decisionCalls[0].input[0].text;
+    expect(input).toContain("USER: The big plan\n\nUSER: A small fix");
+    expect((await telemetryLines())[0]).toMatchObject({ turn: "u2", step: 1 });
+  });
+
+  test("a prompt admitted but not yet delivered does not start a new turn", async () => {
+    await writeConfig({ routing: { mode: "observe" } });
+    const host = await start();
+    const history: Any[] = [user("u1"), ...step(1)];
+    await host.hooks.context(request("s", [...history]));
+    await Bun.sleep(10);
+    // Queued: the hook fired, but the message is not in the request yet.
+    await host.hooks.prompt({ sessionID: "s", messageID: "u2", delivery: "queue" });
+    history.push(...step(2));
+    await host.hooks.context(request("s", [...history]));
+    await Bun.sleep(10);
+    const input = host.decisionCalls.at(-1).input[0].text;
+    expect(input).toContain("USER: Fix the login test");
+    expect(input).toContain("Steps this turn: 2.");
+    expect((await telemetryLines()).map((line) => [line.turn, line.step])).toEqual([
+      ["u1", 1],
+      ["u1", 2],
+    ]);
   });
 
   test("the cooldown counts distinct steps across turns, not retries", async () => {

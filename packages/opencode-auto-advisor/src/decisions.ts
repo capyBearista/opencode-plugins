@@ -17,7 +17,7 @@ const MOMENTS: ReadonlyArray<{ value: Moment; description: string }> = [
   {
     value: "done",
     description:
-      "The whole user request looks complete: the latest checks passed, no failure is unresolved, and the next step is reporting to the user. A finished subtask, a returned subagent, a loaded skill or a failed or partial check is not done.",
+      "The latest request, read with the earlier ones, looks complete: the latest checks passed, no failure is unresolved, and the next step is reporting to the user. A finished subtask, a returned subagent, a loaded skill or a failed or partial check is not done.",
   },
   {
     value: "routine",
@@ -46,7 +46,7 @@ export const QUESTIONS = [
     name: "moment",
     type: "choice" as const,
     instructions:
-      "This is a coding agent's work in progress. Which moment is it at, judged from the latest request and its recent steps?",
+      "This is a coding agent's work in progress. Which moment is it at, judged from the user's requests (the last is the latest) and the recent steps?",
     choices: MOMENTS,
   },
   {

@@ -20,7 +20,13 @@ import {
 import { decide } from "./policy.js";
 import { AutoAdvisorRpc, type ReviewDetails, type Status } from "./rpc.js";
 import { createTelemetry, type TelemetryRecord } from "./telemetry.js";
-import { advisorTranscript, decisionInput, type Message, type SystemText } from "./transcript.js";
+import {
+  advisorTranscript,
+  decisionInput,
+  isRequest,
+  type Message,
+  type SystemText,
+} from "./transcript.js";
 
 export const PLUGIN_ID = "capybearista.opencode-auto-advisor";
 
@@ -43,10 +49,10 @@ interface SessionState {
   /** Bumped when a run ends, so a consult that outlives its step never delivers. */
   epoch: number;
   /**
-   * Id of the latest real user prompt: from the `prompt` hook, or read once from the stored
-   * history when the session predates this process.
+   * Ids of real user prompts: from the `prompt` hook, plus those read once from the stored
+   * history, which may predate this process.
    */
-  prompt?: string;
+  prompts: Set<string>;
   hydrated: boolean;
   turn?: string;
   /** Steps this turn, for telemetry. */
@@ -96,6 +102,7 @@ export default Plugin.define({
       if (!found) {
         found = {
           epoch: 0,
+          prompts: new Set(),
           hydrated: false,
           step: 0,
           steps: 0,
@@ -125,15 +132,16 @@ export default Plugin.define({
      * Synthetic notices, subagent results and shell notices reach the `context` hook as
      * `role: "user"` too; only the stored history keeps their `type`.
      */
-    const latestPrompt = async (sessionID: string, session: SessionState) => {
-      if (session.prompt === undefined && !session.hydrated) {
+    const realPrompts = async (sessionID: string, session: SessionState) => {
+      if (!session.hydrated) {
         session.hydrated = true;
         try {
           const stored = await ctx.session.context({ sessionID });
-          session.prompt = stored.findLast((message) => message.type === "user")?.id;
+          for (const message of stored)
+            if (message.type === "user") session.prompts.add(message.id);
         } catch {}
       }
-      return session.prompt;
+      return session.prompts;
     };
 
     const contextTokens = new Map<string, number>();
@@ -264,7 +272,8 @@ export default Plugin.define({
     });
 
     const promptHook = await ctx.session.hook("prompt", async (event) => {
-      state(event.sessionID).prompt = event.messageID;
+      // Admitted, not yet delivered: it becomes the turn once it is in the request.
+      state(event.sessionID).prompts.add(event.messageID);
     });
 
     const contextHook = await ctx.session.hook("context", async (event) => {
@@ -300,8 +309,13 @@ export default Plugin.define({
         if (session.lastKey === key) return;
         session.lastKey = key;
 
-        const prompt = await latestPrompt(event.sessionID, session);
-        const turn = prompt ?? "";
+        const { routing } = config;
+        const requests = {
+          prompts: await realPrompts(event.sessionID, session),
+          requests: routing.requests,
+          requestMaxChars: routing.requestMaxChars,
+        };
+        const turn = messages.findLast((message) => isRequest(message, requests.prompts))?.id ?? "";
         if (session.turn !== turn) {
           session.turn = turn;
           session.step = 0;
@@ -316,7 +330,6 @@ export default Plugin.define({
           step: session.step,
         };
 
-        const { routing } = config;
         const cooling =
           session.consultedAt !== undefined &&
           session.steps - session.consultedAt < routing.minStepsBetweenConsultations;
@@ -333,7 +346,7 @@ export default Plugin.define({
           // Decide without consulting, so telemetry still shows what the Decision model saw.
           if (session.observing) return;
           session.observing = true;
-          void route(routing.models, decisionInput(messages, prompt))
+          void route(routing.models, decisionInput(messages, requests))
             .then((routed) => {
               const verdict = routed.ok
                 ? decide({ answers: routed.result.answers, routing })
@@ -362,7 +375,7 @@ export default Plugin.define({
         let delivered: Review | undefined;
         let record: TelemetryRecord | undefined;
         try {
-          const routed = await route(routing.models, decisionInput(messages, prompt));
+          const routed = await route(routing.models, decisionInput(messages, requests));
           const verdict = routed.ok
             ? decide({ answers: routed.result.answers, routing })
             : undefined;

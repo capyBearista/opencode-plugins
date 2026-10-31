@@ -24,9 +24,19 @@ describe("parseConfig", () => {
         consequenceThreshold: 1.5,
         maxConsultationsPerTurn: 1,
         minStepsBetweenConsultations: 10,
+        requests: 3,
+        requestMaxChars: -1,
       },
       tui: { sidebar: true },
     });
+  });
+
+  test("routing.requests and routing.requestMaxChars accept their ranges; -1 is no cap", () => {
+    const config = parseConfig({ routing: { requests: 1, requestMaxChars: 100 } });
+    expect(config.routing.requests).toBe(1);
+    expect(config.routing.requestMaxChars).toBe(100);
+    expect(parseConfig({ routing: { requestMaxChars: -1 } }).routing.requestMaxChars).toBe(-1);
+    expect(parseConfig({ routing: { requests: 20 } }).routing.requests).toBe(20);
   });
 
   test("advisor.maxTokens accepts an integer of at least 1000", () => {
@@ -83,6 +93,13 @@ describe("parseConfig", () => {
     [{ routing: { maxConsultationsPerTurn: 1.5 } }, "routing.maxConsultationsPerTurn"],
     [{ routing: { minStepsBetweenConsultations: -1 } }, "routing.minStepsBetweenConsultations"],
     [{ routing: { minStepsBetweenConsultations: 2.5 } }, "routing.minStepsBetweenConsultations"],
+    [{ routing: { requests: 0 } }, "routing.requests"],
+    [{ routing: { requests: 21 } }, "routing.requests"],
+    [{ routing: { requests: 1.5 } }, "routing.requests"],
+    [{ routing: { requestMaxChars: 0 } }, "routing.requestMaxChars"],
+    [{ routing: { requestMaxChars: 99 } }, "routing.requestMaxChars"],
+    [{ routing: { requestMaxChars: -2 } }, "routing.requestMaxChars"],
+    [{ routing: { requestMaxChars: 150.5 } }, "routing.requestMaxChars"],
     [{ advisor: { timeoutMs: 0 } }, "advisor.timeoutMs"],
     [{ advisor: { model: "x" } }, "advisor.model"],
     [{ advisor: { compactContext: "yes" } }, "advisor.compactContext"],

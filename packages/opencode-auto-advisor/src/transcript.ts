@@ -184,37 +184,60 @@ const failed = (part: Part) => {
   return result?.type === "error" || SHELL_FAILURE.test(json(result?.value));
 };
 
-export const DECISION_INPUT_MAX_CHARS = 32_000;
 const DECISION_RECENT_LINES = 12;
 const DECISION_LINE_MAX = 1_000;
-const DECISION_REQUEST_MAX = 4_000;
+
+/** Which user-role messages are the user's own prompts, and how many to show. */
+export interface Requests {
+  /** Ids of real user prompts; subagent results and other notices are `role: "user"` too. */
+  readonly prompts: ReadonlySet<string>;
+  readonly requests: number;
+  /** Characters per request, keeping the start; -1 is no cap. */
+  readonly requestMaxChars: number;
+}
+
+export const isRequest = (message: Message, prompts: ReadonlySet<string>) =>
+  message.role === "user" && message.id !== undefined && prompts.has(message.id);
+
+/** OpenCode's own wrapper for a subagent's result (`core/src/session/subagent-completion.ts`). */
+const isSubagentResult = (message: Message) =>
+  parts(message).some((part) => part.type === "text" && String(part.text).startsWith("<subagent "));
 
 /**
- * What the Decision model sees: the latest real request, the current turn's recent steps and
- * their outcomes. `prompt` is the id of the latest real user prompt: subagent results, shell
- * notices and other synthetic messages are `role: "user"` too, so they are never the request.
- * System updates (instruction entries, including earlier reviews) are left out. No system prompt
- * or tool definitions: this goes to a third-party decision provider.
+ * What the Decision model sees: the user's last few requests, the current turn's recent steps
+ * and their outcomes. The turn starts at the latest request in the window. Other user-role
+ * messages are labelled for what they are, so they never read as the user speaking. System
+ * updates (instruction entries, including earlier reviews) are left out. No system prompt or tool
+ * definitions: this goes to a third-party decision provider. There is no total cap: a model whose
+ * window is too small fails over to the next one.
  */
-export function decisionInput(messages: readonly Message[], prompt?: string): string {
-  const start = prompt
-    ? messages.findLastIndex((message) => message.role === "user" && message.id === prompt)
-    : -1;
-  const request = start >= 0 ? renderMessage(messages[start], DECISION_REQUEST_MAX).join("\n") : "";
+export function decisionInput(messages: readonly Message[], input: Requests): string {
+  const indexes = messages.flatMap((message, i) => (isRequest(message, input.prompts) ? [i] : []));
+  const start = indexes.at(-1) ?? -1;
+  const max = input.requestMaxChars < 0 ? Number.POSITIVE_INFINITY : input.requestMaxChars;
+  const requests = indexes
+    .slice(-input.requests)
+    .map((i) => truncate(renderMessage(messages[i]).join("\n"), max));
   const turn = messages.slice(start + 1).filter((message) => message.role !== "system");
   const steps = turn.filter((message) => message.role === "assistant").length;
   const results = turn.flatMap(parts).filter((part) => part.type === "tool-result");
   const latest = results.at(-1);
-  const recent = turn
+  // A message's role is its label; the turn starts after the latest request, so no user-role
+  // message here is a request.
+  const labelled = turn.map((message) =>
+    message.role === "user"
+      ? { ...message, role: isSubagentResult(message) ? "subagent" : "notice" }
+      : message,
+  );
+  const recent = labelled
     .flatMap((message) => renderMessage(message, DECISION_LINE_MAX))
     .slice(-DECISION_RECENT_LINES);
-  const text = [
-    `Latest user request:\n${request || "(not in context)"}`,
+  return [
+    `User requests (oldest first; the last is the latest):\n${requests.join("\n\n") || "(not in context)"}`,
     `Recent steps this turn:\n${recent.join("\n") || "(none yet)"}`,
     `Steps this turn: ${steps}. Failed tool calls this turn: ${results.filter(failed).length}. ` +
       `Latest tool result: ${latest ? (failed(latest) ? "failed" : "ok") : "none"}.`,
   ].join("\n\n");
-  return truncate(text, DECISION_INPUT_MAX_CHARS);
 }
 
 /**

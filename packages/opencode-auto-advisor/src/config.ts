@@ -29,6 +29,10 @@ export interface Config {
     readonly maxConsultationsPerTurn: number;
     /** Distinct Executor steps after an automatic consult starts before another may; 0 is off. */
     readonly minStepsBetweenConsultations: number;
+    /** How many of the user's latest requests the Decision model sees. */
+    readonly requests: number;
+    /** Characters per request in the Decision input, keeping the start; -1 is no cap. */
+    readonly requestMaxChars: number;
   };
   readonly tui: {
     /** Show the Advisor widget at the bottom of the session sidebar. */
@@ -48,6 +52,8 @@ export const DEFAULTS: Config = {
     consequenceThreshold: 1.5,
     maxConsultationsPerTurn: 1,
     minStepsBetweenConsultations: 10,
+    requests: 3,
+    requestMaxChars: -1,
   },
   tui: { sidebar: true },
 };
@@ -100,6 +106,15 @@ function number(value: unknown, name: string, min: number, max: number, integer 
   return value as number;
 }
 
+/** -1 (no cap) or an integer in `min..max`. */
+function noCapOr(value: unknown, name: string, min: number, max: number) {
+  if (value === -1) return -1;
+  if (typeof value === "number" && Number.isInteger(value) && value >= min && value <= max) {
+    return value;
+  }
+  throw new ConfigError(`${name} must be -1 (no cap) or an integer in ${min}..${max}`);
+}
+
 function boolean(value: unknown, name: string) {
   if (typeof value !== "boolean") throw new ConfigError(`${name} must be true or false`);
   return value;
@@ -121,6 +136,8 @@ export function parseConfig(input: unknown): Config {
     "consequenceThreshold",
     "maxConsultationsPerTurn",
     "minStepsBetweenConsultations",
+    "requests",
+    "requestMaxChars",
   ]);
   const tui = section(input, "tui", ["sidebar"]);
 
@@ -205,6 +222,14 @@ export function parseConfig(input: unknown): Config {
               1_000,
               true,
             ),
+      requests:
+        routing.requests === undefined
+          ? DEFAULTS.routing.requests
+          : number(routing.requests, "routing.requests", 1, 20, true),
+      requestMaxChars:
+        routing.requestMaxChars === undefined
+          ? DEFAULTS.routing.requestMaxChars
+          : noCapOr(routing.requestMaxChars, "routing.requestMaxChars", 100, 10_000_000),
     },
     tui: {
       sidebar:
