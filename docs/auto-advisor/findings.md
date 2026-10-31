@@ -69,3 +69,7 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
 - Real `opencode/jev-1.13-free` with a 300,180-char input: `ProviderRequestError (invalid_request)` in 296 ms, and the router moved to the next model. A decision model declared in config (`"type": "decision"` under `providers.openrouter.models`) resolved as `Generate.UnsupportedModelError`, so a mock decision model could not be tested.
 - TUI: the sidebar widget is one line (`Advisor ✓ approach 11:03`); a click opened the panel.
 - `bun run timeline <session>` read the telemetry and `opencode api get …/message` and wrote the page; each step listed the messages since the previous one.
+
+## Known limitations
+- A prompt that a summary compaction absorbs before any step sees it never starts its own turn. The turn is the newest real prompt present in the request (`server.ts`); when none is present it carries on from the last one, so the earlier turn's spent budget and step count continue and the Decision requests block reads `(not in context)` until the next prompt. Accepted as rare and fail-closed (fewer consults, never more).
+- `opencode-ram-monitor` builds its modal with `insert(markdown, [])`, the call that blanked this plugin's panel. On 2.2.0 the `/ram` modal still renders its text (checked live 2026-10-31), presumably because its content is reactive and redraws on each poll; not changed.
