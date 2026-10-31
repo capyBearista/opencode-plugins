@@ -42,6 +42,8 @@ interface Snapshot {
   readonly messages: readonly Message[];
   readonly tools: readonly string[];
   readonly model: ModelRef;
+  /** The session's real prompt ids (a live set), to label the Advisor's transcript. */
+  readonly prompts: ReadonlySet<string>;
 }
 
 interface SessionState {
@@ -259,6 +261,8 @@ export default Plugin.define({
             }
             const snapshot = session.last;
             if (!snapshot) return { content: "The Advisor has no conversation to review yet." };
+            // With routing off, nothing has read the stored prompts yet.
+            await realPrompts(tool.sessionID, session);
             // The cached request predates this step; add the in-flight message holding this call.
             const stored = await ctx.session.context({ sessionID: tool.sessionID });
             const current = stored.find((message) => message.id === tool.messageID);
@@ -306,6 +310,7 @@ export default Plugin.define({
           messages,
           tools: Object.keys(event.tools),
           model: event.model,
+          prompts: session.prompts,
         };
         session.last = snapshot;
 

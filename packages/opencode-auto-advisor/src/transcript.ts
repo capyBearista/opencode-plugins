@@ -170,9 +170,6 @@ export function renderMessage(message: Message, max = Number.POSITIVE_INFINITY):
   return lines;
 }
 
-const isUserPrompt = (message: Message) =>
-  message.role === "user" && parts(message).some((part) => part.type === "text");
-
 /**
  * OpenCode 2.2.0's shell notices (`core/src/shell/result.ts`). A non-zero exit, a kill or a
  * timeout still completes the tool, so the result is not marked as an error.
@@ -204,6 +201,17 @@ const isSubagentResult = (message: Message) =>
   parts(message).some((part) => part.type === "text" && String(part.text).startsWith("<subagent "));
 
 /**
+ * A message's role is its rendered label. Subagent results, skills, shell and other notices are
+ * `role: "user"` too; relabel them so they never read as the user speaking.
+ */
+const labelled = (messages: readonly Message[], prompts: ReadonlySet<string>) =>
+  messages.map((message) =>
+    message.role !== "user" || isRequest(message, prompts)
+      ? message
+      : { ...message, role: isSubagentResult(message) ? "subagent" : "notice" },
+  );
+
+/**
  * What the Decision model sees: the user's last few requests, the current turn's recent steps
  * and their outcomes. The turn starts at the latest request in the window. Other user-role
  * messages are labelled for what they are, so they never read as the user speaking. System
@@ -222,14 +230,7 @@ export function decisionInput(messages: readonly Message[], input: Requests): st
   const steps = turn.filter((message) => message.role === "assistant").length;
   const results = turn.flatMap(parts).filter((part) => part.type === "tool-result");
   const latest = results.at(-1);
-  // A message's role is its label; the turn starts after the latest request, so no user-role
-  // message here is a request.
-  const labelled = turn.map((message) =>
-    message.role === "user"
-      ? { ...message, role: isSubagentResult(message) ? "subagent" : "notice" }
-      : message,
-  );
-  const recent = labelled
+  const recent = labelled(turn, input.prompts)
     .flatMap((message) => renderMessage(message, DECISION_LINE_MAX))
     .slice(-DECISION_RECENT_LINES);
   return [
@@ -241,21 +242,26 @@ export function decisionInput(messages: readonly Message[], input: Requests): st
 }
 
 /**
- * What the Advisor sees: system text, tool names and the transcript. Over budget it keeps the
- * system text, the first user message and as many of the newest messages as fit, with every part
+ * What the Advisor sees: system text, tool names and the transcript, labelled like the Decision
+ * input. Over budget it keeps the system text, the first real request and as many of the newest messages as fit, with every part
  * and every message capped at a quarter of the budget so no single message can crowd out the rest.
  */
 export function advisorTranscript(input: {
   readonly system: readonly SystemText[];
   readonly tools: readonly string[];
   readonly messages: readonly Message[];
+  /** Ids of real user prompts, as for `decisionInput`. */
+  readonly prompts: ReadonlySet<string>;
   readonly budgetChars: number;
   /** Replace the host catalogs in system text; user and tool content is never changed. */
   readonly compact?: boolean;
 }): string {
   const joined = input.system.map((part) => part.text).join("\n\n");
   const system = input.compact ? compactContext(joined) : joined;
-  const messages = input.compact ? input.messages.map(compactSystemMessage) : input.messages;
+  const messages = labelled(
+    input.compact ? input.messages.map(compactSystemMessage) : input.messages,
+    input.prompts,
+  );
   const render = (partMax: number) => {
     const head = [
       `SYSTEM PROMPT:\n${truncate(system, partMax)}`,
@@ -274,7 +280,7 @@ export function advisorTranscript(input: {
   if (all.length <= input.budgetChars) return all;
 
   const { head, blocks } = render(Math.floor(input.budgetChars / 4));
-  const first = messages.findIndex(isUserPrompt);
+  const first = messages.findIndex((message) => isRequest(message, input.prompts));
   const firstBlock = first >= 0 ? blocks[first] : "";
   const kept: string[] = [];
   let used = head.length + firstBlock.length + OMISSION_MARKER.length + 6;

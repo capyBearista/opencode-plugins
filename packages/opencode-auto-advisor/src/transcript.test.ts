@@ -190,7 +190,39 @@ describe("decisionInput", () => {
 });
 
 describe("advisorTranscript", () => {
-  const base = { system: [{ text: "Be careful." }], tools: ["bash", "edit"] };
+  const base = {
+    system: [{ text: "Be careful." }],
+    tools: ["bash", "edit"],
+    prompts: new Set(["u1"]),
+  };
+
+  test("labels subagent results and other notices, never as the user", () => {
+    const text = advisorTranscript({
+      ...base,
+      messages: [
+        ...turn,
+        user("syn-1", '<subagent sessionID="s" state="completed">\nDone.\n</subagent>'),
+        user("sk-1", "Skill instructions"),
+      ],
+      budgetChars: 10_000,
+    });
+    expect(text).toContain("USER: Fix the failing login test");
+    expect(text).toContain('SUBAGENT: <subagent sessionID="s"');
+    expect(text).toContain("NOTICE: Skill instructions");
+    expect(text).not.toContain("USER: <subagent");
+  });
+
+  test("over budget it keeps the first real request, not an earlier notice", () => {
+    const messages = [
+      user("syn-0", '<subagent sessionID="s" state="completed">old result</subagent>'),
+      user("u1", "The real task"),
+      ...Array.from({ length: 20 }, (_, i) => result("read", "z".repeat(1_000 + i))),
+    ];
+    const text = advisorTranscript({ ...base, messages, budgetChars: 4_000 });
+    expect(text).toContain(OMISSION_MARKER);
+    expect(text).toContain("USER: The real task");
+    expect(text).not.toContain("old result");
+  });
 
   test("includes system text, tools and every message when it fits", () => {
     const text = advisorTranscript({ ...base, messages: turn, budgetChars: 10_000 });
@@ -213,6 +245,7 @@ describe("advisorTranscript", () => {
   test("an oversized system prompt and first request still fit the budget", () => {
     const text = advisorTranscript({
       system: [{ text: "s".repeat(20_000) }],
+      prompts: new Set(["u1"]),
       tools: ["bash"],
       messages: [user("u1", "f".repeat(20_000)), result("bash", "latest step")],
       budgetChars: 4_000,
@@ -233,6 +266,7 @@ describe("advisorTranscript", () => {
     };
     const text = advisorTranscript({
       system: [{ text: "s".repeat(1_000) }],
+      prompts: new Set(["u1"]),
       tools: ["read"],
       messages: [user("u1", "f".repeat(1_000)), result("read", "older step"), parallel],
       budgetChars: 3_000,
@@ -341,6 +375,7 @@ describe("advisorTranscript compaction", () => {
   ];
   const input = {
     system: [{ text: `Role prompt.\n\n${CODE_MODE}` }, { text: `${SKILLS}\n\n${AGENTS}` }],
+    prompts: new Set(["u1"]),
     tools: ["execute"],
     messages,
     budgetChars: 100_000,
