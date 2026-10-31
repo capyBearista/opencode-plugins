@@ -172,17 +172,30 @@ export function renderMessage(message: Message, max = Number.POSITIVE_INFINITY):
 
 /**
  * OpenCode's shell notices (`core/src/shell/result.ts`, unchanged through 2.2.5). A non-zero exit,
- * a kill or a timeout still completes the tool, so the result is not marked as an error. Only the
- * shell tool appends them; another tool's output (a read log) can contain the same words.
+ * a kill or a timeout still completes the tool, so the result is not marked as an error. The shell
+ * tool emits a notice as its own text part (`tool/plugin/shell.ts` at 2.2.5), so only a whole part
+ * counts: output that quotes a notice, or another tool's output, is not a failure.
  */
-const SHELL_FAILURE = /Exited with code [1-9]|Killed by |Timed out before completion/;
+const SHELL_NOTICE = /^(Exited with code -?[1-9]\d*|Killed by \S+|Timed out before completion)$/;
 /** `bash` runs the shell tool on 2.2.5, and the call keeps the name the model used. */
 const SHELL_TOOLS = new Set(["shell", "bash"]);
+
+/** A result's text parts: a single part arrives as a plain string, several as `content`. */
+const resultTexts = (value: unknown): string[] => {
+  if (typeof value === "string") return [value];
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) =>
+    typeof (item as { text?: unknown })?.text === "string" ? [(item as { text: string }).text] : [],
+  );
+};
 
 const failed = (part: Part) => {
   const result = part.result as { type?: string; value?: unknown } | undefined;
   if (result?.type === "error") return true;
-  return SHELL_TOOLS.has(String(part.name)) && SHELL_FAILURE.test(json(result?.value));
+  return (
+    SHELL_TOOLS.has(String(part.name)) &&
+    resultTexts(result?.value).some((text) => SHELL_NOTICE.test(text.trim()))
+  );
 };
 
 const DECISION_RECENT_LINES = 12;

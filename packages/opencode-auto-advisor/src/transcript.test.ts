@@ -26,6 +26,22 @@ const result = (name: string, value: unknown, error = false): Message => ({
   ],
 });
 
+/** OpenCode 2.2.5's shell result: one text part per piece (output, notice, alias note). */
+const shellResult = (name: string, ...texts: string[]): Message => ({
+  role: "tool",
+  content: [
+    {
+      type: "tool-result",
+      id: "x",
+      name,
+      result:
+        texts.length === 1
+          ? { type: "text", value: texts[0] }
+          : { type: "content", value: texts.map((text) => ({ type: "text", text })) },
+    },
+  ],
+});
+
 // Shapes captured from a real 2.2.0 `context` hook in the spike.
 const turn: Message[] = [
   user("u1", "Fix the failing login test"),
@@ -160,24 +176,52 @@ describe("decisionInput", () => {
   });
 
   test("exit notices count only on shell results; a read of the same text succeeded", () => {
-    const fixture = "24 passed, 1 failed\n\nExited with code 1";
     const read = decisionInput(
-      [user("u1", "Inspect the CI log"), result("read", fixture)],
+      [
+        user("u1", "Inspect the CI log"),
+        result("read", "24 passed, 1 failed\n\nExited with code 1"),
+      ],
       requests(["u1"]),
     );
     expect(read).toContain("Failed tool calls this turn: 0. Latest tool result: ok.");
-    // A model that calls `bash` runs the shell tool on 2.2.5 but keeps the name it used.
+    // A model that calls `bash` runs the shell tool on 2.2.5 but keeps the name it used; the
+    // host appends an alias note after the notice.
     const bash = decisionInput(
-      [user("u1", "Run the tests"), result("bash", fixture)],
+      [
+        user("u1", "Run the tests"),
+        shellResult("bash", "24 passed, 1 failed", "Exited with code 1", "Ran as `shell`."),
+      ],
       requests(["u1"]),
     );
     expect(bash).toContain("Failed tool calls this turn: 1. Latest tool result: failed.");
   });
 
-  test("a non-zero shell exit counts as a failure even when the tool completed", () => {
-    const log = `${"ok line\n".repeat(400)}24 passed, 1 failed\n\nExited with code 1`;
+  test("a shell notice is its own content part; quoting one in the output is not a failure", () => {
+    const quoted = decisionInput(
+      [user("u1", "Search the logs"), shellResult("shell", "ci.log:3: Exited with code 1")],
+      requests(["u1"]),
+    );
+    expect(quoted).toContain("Failed tool calls this turn: 0. Latest tool result: ok.");
+    // No output: the notice is the whole result.
+    const bare = decisionInput(
+      [user("u1", "Run it"), shellResult("shell", "Killed by SIGTERM")],
+      requests(["u1"]),
+    );
+    expect(bare).toContain("Latest tool result: failed.");
+  });
+
+  test("an error result counts as a failure for any tool", () => {
     const text = decisionInput(
-      [user("u1", "Make the tests pass"), result("shell", log)],
+      [user("u1", "Read it"), result("read", "File not found", true)],
+      requests(["u1"]),
+    );
+    expect(text).toContain("Failed tool calls this turn: 1. Latest tool result: failed.");
+  });
+
+  test("a non-zero shell exit counts as a failure even when the tool completed", () => {
+    const log = `${"ok line\n".repeat(400)}24 passed, 1 failed`;
+    const text = decisionInput(
+      [user("u1", "Make the tests pass"), shellResult("shell", log, "Exited with code 1")],
       requests(["u1"]),
     );
     expect(text).toContain("Failed tool calls this turn: 1. Latest tool result: failed.");
