@@ -815,7 +815,9 @@ describe("decision context in telemetry", () => {
     await Bun.sleep(10);
     const [line] = await telemetryLines();
     expect(line.inputChars).toBeGreaterThan(50_000);
+    expect(line.input.length).toBeGreaterThan(31_900);
     expect(line.input.length).toBeLessThanOrEqual(32_000 + 40);
+    expect(line.input).toContain("Recent steps this turn:");
     expect(line.input).toEndWith("Latest tool result: failed.");
   });
 

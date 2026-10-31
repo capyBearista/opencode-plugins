@@ -81,4 +81,16 @@ describe("renderTimeline", () => {
     expect(html).toContain("Done &lt;b&gt;now&lt;/b&gt;");
     expect(html).not.toContain("<b>now</b>");
   });
+
+  test("escapes the logged input and renders lines from before it was logged", () => {
+    const rows = timelineRows(
+      "s",
+      [record(1, undefined), { ...record(2, "a1"), input: "</pre><script>x()</script>" }],
+      messages,
+    );
+    const html = renderTimeline("s", rows);
+    expect(html).toContain("(not logged)");
+    expect(html).toContain("&lt;/pre&gt;&lt;script&gt;");
+    expect(html).not.toContain("<script>");
+  });
 });

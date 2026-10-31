@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { advisorPrompt, consult } from "./advisor.js";
@@ -120,6 +120,17 @@ describe("telemetry", () => {
       .split("\n")
       .map((line) => JSON.parse(line));
     expect(rotated.at(-1).step).toBe(current[0].step - 1);
+  });
+
+  test("only the owner can read the log or its rotation: it holds requests", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "advisor-telemetry-"));
+    dirs.push(dir);
+    const path = join(dir, "t.jsonl");
+    const telemetry = createTelemetry(path, 300);
+    for (let i = 0; i < 5; i++) telemetry.record({ ...entry, step: i });
+    await telemetry.flush();
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect((await stat(`${path}.1`)).mode & 0o777).toBe(0o600);
   });
 
   test("write failures are swallowed", async () => {

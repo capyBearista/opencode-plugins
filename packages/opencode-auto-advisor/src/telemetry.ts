@@ -1,4 +1,4 @@
-import { mkdir, open, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Attempt } from "./fallback.js";
@@ -55,11 +55,14 @@ export function createTelemetry(path: string = resolveTelemetryPath(), maxBytes 
   const write = async (line: string) => {
     await mkdir(dirname(path), { recursive: true });
     // Size check, rotation and append all go through one handle, so they always see the same file.
-    const file = await open(path, "a+");
+    const file = await open(path, "a+", 0o600);
     try {
+      // Owner only, also for a file created before the log held Decision inputs.
+      await file.chmod(0o600);
       const { size } = await file.stat();
       if (size > 0 && size + Buffer.byteLength(line) > maxBytes) {
-        await writeFile(`${path}.1`, await file.readFile());
+        await writeFile(`${path}.1`, await file.readFile(), { mode: 0o600 });
+        await chmod(`${path}.1`, 0o600);
         await file.truncate(0);
       }
       await file.appendFile(line);

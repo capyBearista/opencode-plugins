@@ -41,7 +41,7 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
 - `active` with thresholds at 0 and real Jev: step 1 and step 2 each got a review at the tail of their own request; each review became a durable entry from the next step on; the budget stopped at 2. Across primary requests the system prompt and tools were byte-identical and only the newest tail message changed.
 - `observe` with an explicit `advisor()` call from the mock: no request was changed, telemetry was written, and the Advisor's prompt contained the in-flight `TOOL CALL advisor`; its advice came back as the tool result.
 - Interrupt during a consult (`POST /api/session/:id/interrupt`, Advisor reply held 20 s): `session.execution.interrupted` aborted the consult after 4.4 s, telemetry recorded `stale`, nothing was delivered, and the interrupted step sent no model request.
-- Not covered live: compaction and child sessions. These are covered by `src/server.test.ts` only.
+- Not covered live: compaction and child sessions. `src/server.test.ts` covers child sessions and a turn surviving a compaction that drops its prompt (a request shape built by hand, not captured from the host).
 
 ## Live check of the decision fixes and the TUI (2026-10-30, OpenCode 2.2.0)
 - A failing shell command reached the model as `24 passed, 1 failed\n\nExited with code 1` (tool completed, no error), the string `SHELL_FAILURE` matches. Real Jev read that step as `stuck` 0.65, `done` 0.
@@ -58,3 +58,14 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
 6. Kill servers by pid, not `pkill -f`, which can match the shell running the command.
 7. After an OpenCode upgrade, check that `compactContext`'s strings in `src/transcript.ts` still match `core/src/codemode/instructions.ts`, `mcp/instructions.ts` and `skill/instructions.ts`: run one explicit `advisor()` consult and confirm the Advisor's prompt has the three `[context-omitted: …]` markers. A mismatch only stops the compaction.
 8. Also check `SHELL_FAILURE` in `src/transcript.ts` against `core/src/shell/result.ts` (`Exited with code N`, `Killed by …`, `Timed out before completion`), and that `to-llm-message.ts` still lowers synthetic and shell messages to `role: "user"` while `ctx.session.context` keeps their `type`. A mismatch hides failed commands from the Decision model.
+
+## Live check of round 3 (2026-10-31, OpenCode 2.2.0)
+- Advisor chain `["dead/x" (port 9), "mock/overflow", "mock/silent", "mock/keepalive"]`, provider `headerTimeout`/`chunkTimeout` 1500 ms, `advisor.timeoutMs` -1:
+  - `dead/x`: `ProviderRequestError (provider)` after 12.5 s, because the host retries a refused connection (`retryOneShot`).
+  - `mock/overflow` (HTTP 400 `context_length_exceeded`): `ProviderRequestError (invalid_request)` after 33 ms; moved on.
+  - `mock/silent` (headers, then nothing): ended by the chunk timeout after 1.5 s; moved on.
+  - `mock/keepalive` (SSE comments for 4 s, then text): answered after 4.2 s, so keep-alives keep a slow model alive past `chunkTimeout`. The panel and telemetry named `mock/keepalive`.
+- A long plan prompt (8,266 chars), then `opencode run --session … "Leave .slim/deepwork/ unignored."`: the second turn's Decision input held the whole plan and the correction (8,372 chars of requests); the turn was the correction's id.
+- Real `opencode/jev-1.13-free` with a 300,180-char input: `ProviderRequestError (invalid_request)` in 296 ms, and the router moved to the next model. A decision model declared in config (`"type": "decision"` under `providers.openrouter.models`) resolved as `Generate.UnsupportedModelError`, so a mock decision model could not be tested.
+- TUI: the sidebar widget is one line (`Advisor ✓ approach 11:03`); a click opened the panel.
+- `bun run timeline <session>` read the telemetry and `opencode api get …/message` and wrote the page; each step listed the messages since the previous one.
