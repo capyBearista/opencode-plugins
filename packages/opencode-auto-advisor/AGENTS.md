@@ -22,7 +22,7 @@
 - `src/fallback.ts`: the model-chain walker shared by the Decision router and the Advisor chain (error policy, skip map, shared deadline). `src/decisions.ts`: the two Decision questions and the router over `routing.models`. `src/policy.ts`: the pure consult verdict.
 - `src/transcript.ts`: the Decision projection (the last `routing.requests` real prompts, the turn's recent steps without system updates, with subagent results and other user-role notices labelled `SUBAGENT`/`NOTICE`, and failure counts; no system prompt and no total cap) and the Advisor transcript (system text, tool names, messages; compacted, then budgeted to `min(advisor.maxTokens, 75% of the window)` at 3 chars per token).
 - `src/advisor.ts`: prompts and the timeout-raced consult. `src/delivery.ts`: review text, marker, tail push.
-- `src/config.ts`: strict sparse `auto-advisor.json`, re-read when its mtime changes. `src/telemetry.ts`: JSONL with one rotation.
+- `src/config.ts`: strict sparse `auto-advisor.json`, re-read when its mtime changes. `src/telemetry.ts`: JSONL with one rotation; each line carries the newest message id and the Decision input's last 32k chars. `scripts/timeline.ts` (`bun run timeline <sessionID>`, not shipped) joins those lines with the session's messages from `opencode api get /api/session/<id>/message` into an HTML page.
 - `src/tui.ts`: the footer status, a `sidebar.footer` widget (hidden by `tui.sidebar`), and a `session.panel` named `auto-advisor` with the full review, opened by a click or `/advisor-review`. State comes from RPC events, plus one `status` call per mounted widget or panel, so a stored review shows after a restart.
 - `src/rpc.ts` is the contract both halves import.
 

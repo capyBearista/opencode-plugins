@@ -126,7 +126,7 @@ export function truncate(text: string, max: number): string {
 }
 
 /** Like `truncate`, but keeps the end: a tool's outcome (an exit code, a test summary) is last. */
-function truncateStart(text: string, max: number): string {
+export function truncateStart(text: string, max: number): string {
   return text.length <= max
     ? text
     : `[${text.length - max} chars truncated] …${text.slice(text.length - max)}`;

@@ -4,13 +4,23 @@ import { dirname, join } from "node:path";
 import type { Attempt } from "./fallback.js";
 
 export const MAX_BYTES = 5 * 1024 * 1024;
+/** Requests can be uncapped; their full text stays in the session. */
+export const LOGGED_INPUT_CHARS = 32_000;
 
-/** One line per routing opportunity. Never transcript or advice text. */
+/**
+ * One line per routing opportunity. Keeps the Decision input (its end) so a verdict can be
+ * judged later; never the Advisor transcript or advice text.
+ */
 export interface TelemetryRecord {
   readonly ts: string;
   readonly session: string;
   readonly turn: string;
   readonly step: number;
+  /** Id of the newest non-system message in the request, to find this step in the session. */
+  readonly message?: string;
+  /** The Decision input's last `LOGGED_INPUT_CHARS` characters: the steps and counts. */
+  readonly input: string;
+  readonly inputChars: number;
   readonly mode: "observe" | "active";
   readonly attempts: readonly Attempt[];
   readonly model?: string;

@@ -738,3 +738,35 @@ describe("advisor chain", () => {
     expect((await host.rpc().status({ sessionID: "s" })).failed).toBe(true);
   });
 });
+
+describe("decision context in telemetry", () => {
+  test("each line points at the newest message and keeps the Decision input", async () => {
+    await writeConfig({ routing: { mode: "observe" } });
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1"), ...step(1)]));
+    await Bun.sleep(10);
+    const [line] = await telemetryLines();
+    const input = host.decisionCalls[0].input[0].text;
+    expect(line).toMatchObject({ message: "a1", input, inputChars: input.length });
+  });
+
+  test("a long input keeps its end, where the steps and counts are", async () => {
+    await writeConfig({ routing: { mode: "observe" } });
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1", "p".repeat(50_000)), ...step(1)]));
+    await Bun.sleep(10);
+    const [line] = await telemetryLines();
+    expect(line.inputChars).toBeGreaterThan(50_000);
+    expect(line.input.length).toBeLessThanOrEqual(32_000 + 40);
+    expect(line.input).toEndWith("Latest tool result: failed.");
+  });
+
+  test("an active step records them too", async () => {
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1"), ...step(1)]));
+    await Bun.sleep(20);
+    const [line] = await telemetryLines();
+    expect(line.message).toBe("a1");
+    expect(line.input).toContain("Recent steps this turn:");
+  });
+});

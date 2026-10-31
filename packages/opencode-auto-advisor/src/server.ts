@@ -20,13 +20,14 @@ import {
 import { createWalker } from "./fallback.js";
 import { decide } from "./policy.js";
 import { AutoAdvisorRpc, type ReviewDetails, type Status } from "./rpc.js";
-import { createTelemetry, type TelemetryRecord } from "./telemetry.js";
+import { createTelemetry, LOGGED_INPUT_CHARS, type TelemetryRecord } from "./telemetry.js";
 import {
   advisorTranscript,
   decisionInput,
   isRequest,
   type Message,
   type SystemText,
+  truncateStart,
 } from "./transcript.js";
 
 export const PLUGIN_ID = "capybearista.opencode-auto-advisor";
@@ -329,6 +330,7 @@ export default Plugin.define({
           requestMaxChars: routing.requestMaxChars,
         };
         const turn = messages.findLast((message) => isRequest(message, requests.prompts))?.id ?? "";
+        const input = decisionInput(messages, requests);
         if (session.turn !== turn) {
           session.turn = turn;
           session.step = 0;
@@ -341,6 +343,9 @@ export default Plugin.define({
           session: event.sessionID,
           turn,
           step: session.step,
+          message: messages.findLast((message) => message.id && message.role !== "system")?.id,
+          input: truncateStart(input, LOGGED_INPUT_CHARS),
+          inputChars: input.length,
         };
 
         const cooling =
@@ -360,7 +365,7 @@ export default Plugin.define({
           // Decide without consulting, so telemetry still shows what the Decision model saw.
           if (session.observing) return;
           session.observing = true;
-          void route(routing.models, decisionInput(messages, requests))
+          void route(routing.models, input)
             .then((routed) => {
               const verdict = routed.ok
                 ? decide({ answers: routed.value.answers, routing })
@@ -389,7 +394,7 @@ export default Plugin.define({
         let delivered: Review | undefined;
         let record: TelemetryRecord | undefined;
         try {
-          const routed = await route(routing.models, decisionInput(messages, requests));
+          const routed = await route(routing.models, input);
           const verdict = routed.ok
             ? decide({ answers: routed.value.answers, routing })
             : undefined;

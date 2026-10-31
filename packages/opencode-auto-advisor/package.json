@@ -32,7 +32,8 @@
     "check": "bunx @biomejs/biome check --write .",
     "ci": "bunx @biomejs/biome ci .",
     "test": "bun test",
-    "smoke": "bun run build && bun scripts/smoke-built.ts"
+    "smoke": "bun run build && bun scripts/smoke-built.ts",
+    "timeline": "bun scripts/timeline.ts"
   },
   "peerDependencies": {
     "@opencode/plugin": ">=2.2.0 <3",
