@@ -506,13 +506,7 @@ export default Plugin.define({
     const iterator = events[Symbol.asyncIterator]();
     void (async () => {
       for (;;) {
-        // One failed read must not end the listener: stale consults would stop being cancelled.
-        // Wait a little before retrying, so a stream that keeps failing can't spin.
-        const next = await iterator.next().catch(() => undefined);
-        if (!next) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          continue;
-        }
+        const next = await iterator.next();
         if (next.done) return;
         const event = next.value as { type: string; data?: { sessionID?: string } };
         const sessionID = event.data?.sessionID;

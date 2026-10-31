@@ -133,10 +133,7 @@ async function start(setup: Setup = {}) {
         [Symbol.asyncIterator]: () => ({
           next: async () => {
             while (queue.length === 0) await new Promise<void>((resolve) => (wake = resolve));
-            const value = queue.shift();
-            // An Error in the queue stands for a failed read of the event stream.
-            if (value instanceof Error) throw value;
-            return { done: false, value };
+            return { done: false, value: queue.shift() };
           },
           return: async () => ({ done: true, value: undefined }),
         }),
@@ -874,22 +871,5 @@ describe("advisor chain, failures", () => {
     const [, second] = await telemetryLines();
     expect(second.advisor.attempts.map((a: Any) => a.outcome)).toEqual(["timeout", "skipped"]);
     expect(second.advisor.outcome).toBe("timeout");
-  });
-});
-
-describe("run-end events", () => {
-  test("a failed event read does not stop later run ends from cancelling a consult", async () => {
-    let release: () => void = () => {};
-    const host = await start({
-      advice: () => new Promise((resolve) => (release = () => resolve({ text: "late" }))),
-    });
-    await host.send(new Error("stream hiccup"));
-    const pending = host.hooks.context(request("s", [user("u1"), ...step(1)]));
-    await Bun.sleep(5);
-    await host.send({ type: "session.execution.interrupted", data: { sessionID: "s" } });
-    await pending;
-    release();
-    await Bun.sleep(20);
-    expect((await telemetryLines())[0].advisor.outcome).toBe("stale");
   });
 });
