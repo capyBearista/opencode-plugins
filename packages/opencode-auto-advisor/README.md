@@ -38,7 +38,7 @@ Two paths reach the same stateless Advisor. The agent can call the `advisor()` t
 - **Advice on the same step**: the review reaches the waiting request immediately, and stays in the session as an instruction entry until a newer review replaces it.
 - **Cache-safe**: no system-prompt edits. Only the newest message of a request changes.
 - **Observe mode**: run the Decision model without consulting, and log what it would have done, to tune the thresholds.
-- **TUI**: "Advisor reviewing…" in the prompt footer, and a compact Advisor status at the bottom of the session sidebar. Click it, or run `/advisor-review` (also in the command palette), to read the latest review in a scrollable panel: rendered markdown, its moment, model, duration and time.
+- **TUI**: "Advisor reviewing…" in the prompt footer, and a one-line Advisor status at the bottom of the session sidebar. Click it, or run `/advisor-review` (also in the command palette), to read the latest review in a scrollable panel: rendered markdown, its moment, model, duration and time.
 
 ## Install
 

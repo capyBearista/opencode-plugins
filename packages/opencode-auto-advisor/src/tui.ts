@@ -239,8 +239,16 @@ export default Plugin.define({
       return () =>
         shown()
           ? untrack(() =>
-              node("box", { id: "auto-advisor.sidebar", onMouseUp: toggle }, [
-                node("box", { flexDirection: "row", justifyContent: "space-between", gap: 1 }, [
+              node(
+                "box",
+                {
+                  id: "auto-advisor.sidebar",
+                  onMouseUp: toggle,
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  gap: 1,
+                },
+                [
                   node("text", { fg: () => theme().text.base, flexShrink: 0 }, "Advisor"),
                   node("text", { fg: color, wrapMode: "none", truncate: true }, () =>
                     sidebarStatus(
@@ -249,12 +257,8 @@ export default Plugin.define({
                       config()?.mode ?? "off",
                     ),
                   ),
-                ]),
-                () =>
-                  latest(input.sessionID)
-                    ? node("text", { fg: () => theme().text.muted }, "View review  /advisor-review")
-                    : null,
-              ]),
+                ],
+              ),
             )
           : null;
     };

@@ -176,7 +176,9 @@ describe("sidebar widget", () => {
     const text = await frame();
     expect(text).toContain("Advisor");
     expect(text).toContain("✓ stuck 13:08");
-    expect(text).toContain("View review");
+    // One line: the status only.
+    expect(text).not.toContain("View review");
+    expect(text.trim().split("\n")).toHaveLength(1);
     expect(text).not.toContain("clock skew");
     await setup.mockMouse.click(2, 0);
     expect(host.calls).toEqual([`open:${PANEL}`]);
