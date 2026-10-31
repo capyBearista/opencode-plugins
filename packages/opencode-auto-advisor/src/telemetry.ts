@@ -58,7 +58,8 @@ export function createTelemetry(path: string = resolveTelemetryPath(), maxBytes 
     const file = await open(path, "a+", 0o600);
     try {
       // Owner only, also for a file created before the log held Decision inputs.
-      await file.chmod(0o600);
+      // A file owned by someone else can't be changed; still append to it.
+      await file.chmod(0o600).catch(() => {});
       const { size } = await file.stat();
       if (size > 0 && size + Buffer.byteLength(line) > maxBytes) {
         await writeFile(`${path}.1`, await file.readFile(), { mode: 0o600 });

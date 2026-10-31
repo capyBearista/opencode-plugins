@@ -35,6 +35,12 @@ test("the skip window is 60 s", () => {
   expect(SKIP_MS).toBe(60_000);
 });
 
+test("a provider rejection without a field names the provider's message", () => {
+  expect(
+    classify({ _tag: "Generate.InvalidRequestError", message: "prompt is too long" }).error,
+  ).toBe("Generate.InvalidRequestError: prompt is too long");
+});
+
 describe("walker", () => {
   test("an unlimited deadline waits for a slow model instead of timing out", async () => {
     const walk = createWalker();

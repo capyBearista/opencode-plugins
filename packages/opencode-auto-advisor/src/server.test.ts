@@ -849,7 +849,6 @@ describe("advisor chain, failures", () => {
   });
 
   test("a chain that timed out reports a timeout even when a later model was skipped", async () => {
-    await writeConfig({ advisor: { model: ["inherit", "mock/small"], timeoutMs: 40 } });
     let first = true;
     const host = await start({
       advice: (input) => {

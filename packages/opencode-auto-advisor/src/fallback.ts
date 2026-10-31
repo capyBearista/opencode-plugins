@@ -23,8 +23,10 @@ export const SKIP_MS = 60_000;
  * OpenCode 2.2.0's generate errors (`core/src/generate.ts`, spike S1). A provider's
  * `invalid_request` moves on: it is how a context overflow arrives (the host drops its
  * `context-overflow` classification), and a parameter one model rejects says nothing about the
- * next. A `Generate.InvalidRequestError` without a `field` is the same rejection reported
- * mid-stream (no HTTP status), so it moves on too. With a `field` it is a config error such as a
+ * next. A `Generate.InvalidRequestError` without a `field` is a provider rejection that carries
+ * no HTTP status (reported mid-stream, an unsupported operation, or a request the provider's
+ * protocol could not encode), so it moves on too; its message is kept, so a request-shape bug a
+ * later model tolerates still shows in the attempts. With a `field` it is a config error such as a
  * bad `#variant`; that and a content filter, which would see the same content anywhere, stop,
  * so they fail loudly.
  */
@@ -48,7 +50,9 @@ export function classify(error: unknown): {
     return { action: "next", skip, error: label };
   }
   if (tag === "Generate.InvalidRequestError") {
-    return { action: value.field ? "stop" : "next", skip: false, error: tag };
+    if (value.field) return { action: "stop", skip: false, error: tag };
+    const message = typeof value.message === "string" ? value.message.slice(0, 200) : "";
+    return { action: "next", skip: false, error: message ? `${tag}: ${message}` : tag };
   }
   if (
     tag === "Generate.ModelNotFoundError" ||

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { advisorPrompt, consult } from "./advisor.js";
@@ -131,6 +131,17 @@ describe("telemetry", () => {
     await telemetry.flush();
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect((await stat(`${path}.1`)).mode & 0o777).toBe(0o600);
+  });
+
+  test("a log created before is tightened to owner-only", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "advisor-telemetry-"));
+    dirs.push(dir);
+    const path = join(dir, "t.jsonl");
+    await writeFile(path, "", { mode: 0o644 });
+    const telemetry = createTelemetry(path);
+    telemetry.record(entry);
+    await telemetry.flush();
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
 
   test("write failures are swallowed", async () => {
