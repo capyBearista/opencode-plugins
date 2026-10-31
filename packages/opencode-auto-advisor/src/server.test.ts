@@ -800,11 +800,11 @@ describe("advisor chain", () => {
 });
 
 describe("decision context in telemetry", () => {
-  test("by default each request reaches the Decision model capped at 60,000 characters", async () => {
+  test("by default each request reaches the Decision model capped at 20,000 characters", async () => {
     await writeConfig({ routing: { mode: "observe" } });
     const host = await start();
     await host.hooks.context(
-      request("s", [user("u1", `HEAD${"p".repeat(70_000)}TAIL`), ...step(1)]),
+      request("s", [user("u1", `HEAD${"p".repeat(30_000)}TAIL`), ...step(1)]),
     );
     await Bun.sleep(10);
     const input = host.decisionCalls[0].input[0].text;
@@ -824,7 +824,8 @@ describe("decision context in telemetry", () => {
   });
 
   test("a long input keeps its end, where the steps and counts are", async () => {
-    await writeConfig({ routing: { mode: "observe" } });
+    // Uncapped, so the logged input is longer than the 32k telemetry keeps.
+    await writeConfig({ routing: { mode: "observe", requestMaxChars: -1 } });
     const host = await start();
     await host.hooks.context(request("s", [user("u1", "p".repeat(50_000)), ...step(1)]));
     await Bun.sleep(10);
