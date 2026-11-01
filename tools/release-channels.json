@@ -24,6 +24,10 @@
     "@capybearista/opencode-adversarial-review": {
       "releaseClass": "v2",
       "channel": "latest"
+    },
+    "@capybearista/opencode-auto-advisor": {
+      "releaseClass": "v2",
+      "channel": "latest"
     }
   }
 }

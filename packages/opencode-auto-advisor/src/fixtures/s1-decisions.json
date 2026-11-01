@@ -1,0 +1,91 @@
+{
+  "ok": {
+    "answers": [
+      {
+        "type": "choice",
+        "name": "moment",
+        "choice": "stuck",
+        "probabilities": [
+          {
+            "value": "approach",
+            "probability": 0
+          },
+          {
+            "value": "stuck",
+            "probability": 1
+          },
+          {
+            "value": "done",
+            "probability": 0
+          },
+          {
+            "value": "routine",
+            "probability": 0
+          }
+        ],
+        "confidence": 1
+      },
+      {
+        "type": "score",
+        "name": "consequence",
+        "score": 2.49,
+        "probabilities": [
+          {
+            "value": 0,
+            "label": "trivial",
+            "probability": 0.01
+          },
+          {
+            "value": 1,
+            "label": "minor",
+            "probability": 0.06
+          },
+          {
+            "value": 2,
+            "label": "moderate",
+            "probability": 0.4
+          },
+          {
+            "value": 3,
+            "label": "serious",
+            "probability": 0.49
+          },
+          {
+            "value": 4,
+            "label": "critical",
+            "probability": 0.04
+          }
+        ],
+        "confidence": 0.51
+      }
+    ],
+    "cost": 0
+  },
+  "errors": {
+    "unknown-model": {
+      "_tag": "Generate.ModelNotFoundError",
+      "providerID": "opencode",
+      "modelID": "jev-nope",
+      "message": "Model not found: opencode/jev-nope"
+    },
+    "unknown-provider": {
+      "_tag": "Generate.ModelNotFoundError",
+      "providerID": "nope",
+      "modelID": "x",
+      "message": "Model not found: nope/x"
+    },
+    "chat-model": {
+      "_tag": "Generate.UnsupportedModelError",
+      "providerID": "opencode",
+      "modelID": "big-pickle",
+      "capability": "decision",
+      "message": "opencode/big-pickle is a chat model, not a decision model"
+    },
+    "openrouter-nocreds": {
+      "_tag": "Generate.ModelNotFoundError",
+      "providerID": "openrouter",
+      "modelID": "typesafe/jev-1.13",
+      "message": "Model not found: openrouter/typesafe/jev-1.13"
+    }
+  }
+}

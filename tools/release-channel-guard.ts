@@ -24,6 +24,10 @@ const APPROVED_POLICY: Record<string, PolicyEntry> = {
     releaseClass: "v2",
     channel: "latest",
   },
+  "@capybearista/opencode-auto-advisor": {
+    releaseClass: "v2",
+    channel: "latest",
+  },
   "@capybearista/opencode-double-tap-timeline": {
     releaseClass: "v2",
     channel: "latest",
