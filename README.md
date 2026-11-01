@@ -41,15 +41,25 @@
 
 | Plugin | What it does |
 | --- | --- |
+| [🔍 Auto Advisor](./packages/opencode-auto-advisor/) | Get an independent second model's review at the moments that matter. |
 | [🤺 Adversarial Review](./packages/opencode-adversarial-review/) | Challenge your implementation before shipping. |
 | [🐏 RAM Monitor](./packages/opencode-ram-monitor/) | See where OpenCode's memory goes. |
 | [⏱️ Double-Tap Timeline](./packages/opencode-double-tap-timeline/) | Open the session timeline with two Escape presses. |
 | [🛠️ Agents Loader](./packages/opencode-agents-loader/) | Reuse agents and commands across AI coding tools. |
 | [🗣️ Output Styles](./packages/opencode-output-styles/) | Customize how your agents approach conversations. |
-| [🧭 Auto Advisor](./packages/opencode-auto-advisor/) | Get a second model's review at the moments that matter. |
 | [💬 Agent Prompt Inheritance](./packages/opencode-agent-prompt-inheritance/) | **V1 only:** Preserve base model instructions when customizing agents. |
 
 ## Meet the Plugins
+
+### 🔍 Auto Advisor [[opencode-auto-advisor]](./packages/opencode-auto-advisor/)
+
+<p>
+  <img src=".github/assets/opencode-v2.svg" alt="OpenCode V2 compatible" height="20" />
+</p>
+
+**A Claude Code-style Advisor for your agent.**
+
+Your agent can call a zero-argument `advisor()` tool to have a second model, ideally a stronger one, review its work. By default, a fast Decision model also watches each step and brings in the Advisor on its own, at most twice per turn and once per 10 steps, when the agent is about to commit to an approach, is stuck, or is finishing, and a mistake would be costly. Reviews never edit the system prompt, so the prompt cache stays intact.
 
 ### 🤺 Adversarial Review [[opencode-adversarial-review]](./packages/opencode-adversarial-review/)
 
@@ -156,16 +166,6 @@ Extend OpenCode's agent and command discovery to the `.agents/` directory conven
 Switch between persistent response styles without repeating the same instructions throughout a conversation.
 
 Includes Claude Code's built-in `Proactive`, `Concise`, `Explanatory`, and `Learning` styles, plus custom project-local and global styles. Use `/output-style`, the picker, or the clickable sidebar line to switch; each session keeps its own style, with a global setting for the rest.
-
-### 🧭 Auto Advisor [[opencode-auto-advisor]](./packages/opencode-auto-advisor/)
-
-<p>
-  <img src=".github/assets/opencode-v2.svg" alt="OpenCode V2 compatible" height="20" />
-</p>
-
-**A Claude Code-style Advisor for your agent.**
-
-Your agent can call a zero-argument `advisor()` tool to have a second model, ideally a stronger one, review its work. By default, a fast Decision model also watches each step and brings in the Advisor on its own, at most twice per turn and once per 10 steps, when the agent is about to commit to an approach, is stuck, or is finishing, and a mistake would be costly. Reviews never edit the system prompt, so the prompt cache stays intact.
 
 ## Quick Start (OpenCode V2)
 
