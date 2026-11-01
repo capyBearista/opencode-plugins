@@ -1,6 +1,6 @@
 # opencode-auto-advisor
 
-<p align="center">A Claude Code-style Advisor for OpenCode: a stronger model reviews your agent's work when it asks, or automatically at the moments that matter.</p>
+<p align="center">A Claude Code-style Advisor for OpenCode: a second model, ideally a stronger one, reviews your agent's work when it asks, or automatically at the moments that matter.</p>
 <p align="center">
   <a href="https://www.npmjs.com/package/@capybearista/opencode-auto-advisor"><img alt="npm version" src="https://img.shields.io/npm/v/@capybearista/opencode-auto-advisor?style=flat-square&color=8d60e6" /></a>
   <a href="https://www.npmjs.com/package/@capybearista/opencode-auto-advisor"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@capybearista/opencode-auto-advisor?style=flat-square&color=6067e6" /></a>
@@ -71,7 +71,7 @@ Remove the entry from `"plugins"` in `opencode.json(c)`. Optionally delete `~/.c
 - **Ask for a review**: the agent sees the `advisor()` tool and its guidance: consult after orienting and before substantive work, when stuck or changing approach, and before declaring done (after saving the work). An automatic review counts as a consultation already made. You can also say "consult the advisor before you continue".
 - **Automatic reviews are on by default** (`routing.mode` `active`). Without `advisor.model`, they consult the agent's own model and are billed at its rates; set `advisor.model`, or set `routing.mode` to `observe` or `off`, if that's not what you want.
 - Automatic reviews run in top-level sessions only. Subagent sessions don't get the tool or automatic reviews.
-- Automatic reviews are limited to two per user turn (`routing.maxConsultationsPerTurn`) and to one per 10 agent steps across the session (`routing.minStepsBetweenConsultations`). The step count carries over to the next turn, and a retried step doesn't count. Explicit `advisor()` calls ignore both limits.
+- Automatic reviews are limited to two per user turn (`routing.maxConsultationsPerTurn`) and to one per 10 agent steps across the session (`routing.minStepsBetweenConsultations`). The step count carries over to the next turn, and a retried step doesn't count. Both limits are kept in memory, so restarting OpenCode resets them. Explicit `advisor()` calls ignore both limits.
 
 ## Configuration
 
@@ -110,7 +110,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 
 ## Troubleshooting
 
-- **Judging the verdicts**: from a checkout of this repo, with OpenCode running, `bun run timeline <sessionID> [--out file.html]` in `packages/opencode-auto-advisor` writes one page per session: each routing decision with its moment probabilities, consequence, limit and Advisor outcome, and, expanded, the messages since the previous step and the exact Decision input.
+- **Judging the verdicts**: from a checkout of this repo, with OpenCode running, `bun run timeline <sessionID> [--out file.html]` (the ID is the `session` field of any telemetry line) in `packages/opencode-auto-advisor` writes one page per session: each routing decision with its moment probabilities, consequence, limit and Advisor outcome, and, expanded, the messages since the previous step and the exact Decision input.
 - **Nothing happens automatically**: check `telemetry.jsonl` for the verdicts. `routine` and `low-consequence` mean the thresholds held the review back, `blocked` means the cooldown or the per-turn limit did (the `blocked` field says which; a step both block is logged as `cooldown`), and `no-decision` means no configured decision model answered.
 - **"Advisor unavailable" in the footer or sidebar**: every Advisor model failed or the deadline ran out. The agent carried on without advice. `advisor.attempts` in `telemetry.jsonl` lists each model's outcome.
 - **No Advisor in the sidebar**: OpenCode shows the sidebar only in top-level sessions, and only on terminals wider than 120 columns unless you open it. While the review panel is open, it takes the sidebar's place. `/advisor-review` works either way.

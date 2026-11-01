@@ -46,7 +46,7 @@
 | [⏱️ Double-Tap Timeline](./packages/opencode-double-tap-timeline/) | Open the session timeline with two Escape presses. |
 | [🛠️ Agents Loader](./packages/opencode-agents-loader/) | Reuse agents and commands across AI coding tools. |
 | [🗣️ Output Styles](./packages/opencode-output-styles/) | Customize how your agents approach conversations. |
-| [🧭 Auto Advisor](./packages/opencode-auto-advisor/) | Get a stronger model's review at the moments that matter. |
+| [🧭 Auto Advisor](./packages/opencode-auto-advisor/) | Get a second model's review at the moments that matter. |
 | [💬 Agent Prompt Inheritance](./packages/opencode-agent-prompt-inheritance/) | **V1 only:** Preserve base model instructions when customizing agents. |
 
 ## Meet the Plugins
@@ -165,7 +165,7 @@ Includes Claude Code's built-in `Proactive`, `Concise`, `Explanatory`, and `Lear
 
 **A Claude Code-style Advisor for your agent.**
 
-Your agent can call a zero-argument `advisor()` tool to have a stronger model review its work. By default, a fast Decision model also watches each step and brings in the Advisor on its own, at most once per turn and once per 10 steps, when the agent is about to commit to an approach, is stuck, or is finishing, and a mistake would be costly. Reviews never edit the system prompt, so the prompt cache stays intact.
+Your agent can call a zero-argument `advisor()` tool to have a second model, ideally a stronger one, review its work. By default, a fast Decision model also watches each step and brings in the Advisor on its own, at most twice per turn and once per 10 steps, when the agent is about to commit to an approach, is stuck, or is finishing, and a mistake would be costly. Reviews never edit the system prompt, so the prompt cache stays intact.
 
 ## Quick Start (OpenCode V2)
 
