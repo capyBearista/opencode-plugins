@@ -1,11 +1,11 @@
 
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="600" viewBox="0 0 1280 600" role="img" aria-labelledby="diagram-title diagram-desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="716" viewBox="0 0 1280 716" role="img" aria-labelledby="diagram-title diagram-desc">
   <title id="diagram-title">OpenCode V2 plugin architecture</title>
-  <desc id="diagram-desc">Three server-installed plugins: Adversarial Review, Agents Loader, and Output Styles. Two TUI-installed plugins: RAM Monitor and Double-Tap Timeline. Output Styles provides both server and TUI functionality from one opencode.json entry; its TUI half loads automatically without a cli.json entry.</desc>
+  <desc id="diagram-desc">Four server-installed plugins: Adversarial Review, Agents Loader, Output Styles, and Auto Advisor. Two separately installed TUI plugins: RAM Monitor and Double-Tap Timeline. Output Styles and Auto Advisor each load their TUI component automatically from a single opencode.json entry, without an additional cli.json entry.</desc>
 
   <defs>
     <style>
-      text { font-family: "JetBrains Mono"; font-weight: 500; }
+      text { font-family: "JetBrains Mono", monospace; font-weight: 500; }
       .title { font-size: 30px; font-weight: 750; letter-spacing: -0.6px; }
       .subtitle { font-size: 14px; fill: #808080; }
       .section { font-size: 22px; font-weight: 750; }
@@ -18,13 +18,13 @@
   </defs>
 
   <!-- Canvas and heading -->
-  <rect width="1280" height="600" fill="#0a0a0a"/>
+  <rect width="1280" height="716" fill="#0a0a0a"/>
   <text x="640" y="48" class="title" fill="#eeeeee" text-anchor="middle">OpenCode V2 plugin architecture</text>
-  <text x="640" y="77" class="subtitle" text-anchor="middle">Server and TUI plugins are configured separately—with one important exception.</text>
+  <text x="640" y="77" class="subtitle" text-anchor="middle">Server and TUI plugins use separate configs; some server plugins load a TUI companion.</text>
 
   <!-- Column shells -->
-  <rect x="24" y="103" width="608" height="460" fill="#141414" stroke="#fab283" stroke-width="1.5"/>
-  <rect x="648" y="103" width="608" height="460" fill="#141414" stroke="#5c9cf5" stroke-width="1.5"/>
+  <rect x="24" y="103" width="608" height="575" fill="#141414" stroke="#fab283" stroke-width="1.5"/>
+  <rect x="648" y="103" width="608" height="575" fill="#141414" stroke="#5c9cf5" stroke-width="1.5"/>
 
   <!-- Column headers -->
   <text x="46" y="141" class="section" fill="#fab283">SERVER</text>
@@ -35,7 +35,7 @@
   <text x="670" y="141" class="section" fill="#5c9cf5">TUI</text>
   <rect x="670" y="156" width="111" height="25" fill="#1e1e1e" stroke="#484848"/>
   <text x="681" y="173" class="code">cli.json</text>
-  <text x="670" y="205" class="body">Interactive terminal UI extensions</text>
+  <text x="670" y="205" class="body">Separately configured terminal UI plugins</text>
 
   <!-- Server: Adversarial Review -->
   <rect x="46" y="219" width="564" height="100" fill="#1e1e1e" stroke="#484848"/>
@@ -58,7 +58,7 @@
   <text x="150" y="386" class="pkg">@capybearista/opencode-agents-loader</text>
   <text x="150" y="411" class="small">Bridges .agents/ commands and agents</text>
 
-  <!-- Server: Output Styles (server + TUI from one entry) -->
+  <!-- Server: Output Styles (server + automatically loaded TUI) -->
   <rect x="46" y="445" width="564" height="100" fill="#1e1e1e" stroke="#9d7cd8" stroke-width="1.25"/>
   <rect x="64" y="467" width="48" height="48" fill="#0a0a0a" stroke="#9d7cd8" stroke-width="1.5"/>
   <path d="M75 479 H101 M75 491 H101 M75 503 H101" stroke="#9d7cd8" stroke-width="1.7"/>
@@ -68,7 +68,17 @@
   <path d="M130 463 V526" stroke="#484848"/>
   <text x="150" y="475" class="label">Output Styles</text>
   <text x="150" y="499" class="pkg">@capybearista/opencode-output-styles</text>
-  <text x="150" y="524" class="small">Server + automatically loaded TUI</text>
+  <text x="150" y="524" class="small">Persistent styles; auto-loaded TUI picker</text>
+
+  <!-- Server: Auto Advisor (server + automatically loaded TUI) -->
+  <rect x="46" y="558" width="564" height="100" fill="#1e1e1e" stroke="#9d7cd8" stroke-width="1.25"/>
+  <rect x="64" y="580" width="48" height="48" fill="#0a0a0a" stroke="#9d7cd8" stroke-width="1.5"/>
+  <circle cx="85" cy="601" r="10" fill="none" stroke="#9d7cd8" stroke-width="1.8"/>
+  <path d="M92 608 L101 617 M85 595 V607 M79 601 H91" fill="none" stroke="#9d7cd8" stroke-width="1.8"/>
+  <path d="M130 576 V639" stroke="#484848"/>
+  <text x="150" y="588" class="label">Auto Advisor</text>
+  <text x="150" y="612" class="pkg">@capybearista/opencode-auto-advisor</text>
+  <text x="150" y="637" class="small">Second-model reviews; auto-loaded TUI</text>
 
   <!-- TUI: RAM Monitor -->
   <rect x="670" y="219" width="564" height="100" fill="#1e1e1e" stroke="#484848"/>
@@ -91,12 +101,26 @@
   <text x="774" y="386" class="pkg">@capybearista/opencode-double-tap-timeline</text>
   <text x="774" y="411" class="small">Open the timeline with two Escape presses</text>
 
-  <!-- Explicit note: Output Styles is not a separate cli.json entry -->
-  <rect x="670" y="445" width="564" height="100" fill="#18151d" stroke="#9d7cd8" stroke-width="1" stroke-dasharray="5 5"/>
-  <text x="690" y="474" fill="#9d7cd8" font-size="14" font-weight="750">OUTPUT STYLES TUI: AUTO-LOADED</text>
-  <path d="M690 485 H1214" stroke="#484848"/>
-  <text x="690" y="507" class="body">Loads from the server package above.</text>
-  <text x="690" y="530" class="small">Do not add Output Styles separately to cli.json.</text>
+  <!-- Companion TUI features: these belong to server-installed packages -->
+  <rect x="670" y="445" width="564" height="213" fill="#18151d" stroke="#9d7cd8" stroke-width="1" stroke-dasharray="5 5"/>
+  <text x="690" y="475" fill="#eeeeee" font-size="14" font-weight="750">AUTO-LOADED TUI COMPANIONS</text>
+  <path d="M690 489 H1214" stroke="#484848"/>
 
-  <text x="640" y="588" class="small" text-anchor="middle">Choose only the plugins you want. Output Styles needs OpenCode 2.0.23+.</text>
+  <!-- Output Styles TUI -->
+  <rect x="690" y="501" width="7" height="7" fill="#9d7cd8"/>
+  <text x="709" y="510" fill="#9d7cd8" font-size="14" font-weight="700">Output Styles</text>
+  <text x="709" y="532" class="small">Picker, /output-style, sidebar line</text>
+  <path d="M690 544 H1214" stroke="#484848"/>
+
+  <!-- Auto Advisor TUI -->
+  <rect x="690" y="558" width="7" height="7" fill="#9d7cd8"/>
+  <text x="709" y="567" fill="#9d7cd8" font-size="14" font-weight="700">Auto Advisor</text>
+  <text x="709" y="589" class="small">Review panel, status footer, sidebar</text>
+  <path d="M690 604 H1214" stroke="#484848"/>
+
+  <text x="690" y="627" class="body">Both load from opencode.json(c).</text>
+  <text x="690" y="647" class="small">Neither needs a separate cli.json entry.</text>
+
+  <!-- Footer -->
+  <text x="640" y="705" class="small" text-anchor="middle">Choose only the plugins you want. Auto Advisor requires OpenCode 2.2.5+.</text>
 </svg>
