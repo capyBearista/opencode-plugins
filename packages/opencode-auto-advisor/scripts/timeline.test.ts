@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fetchMessages, renderTimeline, timelineRows } from "./timeline.js";
 
 const at = (n: number) => ({ created: 1_793_000_000_000 + n * 1_000 });
@@ -104,6 +107,32 @@ describe("fetchMessages", () => {
       const messages = fetchMessages("s", fake);
       expect(messages.map((m) => m.id)).toEqual(["m1", "m2", "m3", "m4", "m5", "m6"]);
       expect(messages.every((m) => m.text?.length === 1_000_003)).toBe(true);
+    }
+  });
+});
+
+describe("bun run timeline", () => {
+  // The page holds the user's requests and the Decision input, like telemetry (0600).
+  test("writes a page only its owner can read, also over an existing file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "timeline-test-"));
+    const shim = join(dir, "opencode");
+    writeFileSync(
+      shim,
+      `#!/bin/sh\nexec "${process.execPath}" "${import.meta.dir}/fixtures/fake-opencode.ts" "$@"\n`,
+    );
+    chmodSync(shim, 0o755);
+    const page = join(dir, "page.html");
+    writeFileSync(page, "old");
+    chmodSync(page, 0o644);
+    const result = Bun.spawnSync(
+      [process.execPath, `${import.meta.dir}/timeline.ts`, "s", "--out", page],
+      { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, XDG_DATA_HOME: dir } },
+    );
+    try {
+      expect(result.exitCode).toBe(0);
+      expect(statSync(page).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

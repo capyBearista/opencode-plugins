@@ -6,7 +6,7 @@
  *   bun run timeline <sessionID> [--out file.html]
  */
 import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveTelemetryPath, type TelemetryRecord } from "../src/telemetry.js";
@@ -199,6 +199,9 @@ if (import.meta.main) {
     fetchMessages(sessionID),
   );
   const file = out ?? `timeline-${sessionID}.html`;
-  await writeFile(file, renderTimeline(sessionID, rows));
+  // The page holds the user's requests and the Decision input, so only its owner may read it,
+  // like telemetry. `mode` applies only to a new file, so an existing one is replaced.
+  await rm(file, { force: true });
+  await writeFile(file, renderTimeline(sessionID, rows), { mode: 0o600, flag: "wx" });
   console.log(`${rows.length} steps → ${file}`);
 }

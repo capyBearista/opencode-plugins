@@ -145,6 +145,9 @@ rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
 - Keep the remote feature branch after merging (disable automatic branch deletion on GitHub); delete only the local branch unless the user explicitly asks to remove the remote one.
 - Safety-net-blocked git forms have recoverable equivalents: `git stash -u` before `worktree remove` (never `--force`), `git update-ref` for pointer-only moves on verified-identical trees, `git merge --ff-only` where ancestry allows, `git branch -d` (never `-D` in chained commands)
 - Merge commits also need conventional messages — the commitlint hook rejects empty subject/type on merges too
+- In a commit body, a line that starts with a word and a colon (`Docs: …`) begins the footer, where commitlint caps lines at 100 characters — reword the line or keep it short
+- To re-sign a PR branch's commits, rebase from `git merge-base origin/main HEAD`, not from the first commit you changed — commits before your starting point stay unsigned
+- Re-signing or rebasing changes every hash: post review replies that cite commits only after the branch's history is final
 - `git log --all -- <path>` also lists merges that deleted the path; prove artifact absence with `git rev-list --objects --all --reflog` plus `git cat-file -e <blob>`, not log output
 - Release-channel policy edits never move npm dist-tags (guard returns `noop` for published versions); promotion is an authenticated `npm dist-tag` op — E401 in unattended sessions means handing exact commands to an operator
 - The "Version Packages" PR is opened by `github-actions[bot]`, so its CI runs sit at "action_required" until a maintainer clicks "Approve and run workflows" on the PR.

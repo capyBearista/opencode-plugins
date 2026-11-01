@@ -110,7 +110,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 
 ## Troubleshooting
 
-- **Judging the verdicts**: from a checkout of this repo, with OpenCode running, `bun run timeline <sessionID> [--out file.html]` (the ID is the `session` field of any telemetry line) in `packages/opencode-auto-advisor` writes one page per session: each routing decision with its moment probabilities, consequence, limit and Advisor outcome, and, expanded, the messages since the previous step and the exact Decision input.
+- **Judging the verdicts**: from a checkout of this repo, with OpenCode running, `bun run timeline <sessionID> [--out file.html]` (the ID is the `session` field of any telemetry line) in `packages/opencode-auto-advisor` writes one page per session: each routing decision with its moment probabilities, consequence, limit and Advisor outcome, and, expanded, the messages since the previous step and the exact Decision input. Like telemetry, the page is readable only by you.
 - **Nothing happens automatically**: check `telemetry.jsonl` for the verdicts. `routine` and `low-consequence` mean the thresholds held the review back, `blocked` means the cooldown or the per-turn limit did (the `blocked` field says which; a step both block is logged as `cooldown`), and `no-decision` means no configured decision model answered.
 - **"Advisor unavailable" in the footer or sidebar**: every Advisor model failed or the deadline ran out. The agent carried on without advice. `advisor.attempts` in `telemetry.jsonl` lists each model's outcome.
 - **No Advisor in the sidebar**: OpenCode shows the sidebar only in top-level sessions, and only on terminals wider than 120 columns unless you open it. While the review panel is open, it takes the sidebar's place. `/advisor-review` works either way.
@@ -122,7 +122,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 
 This package lives in the `opencode-plugins` monorepo. See the [contribution guidelines](../../CONTRIBUTING.md) for setup, the full check suite, and releases, and open or find an issue before a pull request.
 
-From this directory, `bun test` runs the package tests, `bun run smoke` checks the built package, and `bun run sandbox start` runs an isolated OpenCode with this package and a mock model, for live checks. To try a change in your own OpenCode, see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
+From this directory, `bun test` runs the package tests, `bun run smoke` checks the built package, and `bun run sandbox` runs an isolated OpenCode with this package and a mock model, for live checks. To try a change in your own OpenCode, see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
 
 ## License
 
