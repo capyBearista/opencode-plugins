@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "id": "release-policy-coherence",
+      "rule": "Flag package versions outside their release class in tools/release-channels.json, packages missing from that file or from the workspace, and changes that let a release skip Changesets or the CI release plan (bun run release:check).",
+      "scope": [
+        "packages/*/package.json",
+        ".changeset/**",
+        "tools/release-channel-guard.ts",
+        "tools/release-channels.json",
+        ".github/workflows/**"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "publish-trust-boundary",
+      "rule": "Flag workflow changes that let pull-request code publish to npm, expose npm credentials or tokens, or publish without the release guard.",
+      "scope": [".github/workflows/**"],
+      "severity": "high"
+    }
+  ]
+}
