@@ -4,6 +4,7 @@ export default {
       "@capybearista/opencode-adversarial-review",
       "@capybearista/opencode-agent-prompt-inheritance",
       "@capybearista/opencode-agents-loader",
+      "@capybearista/opencode-auto-advisor",
       "@capybearista/opencode-double-tap-timeline",
       "@capybearista/opencode-output-styles",
       "@capybearista/opencode-ram-monitor",
