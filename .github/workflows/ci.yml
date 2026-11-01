@@ -67,3 +67,8 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      # Reads npm and publishes nothing: shows what the Release job would publish, and fails here,
+      # before merge, on anything the guard would reject there.
+      - name: Release plan
+        run: bun run release:check

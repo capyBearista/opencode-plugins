@@ -19,38 +19,13 @@ const MAX_PACKUMENT_BYTES = 2_000_000;
 const NPM_CONFIG_TIMEOUT_MS = 10_000;
 const MAX_NPM_OUTPUT_BYTES = 8 * 1024;
 const execFileAsync = promisify(execFile);
-const APPROVED_POLICY: Record<string, PolicyEntry> = {
-  "@capybearista/opencode-agents-loader": {
-    releaseClass: "v2",
-    channel: "latest",
-  },
-  "@capybearista/opencode-auto-advisor": {
-    releaseClass: "v2",
-    channel: "latest",
-  },
-  "@capybearista/opencode-double-tap-timeline": {
-    releaseClass: "v2",
-    channel: "latest",
-  },
-  "@capybearista/opencode-agent-prompt-inheritance": {
-    releaseClass: "v1",
-    channel: "latest",
-  },
-  "@capybearista/opencode-output-styles": {
-    releaseClass: "v2",
-    channel: "latest",
-  },
-  "@capybearista/opencode-ram-monitor": {
-    releaseClass: "v2",
-    channel: "latest",
-  },
-  "@capybearista/opencode-adversarial-review": {
-    releaseClass: "v2",
-    channel: "latest",
-  },
-};
+/**
+ * The newest OpenCode major. A release class above it would publish a plugin major that is
+ * reserved for an OpenCode release that does not exist yet (3.x is for OpenCode V3).
+ */
+const CURRENT_OPENCODE_MAJOR = 2;
+const RELEASE_CHANNELS: readonly string[] = ["latest", "opencode2"];
 
-// A class names the OpenCode major its packages target; class vN publishes only major N.
 type ReleaseClass = `v${number}`;
 type ReleaseChannel = "noop" | "latest" | "opencode2";
 
@@ -69,7 +44,8 @@ export type RegistrySnapshot = {
   distTags: Record<string, string>;
 };
 
-export type RegistryClient = (name: string) => Promise<RegistrySnapshot>;
+/** Resolves to `null` when the registry has never seen the package (a first publish). */
+export type RegistryClient = (name: string) => Promise<RegistrySnapshot | null>;
 
 export type ReleasePackage = {
   name: string;
@@ -77,6 +53,8 @@ export type ReleasePackage = {
   releaseClass: ReleaseClass;
   channel: Exclude<ReleaseChannel, "noop">;
   published: boolean;
+  /** Not on the registry at all yet. */
+  firstPublish: boolean;
 };
 
 export type ReleasePlan = {
@@ -163,10 +141,10 @@ export async function buildReleasePlan(options: BuildPlanOptions = {}): Promise<
       timeoutMs,
       `registry metadata query timed out for ${item.name}`,
     );
-    validateRegistrySnapshot(item.name, snapshot);
+    if (snapshot !== null) validateRegistrySnapshot(item.name, snapshot);
     const policyEntry = policy.packages[item.name];
 
-    const published = hasVersion(snapshot, item.version);
+    const published = snapshot !== null && hasVersion(snapshot, item.version);
     const classMajorVersion = classMajor(policyEntry.releaseClass);
     if (!published && majorVersion(item.version) !== classMajorVersion) {
       throw new ReleaseGuardError(
@@ -180,6 +158,7 @@ export async function buildReleasePlan(options: BuildPlanOptions = {}): Promise<
       releaseClass: policyEntry.releaseClass,
       channel: policyEntry.channel,
       published,
+      firstPublish: snapshot === null,
     });
   }
 
@@ -334,7 +313,11 @@ function printPlan(plan: ReleasePlan, output: (line: string) => void) {
   }
   for (const item of plan.packages) {
     output(
-      `${item.name}@${item.version} ${item.published ? "published" : `unpublished -> ${plan.channel}`}`,
+      `${item.name}@${item.version} ${
+        item.published
+          ? "published"
+          : `${item.firstPublish ? "first publish" : "unpublished"} -> ${plan.channel}`
+      }`,
     );
   }
 }
@@ -359,29 +342,21 @@ function validatePolicy(policy: ReleasePolicy) {
   if (normalizeRegistry(policy.registry) !== normalizeRegistry(PUBLIC_REGISTRY)) {
     throw new ReleaseGuardError("release channel policy must use the public npm registry");
   }
-  const entries = Object.entries(policy.packages);
-  const approvedNames = Object.keys(APPROVED_POLICY).sort();
-  if (
-    entries.length !== approvedNames.length ||
-    entries
-      .map(([name]) => name)
-      .sort()
-      .some((name, index) => name !== approvedNames[index])
-  ) {
-    throw new ReleaseGuardError(
-      "release channel policy must contain exactly six approved packages",
-    );
-  }
-  for (const [name, rawEntry] of entries) {
-    if (!isPlainObject(rawEntry)) throw new ReleaseGuardError(`invalid policy entry for ${name}`);
-    const expected = APPROVED_POLICY[name];
+  // The workspace check in readWorkspace makes this list match packages/ exactly.
+  for (const [name, entry] of Object.entries(policy.packages)) {
     if (
-      rawEntry.releaseClass !== expected.releaseClass ||
-      rawEntry.channel !== expected.channel ||
-      Object.hasOwn(rawEntry, "frozenLatest")
+      !isPlainObject(entry) ||
+      Object.keys(entry).sort().join() !== "channel,releaseClass" ||
+      typeof entry.releaseClass !== "string" ||
+      !/^v[1-9]\d*$/.test(entry.releaseClass) ||
+      typeof entry.channel !== "string" ||
+      !RELEASE_CHANNELS.includes(entry.channel)
     ) {
+      throw new ReleaseGuardError(`invalid policy entry for ${name}`);
+    }
+    if (classMajor(entry.releaseClass as ReleaseClass) > CURRENT_OPENCODE_MAJOR) {
       throw new ReleaseGuardError(
-        `policy entry for ${name} does not match the approved release class`,
+        `${name} is in release class ${entry.releaseClass}, above the current OpenCode ${CURRENT_OPENCODE_MAJOR}`,
       );
     }
   }
@@ -431,14 +406,16 @@ async function readWorkspace(cwd: string, policy: ReleasePolicy): Promise<Worksp
   }
 
   const expected = Object.keys(policy.packages);
-  const actual = [...manifests.keys()].sort();
-  if (
-    actual.length !== expected.length ||
-    actual.some((name, index) => name !== [...expected].sort()[index])
-  ) {
-    throw new ReleaseGuardError(
-      "workspace policy mismatch: expected exactly the six approved packages",
-    );
+  const unlisted = [...manifests.keys()].filter((name) => !Object.hasOwn(policy.packages, name));
+  const missing = expected.filter((name) => !manifests.has(name));
+  if (unlisted.length > 0 || missing.length > 0) {
+    const problems = [
+      unlisted.length > 0
+        ? `not in tools/release-channels.json: ${unlisted.sort().join(", ")}`
+        : "",
+      missing.length > 0 ? `not in the workspace: ${missing.sort().join(", ")}` : "",
+    ].filter(Boolean);
+    throw new ReleaseGuardError(`workspace policy mismatch: ${problems.join("; ")}`);
   }
 
   return expected.map((name) => {
@@ -534,7 +511,8 @@ async function validateRegistryConfiguration(
   }
 }
 
-function createPublicRegistryClient(registry: string): RegistryClient {
+/** npm's metadata API; a 404 is a package it has never seen. Any other failure fails closed. */
+export function createPublicRegistryClient(registry: string): RegistryClient {
   return async (name) => {
     const url = `${registry}${encodeURIComponent(name)}`;
     let response: Response;
@@ -546,6 +524,7 @@ function createPublicRegistryClient(registry: string): RegistryClient {
     } catch {
       throw new ReleaseGuardError(`registry metadata request failed for ${name}`);
     }
+    if (response.status === 404) return null;
     if (!response.ok)
       throw new ReleaseGuardError(
         `registry metadata request for ${name} returned HTTP ${response.status}`,

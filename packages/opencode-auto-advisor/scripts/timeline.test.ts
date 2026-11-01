@@ -108,7 +108,8 @@ describe("fetchMessages", () => {
       expect(messages.map((m) => m.id)).toEqual(["m1", "m2", "m3", "m4", "m5", "m6"]);
       expect(messages.every((m) => m.text?.length === 1_000_003)).toBe(true);
     }
-  });
+    // Five rounds of 3 MB pages through real subprocesses: well over 5 s on a slow CI runner.
+  }, 30_000);
 });
 
 describe("bun run timeline", () => {

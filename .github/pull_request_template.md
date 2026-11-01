@@ -14,6 +14,7 @@
 - [ ] opencode-ram-monitor
 - [ ] opencode-agent-prompt-inheritance
 - [ ] opencode-adversarial-review
+- [ ] opencode-auto-advisor
 - [ ] opencode-plugins (this monorepo itself)
 - [ ] Other: _______
 

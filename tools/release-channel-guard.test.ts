@@ -20,6 +20,7 @@ import {
   checkClassMajor,
   checkPendingChangesets,
   createChangesetsEnvironment,
+  createPublicRegistryClient,
   PUBLIC_REGISTRY,
   type RegistryClient,
   type RegistrySnapshot,
@@ -70,13 +71,14 @@ function snapshot(
   };
 }
 
+/** An override of `null` is a package npm has never seen (a 404). */
 function createRegistryClient(
-  overrides: Partial<Record<PackageName, RegistrySnapshot | Error>> = {},
+  overrides: Record<string, RegistrySnapshot | Error | null> = {},
 ): RegistryClient {
   return async (name) => {
-    const override = overrides[name as PackageName];
+    const override = overrides[name];
     if (override instanceof Error) throw override;
-    if (override) return override;
+    if (override !== undefined) return override;
     const version = registryVersions[name as PackageName];
     return snapshot([version], version);
   };
@@ -371,7 +373,7 @@ describe("release-channel-guard policy matrix", () => {
     );
   });
 
-  test("the retired frozen policy fails exact-match validation", async () => {
+  test("the retired frozen policy entry is rejected as malformed", async () => {
     const cwd = await createFixture();
     const policyFile = path.join(cwd, "tools", "release-channels.json");
     const policy = JSON.parse(await readFile(policyFile, "utf8")) as {
@@ -386,7 +388,7 @@ describe("release-channel-guard policy matrix", () => {
 
     await expectGuardRejects(
       buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
-      "does not match the approved release class",
+      `invalid policy entry for ${packageNames.agents}`,
     );
   });
 
@@ -473,8 +475,8 @@ describe("release-channel-guard policy matrix", () => {
     expect(invocations).toBe(0);
   });
 
-  test("R1 the policy requires the approved V2 class for ram-monitor", async () => {
-    const cwd = await createFixture();
+  test("R1 a V1 class cannot claim a package already on major 2", async () => {
+    const cwd = await createFixture({ [packageNames.ram]: "2.1.0" });
     const policyFile = path.join(cwd, "tools", "release-channels.json");
     const policy = JSON.parse(await readFile(policyFile, "utf8")) as {
       packages: Record<string, unknown>;
@@ -484,7 +486,7 @@ describe("release-channel-guard policy matrix", () => {
 
     await expectGuardRejects(
       buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
-      "does not match the approved release class",
+      "must remain on V1 major 1",
     );
   });
 
@@ -1380,10 +1382,12 @@ class LoopbackRegistry {
   private server: Server | undefined;
   private address = "";
 
-  constructor() {
+  /** `unpublished` packages start absent, so their metadata is a 404 until published. */
+  constructor(unpublished: readonly string[] = []) {
     for (const [name, version] of Object.entries(registryVersions) as Array<
       [PackageName, string]
     >) {
+      if (unpublished.includes(name)) continue;
       this.packages.set(name, {
         versions: new Set([version]),
         distTags: { latest: version },
@@ -1434,7 +1438,9 @@ class LoopbackRegistry {
       return;
     }
     if (request.method === "GET") {
-      this.respondJson(response, 200, this.readPackument(pathname));
+      const packument = this.readPackument(pathname);
+      if (packument) this.respondJson(response, 200, packument);
+      else this.respondJson(response, 404, { error: "Not found" });
       return;
     }
     if (request.method === "PUT") {
@@ -1449,7 +1455,7 @@ class LoopbackRegistry {
   private readPackument(pathname: string) {
     const name = decodeURIComponent(pathname.slice(1)) as PackageName;
     const packageState = this.packages.get(name);
-    if (!packageState) return { error: "E404" };
+    if (!packageState) return undefined;
     return {
       name,
       "dist-tags": packageState.distTags,
@@ -1469,8 +1475,11 @@ class LoopbackRegistry {
     const version = versions.at(-1);
     if (!version) throw new Error(`loopback publish omitted version for ${name}`);
     const tag = Object.keys(body["dist-tags"] ?? {})[0] ?? "latest";
-    const packageState = this.packages.get(name as PackageName);
-    if (!packageState) throw new Error(`loopback publish unknown package ${name}`);
+    let packageState = this.packages.get(name as PackageName);
+    if (!packageState) {
+      packageState = { versions: new Set(), distTags: {} };
+      this.packages.set(name as PackageName, packageState);
+    }
     packageState.versions.add(version);
     if (body["dist-tags"]) Object.assign(packageState.distTags, body["dist-tags"]);
     this.publishes.push({ name, version, tag });
@@ -1593,6 +1602,165 @@ describe("R11 disposable real Changesets publication", () => {
       await registry.close();
     }
   }, 20_000);
+
+  test("first-publishes a package the registry has never seen", async () => {
+    const registry = new LoopbackRegistry([packageNames.advisor]);
+    const registryUrl = await registry.start();
+    const fixture = await createFixture();
+    await linkChangesetsCli(fixture);
+    await writeFile(
+      path.join(fixture, "bun.lock"),
+      '{\n  "lockfileVersion": 1,\n  "workspaces": {}\n}\n',
+    );
+    const evidenceRoot = await createScratch("release-channel-registry-");
+    await mkdir(path.join(evidenceRoot, "home"), { recursive: true });
+    await mkdir(path.join(evidenceRoot, "npm-cache"), { recursive: true });
+    const env = { ...publishEnvironment(), ...runtimeEnvironment(evidenceRoot) };
+
+    try {
+      const plan = await runReleaseGuard({
+        cwd: fixture,
+        mode: "publish",
+        env,
+        registryClient: createPublicRegistryClient(`${registryUrl}/`),
+        runChangesets: runRealChangesets(registryUrl),
+        testOnlyRegistry: registryUrl,
+        testOnlyNoGitTag: true,
+      });
+
+      expect(plan.unpublished.map((item) => [item.name, item.firstPublish])).toEqual([
+        [packageNames.advisor, true],
+      ]);
+      expect(registry.publishes).toEqual([
+        { name: packageNames.advisor, version: "2.0.0", tag: "latest" },
+      ]);
+      expect(registry.packages.get(packageNames.advisor)?.distTags.latest).toBe("2.0.0");
+    } finally {
+      await registry.close();
+    }
+  }, 20_000);
+});
+
+describe("new plugins", () => {
+  const newPlugin = "@capybearista/opencode-new-plugin";
+
+  async function addPolicyEntry(cwd: string, name: string, entry: Record<string, unknown>) {
+    const policyFile = path.join(cwd, "tools", "release-channels.json");
+    const policy = JSON.parse(await readFile(policyFile, "utf8")) as {
+      packages: Record<string, unknown>;
+    };
+    policy.packages[name] = entry;
+    await writeJson(policyFile, policy);
+  }
+
+  test("a package npm has never seen is planned as a first publish", async () => {
+    const cwd = await createFixture();
+    const output: string[] = [];
+
+    const plan = await runReleaseGuard({
+      cwd,
+      mode: "check",
+      registryClient: createRegistryClient({ [packageNames.advisor]: null }),
+      output: (line) => output.push(line),
+    });
+
+    expect(plan.channel).toBe("latest");
+    expect(plan.unpublished.map((item) => [item.name, item.firstPublish])).toEqual([
+      [packageNames.advisor, true],
+    ]);
+    expect(output.join("\n")).toContain(`${packageNames.advisor}@2.0.0 first publish -> latest`);
+  });
+
+  test("a first publish must still use its class major", async () => {
+    const cwd = await createFixture({ [packageNames.advisor]: "1.0.0" });
+
+    await expectGuardRejects(
+      buildReleasePlan({
+        cwd,
+        registryClient: createRegistryClient({ [packageNames.advisor]: null }),
+      }),
+      "may only publish major 2 from the v2 release class",
+    );
+  });
+
+  test("a new plugin needs only its policy entry, not a guard change", async () => {
+    const cwd = await createFixture({}, { extraPackage: { name: newPlugin, version: "2.0.0" } });
+    await addPolicyEntry(cwd, newPlugin, { releaseClass: "v2", channel: "latest" });
+
+    const plan = await buildReleasePlan({
+      cwd,
+      registryClient: createRegistryClient({ [newPlugin]: null }),
+    });
+
+    expect(plan.unpublished.map((item) => item.name)).toEqual([newPlugin]);
+    expect(plan.channel).toBe("latest");
+  });
+
+  test("a workspace package missing from the policy is named in the error", async () => {
+    const cwd = await createFixture({}, { extraPackage: { name: newPlugin, version: "2.0.0" } });
+
+    await expectGuardRejects(
+      buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
+      `not in tools/release-channels.json: ${newPlugin}`,
+    );
+  });
+
+  test("a policy entry without a workspace package is named in the error", async () => {
+    const cwd = await createFixture({}, { omit: packageNames.review });
+
+    await expectGuardRejects(
+      buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
+      `not in the workspace: ${packageNames.review}`,
+    );
+  });
+
+  test("a release class above the current OpenCode major is rejected", async () => {
+    const cwd = await createFixture({ [packageNames.advisor]: "3.0.0" });
+    await addPolicyEntry(cwd, packageNames.advisor, { releaseClass: "v3", channel: "latest" });
+
+    await expectGuardRejects(
+      buildReleasePlan({
+        cwd,
+        registryClient: createRegistryClient({ [packageNames.advisor]: null }),
+      }),
+      "OpenCode 2",
+    );
+  });
+
+  test("malformed policy entries are rejected", async () => {
+    for (const entry of [
+      { releaseClass: "2", channel: "latest" },
+      { releaseClass: "v2", channel: "beta" },
+      { releaseClass: "v2", channel: "latest", extra: true },
+    ]) {
+      const cwd = await createFixture();
+      await addPolicyEntry(cwd, packageNames.advisor, entry);
+      await expectGuardRejects(
+        buildReleasePlan({ cwd, registryClient: createRegistryClient() }),
+        `invalid policy entry for ${packageNames.advisor}`,
+      );
+    }
+  });
+
+  test("the npm client reads a 404 as never published and fails on other statuses", async () => {
+    const statuses: Record<string, number> = { "/missing": 404, "/down": 503, "/auth": 401 };
+    const server = createServer((request, response) => {
+      const status = statuses[request.url ?? ""] ?? 500;
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "status" }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("test server did not bind");
+    const client = createPublicRegistryClient(`http://127.0.0.1:${address.port}/`);
+    try {
+      expect(await client("missing")).toBeNull();
+      await expect(client("down")).rejects.toThrow("HTTP 503");
+      await expect(client("auth")).rejects.toThrow("HTTP 401");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 test("the policy points at the public npm registry", () => {

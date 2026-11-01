@@ -54,7 +54,8 @@ For changes intended for the next package release, add a changeset with `bun run
 Plugin majors track OpenCode majors, not strict semver. A package in release class `vN` (see `tools/release-channels.json`) only ever publishes major N, so:
 
 - Use `patch` for fixes and `minor` for features **and for breaking changes** within the same OpenCode major. Say "Breaking" in the changeset text so it lands in the changelog.
-- Use `major` only to move a package to a new OpenCode major. Change its `releaseClass` in `tools/release-channels.json` and the guard's `APPROVED_POLICY` in the same PR.
+- Use `major` only to move a package to a new OpenCode major. Change its `releaseClass` in `tools/release-channels.json` in the same PR (the guard rejects a class above the current OpenCode major, `CURRENT_OPENCODE_MAJOR` in `tools/release-channel-guard.ts`).
+- A new package needs one entry in `tools/release-channels.json`; the guard rejects a workspace package without one. Its first release is a first publish (npm has never seen it), which CI's `Release plan` step shows before merge.
 
 `bun run release:changesets` checks pending changesets and package manifests against this rule without touching the registry. The Changesets workflow runs it on pull requests.
 
