@@ -145,6 +145,7 @@ rg -n "api\.slots\.register|sidebar_content|app_bottom" packages/
 - Keep the remote feature branch after merging (disable automatic branch deletion on GitHub); delete only the local branch unless the user explicitly asks to remove the remote one.
 - Safety-net-blocked git forms have recoverable equivalents: `git stash -u` before `worktree remove` (never `--force`), `git update-ref` for pointer-only moves on verified-identical trees, `git merge --ff-only` where ancestry allows, `git branch -d` (never `-D` in chained commands)
 - Merge commits also need conventional messages — the commitlint hook rejects empty subject/type on merges too
+- A package's first npm release can't go through CI: trusted publishing needs an existing package, so the Release job fails with `ENEEDAUTH`. A publish without a valid npm login fails with 404, not 401. Follow CONTRIBUTING.md "First release of a new package"
 - `git log --all -- <path>` also lists merges that deleted the path; prove artifact absence with `git rev-list --objects --all --reflog` plus `git cat-file -e <blob>`, not log output
 - Release-channel policy edits never move npm dist-tags (guard returns `noop` for published versions); promotion is an authenticated `npm dist-tag` op — E401 in unattended sessions means handing exact commands to an operator
 - The "Version Packages" PR is opened by `github-actions[bot]`, so its CI runs sit at "action_required" until a maintainer clicks "Approve and run workflows" on the PR.
@@ -199,9 +200,8 @@ This repository uses **Bun Workspaces** for dependency management and **Turborep
 - **Versioning:** This monorepo uses **Changesets** to manage independent versioning and publishing for each plugin.
 
 ### Agent Workflow
-1. **Scaffolding:** Use the `init-plugin` skill to create a new plugin directory in `packages/`.
-2. **Development:** Use the `create-plugin` skill. Work inside the specific package directory.
+1. **Scaffolding:** Model a new package on an existing one of the same kind (V2 server, TUI, or server + TUI), start its README from [`README-template.md`](README-template.md), read [`docs/opencode-v2-plugin-runtime.md`](docs/opencode-v2-plugin-runtime.md), and add its entry to [`tools/release-channels.json`](tools/release-channels.json) (the guard rejects a workspace package without one).
+2. **Development:** Work inside the package directory and follow its `AGENTS.md`. To try it in a real OpenCode, see [CONTRIBUTING.md › Testing in OpenCode](CONTRIBUTING.md#testing-in-opencode).
 3. **Execution:** Run commands from the **root** using Turbo for speed, or within a package directory for specific tasks.
    - Root: `bun run build`, `bun run test`, `bun run lint`
-4. **Releasing:** Use the `release-plugin` skill.
-   - Run `bun changeset` at the root to record change intents.
+4. **Releasing:** Run `bun changeset` at the root to record change intents, then follow [CONTRIBUTING.md › Changesets and releases](CONTRIBUTING.md#changesets-and-releases); a new package's first release is manual ([First release of a new package](CONTRIBUTING.md#first-release-of-a-new-package)).

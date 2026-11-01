@@ -1669,6 +1669,10 @@ describe("new plugins", () => {
       [packageNames.advisor, true],
     ]);
     expect(output.join("\n")).toContain(`${packageNames.advisor}@2.0.0 first publish -> latest`);
+    // CI cannot do a first publish (trusted publishing needs an existing package): say what to do.
+    expect(output.join("\n")).toContain(
+      'needs a one-time manual publish; see CONTRIBUTING.md "First release of a new package"',
+    );
   });
 
   test("a first publish must still use its class major", async () => {

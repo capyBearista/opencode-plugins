@@ -55,28 +55,38 @@ Plugin majors track OpenCode majors, not strict semver. A package in release cla
 
 - Use `patch` for fixes and `minor` for features **and for breaking changes** within the same OpenCode major. Say "Breaking" in the changeset text so it lands in the changelog.
 - Use `major` only to move a package to a new OpenCode major. Change its `releaseClass` in `tools/release-channels.json` in the same PR (the guard rejects a class above the current OpenCode major, `CURRENT_OPENCODE_MAJOR` in `tools/release-channel-guard.ts`).
-- A new package needs one entry in `tools/release-channels.json`; the guard rejects a workspace package without one. Its first release is a first publish (npm has never seen it), which CI's `Release plan` step shows before merge.
+- A new package needs one entry in `tools/release-channels.json`; the guard rejects a workspace package without one. Its first release is a first publish (npm has never seen it), which CI's `Release plan` step shows before merge; CI can't publish it, so see [First release of a new package](#first-release-of-a-new-package).
 
 `bun run release:changesets` checks pending changesets and package manifests against this rule without touching the registry. The Changesets workflow runs it on pull requests.
 
 ### Release channels
 
-- The five V2 ports are published as `2.x` on `latest`.
+- The V2 packages (five ports, plus auto-advisor, which is V2-only) are published as `2.x` on `latest`.
 - The one V1-only package (`opencode-agent-prompt-inheritance`) continues to publish under `latest`. The output-styles V1 line is frozen at `1.0.2`. The loader and timeline V1 releases stay available at `1.0.0` and `1.0.1` by exact pin.
 - Keep V1 and V2 version/release batches separate. The guard checks **all unpublished public workspace versions**, not just the packages named in a changeset or Git diff. A mixed batch is rejected before publishing.
 
-Publishing is CI-only. The release workflow uses the `npm-publish` environment and npm trusted publishing, and runs `bun run changeset:publish` through the pinned Changesets Action. Version application and publication require maintainer authorization; do not run a real-registry publish locally.
+Publishing is CI-only, except a package's first release (see [First release of a new package](#first-release-of-a-new-package)). The release workflow uses the `npm-publish` environment and npm trusted publishing, and runs `bun run changeset:publish` through the pinned Changesets Action. Version application and publication require maintainer authorization; do not run a real-registry publish locally.
 
 The release flow on `main`:
 
 1. Merge a PR that carries a changeset. The Release workflow opens (or updates) a **Version Packages** PR with the version bumps and changelog entries.
 2. That PR is opened by `github-actions[bot]`, so its checks wait at "action_required". Click **Approve and run workflows** on the PR, then merge it once they pass.
 3. The Release workflow publishes the unpublished versions with provenance, then pushes `name@version` tags and creates a GitHub release per package.
-4. Verify on the registry with a direct curl (for example `curl -s https://registry.npmjs.org/@capybearista%2F<name>`); `npm view` can lag.
+4. Verify on the registry with a direct curl (for example `curl -s https://registry.npmjs.org/@capybearista%2F<name>`); `npm view` can lag. Use the registry API, not the npmjs.com website, which is behind a bot check.
 
 The toolchain is Changesets CLI 3.x with `changesets/action` v2. They are upgraded together: action v2 rejects CLI v2. The guard pins the CLI version as well (see [AGENTS.md](./AGENTS.md)).
 
 Run `bun run release:check` to inspect the complete unpublished set and selected channel. It queries public registry metadata but does not publish or create Git tags. It rejects unsupported package/version combinations (including a version outside its class major), ambiguous batches, and failed or malformed registry responses.
+
+### First release of a new package
+
+npm trusted publishing can only be configured for a package that already exists, so CI cannot publish a package's first version: the Release job fails with `ENEEDAUTH`. `bun run release:check` (and CI's `Release plan` step) lists the package as `first publish -> latest` with a pointer here. A maintainer bootstraps it once:
+
+1. From a clean checkout of `main`, run `bun install --frozen-lockfile`, then in the package directory `bun run build`, `npm pack --dry-run` (check the file list) and `npm publish --access public`. `npm whoami` must print `capybearista`; log in with `npm login` first if it doesn't. A publish without a valid login fails with **404 Not Found**, not 401.
+2. On npmjs.com, add the package's trusted publisher: GitHub Actions, `capyBearista/opencode-plugins`, workflow `release.yml`, environment `npm-publish`. Tick **Allow npm publish** (the Release job runs `npm publish`); leave **Allow npm dist-tag** off. These fields cannot be edited later. A new connection expires unless it completes a publish within 2 days, so set it up shortly before the next release.
+3. Create the `@capybearista/<name>@<version>` tag on the commit you published from, and its GitHub release, which the Release job would otherwise have created.
+
+npm may add a `0.0.0-stage` version ("temporary package placeholder for staged publishing"). `latest` is unaffected; leave it. The manually published version has no provenance attestation; later CI releases do.
 
 ### Publication failures
 
@@ -128,7 +138,7 @@ Install and update instructions belong to the root README and the package README
 
 Husky installs a single **commit-msg** hook that enforces conventional commits via `commitlint`.
 
-**CI** runs typecheck, lint, and test on pushes and pull requests. Markdown, docs, asset, and changeset-only changes skip CI through path filters. The **Changesets** workflow runs `bun run release:changesets` on pull requests that touch changesets, package manifests, or the release policy, so changeset-only PRs are still checked. Releases run separately in the `release` workflow, only from `main`.
+**CI** runs typecheck, lint, test and the release plan (`bun run release:check`, read-only; it needs npm reachable) on pushes and pull requests. Markdown, docs, asset, and changeset-only changes skip CI through path filters. The **Changesets** workflow runs `bun run release:changesets` on pull requests that touch changesets, package manifests, or the release policy, so changeset-only PRs are still checked. Releases run separately in the `release` workflow, only from `main`.
 
 ## Monorepo Structure
 
