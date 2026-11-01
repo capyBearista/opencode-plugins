@@ -27,7 +27,7 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc --emitDeclarationOnly && bun build src/server.ts src/tui.ts --outdir=dist --target=bun --external '@opencode/*' --external '@opentui/*' --external 'solid-js'",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p scripts",
     "lint": "bunx @biomejs/biome check .",
     "check": "bunx @biomejs/biome check --write .",
     "ci": "bunx @biomejs/biome ci .",
