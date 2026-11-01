@@ -11,10 +11,11 @@
 | ------------------- | ----------------------------------------- |
 | `bun run check`     | Lint and format (Biome)                   |
 | `bun run lint`      | Validate without modifying                |
-| `bun run typecheck` | Type check                                |
+| `bun run typecheck` | Type check (`src`, then `scripts`)        |
 | `bun test`          | Run tests                                 |
 | `bun run build`     | Declarations (tsc) + bundles (bun build)  |
 | `bun run smoke`     | Build, then check both built entries load |
+| `bun run sandbox`   | Isolated OpenCode + mock, for live checks |
 
 ## Architecture
 
@@ -22,7 +23,7 @@
 - `src/fallback.ts`: the model-chain walker shared by the Decision router and the Advisor chain (error policy, skip map, shared deadline). `src/decisions.ts`: the two Decision questions and the router over `routing.models`. `src/policy.ts`: the pure consult verdict.
 - `src/transcript.ts`: the Decision projection (the last `routing.requests` real prompts, each capped at `routing.requestMaxChars`, 20k by default (per request, not a total), the turn's recent steps without system updates, with subagent results and other user-role notices labelled `SUBAGENT`/`NOTICE`, and failure counts; no system prompt and no total cap) and the Advisor transcript (system text, tool names, messages with the same `SUBAGENT`/`NOTICE` labels; compacted, then budgeted, keeping the first real request to `min(advisor.maxTokens, 75% of the window)` at 3 chars per token).
 - `src/advisor.ts`: prompts and the timeout-raced consult. `src/delivery.ts`: review text, marker, tail push.
-- `src/config.ts`: strict sparse `auto-advisor.json`, re-read when its mtime changes. `src/telemetry.ts`: JSONL with one rotation; each line carries the newest message id and the Decision input's last 32k chars. `scripts/timeline.ts` (`bun run timeline <sessionID>`, not shipped) joins those lines with the session's messages from `opencode api get /api/session/<id>/message` into an HTML page.
+- `src/config.ts`: strict sparse `auto-advisor.json`, re-read when its mtime changes. `src/telemetry.ts`: JSONL with one rotation; each line carries the newest message id and the Decision input's last 32k chars. `scripts/timeline.ts` (`bun run timeline <sessionID>`, not shipped) joins those lines with the session's messages from `opencode api get /api/session/<id>/message` into an HTML page. `scripts/sandbox.ts` (`bun run sandbox start|stop`, not shipped) runs the isolated OpenCode used for live checks.
 - `src/tui.ts`: the footer status, a `sidebar.footer` widget (hidden by `tui.sidebar`), and a `session.panel` named `auto-advisor` with the full review, opened by a click or `/advisor-review`. State comes from RPC events, plus one `status` call per mounted widget or panel, so a stored review shows after a restart.
 - `src/rpc.ts` is the contract both halves import.
 
@@ -44,6 +45,7 @@
 - **A field-less `Generate.InvalidRequestError` is a provider rejection without an HTTP status** (mid-stream, an unsupported operation, or a request the protocol could not encode; `core/src/generate.ts` `providerError`); with a `field` it is a config error. Only the latter stops a chain.
 - **A slot's render body runs once, untracked** (`tui/src/plugin/render.tsx` at v2.2.0); its input stays reactive through getters. Read `input.sessionID` and `input.name` inside reactive functions, and choose the panel's content from `input.name` reactively. Opening a panel hides the sidebar, footer widget included.
 - **Never `insert` children into `markdown`**, not even `[]`: it removes the blocks rendered from `content`, and the panel stays blank in the real TUI until `content` changes (ram-monitor's `/ram` modal hides it: its content changes once, when the async load finishes after the insert). `testRender` parses later, so the unit tests pass anyway; only a live check catches it.
+- **Read `opencode api` output from a file, never a pipe.** The CLI calls `process.exit` right after writing (`packages/cli/src/index.ts`, 2.2.5), so a piped response of a few MB arrives cut short at a random length; 350 KB still arrives whole, so small test sessions hide it. `fetchMessages` in `scripts/timeline.ts` writes each page to a file.
 - **`bun run build` starts with `rm -rf dist`.** A running OpenCode watches the local plugin, reloads mid-build, and drops the plugin (server and TUI) if `dist/` is missing or the build fails. Restart OpenCode after rebuilding.
 - **The TUI can't reach the host's markdown syntax style** or the `PanelInput` type. `markdownStyle` mirrors the markdown subset of `theme/src/tui/syntax.ts` from the public `context.theme.markdown` tokens, as ram-monitor does.
 - **One `opencode.json` entry loads both halves**; `cli.json` needs none. The TUI gets `context.options = {}`, so configuration stays server-side.
@@ -51,7 +53,7 @@
 
 ## Testing Guidelines
 
-- Location: colocated (`src/*.test.ts`). `bunfig.toml` preloads `@opentui/solid/preload` for the TUI tests.
+- Location: colocated (`src/*.test.ts`, `scripts/*.test.ts`). Test files are not typechecked (no package's are); `scripts/tsconfig.json` checks the other scripts. `bunfig.toml` preloads `@opentui/solid/preload` for the TUI tests.
 - Tests set `OPENCODE_CONFIG_DIR` and `XDG_DATA_HOME` to temp dirs; never read the real `HOME`.
 - `src/server.test.ts` drives a fake host context. Request shapes match what a real 2.2.x `context` hook delivers.
-- Hook, delivery or protocol changes need a live check against real 2.2.5 (the minimum). The sandbox recipe and verified behavior are in [the findings doc](../../docs/auto-advisor/findings.md).
+- Hook, delivery or protocol changes need a live check against real 2.2.5 (the minimum): `bun run build && bun run sandbox start`. The recipe and verified behavior are in [the findings doc](../../docs/auto-advisor/findings.md).

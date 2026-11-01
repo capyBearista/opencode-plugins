@@ -122,7 +122,7 @@ Global, optional, strict JSON at `~/.config/opencode/auto-advisor.json` (or `$OP
 
 This package lives in the `opencode-plugins` monorepo. See the [contribution guidelines](../../CONTRIBUTING.md) for setup, the full check suite, and releases, and open or find an issue before a pull request.
 
-From this directory, `bun test` runs the package tests and `bun run smoke` checks the built package. To try a change in your own OpenCode, see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
+From this directory, `bun test` runs the package tests, `bun run smoke` checks the built package, and `bun run sandbox start` runs an isolated OpenCode with this package and a mock model, for live checks. To try a change in your own OpenCode, see [Testing in OpenCode](../../CONTRIBUTING.md#testing-in-opencode).
 
 ## License
 

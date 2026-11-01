@@ -1,6 +1,6 @@
 # Auto Advisor: verified OpenCode 2.2.x behavior
 
-Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local mock executor (OpenAI chat and Anthropic messages endpoints that log request bodies) and real OpenCode Zen. The design in `packages/opencode-auto-advisor` rests on these facts; re-check them before changing hooks, delivery or the router.
+Each section names the date and the OpenCode version it was checked on. S1–S5 were verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local mock executor (OpenAI chat and Anthropic messages endpoints that log request bodies) and real OpenCode Zen. The design in `packages/opencode-auto-advisor` rests on these facts; re-check them before changing hooks, delivery or the router.
 
 ## S1 — `ctx.experimental.generate.decisions` with `opencode/jev-1.13-free`
 - Anonymous works, no Zen login. `cost: 0`, `native.opencode.usage.opencode.billing_source: "free"`.
@@ -44,20 +44,19 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
 - Not covered live: compaction and child sessions. `src/server.test.ts` covers child sessions and a turn surviving a compaction that drops its prompt (a request shape built by hand, not captured from the host).
 
 ## Live check of the decision fixes and the TUI (2026-10-30, OpenCode 2.2.0)
-- A failing shell command reached the model as `24 passed, 1 failed\n\nExited with code 1` (tool completed, no error), the string `SHELL_FAILURE` matches. Real Jev read that step as `stuck` 0.65, `done` 0.
+- A failing shell command reached the model as `24 passed, 1 failed\n\nExited with code 1` (tool completed, no error), and the plugin's shell-notice pattern (now `SHELL_NOTICE`) matches it. Real Jev read that step as `stuck` 0.65, `done` 0.
 - With the per-turn budget spent, the next step logged `verdict: "blocked"`, `blocked: "budget"`, without a consult.
 - After a server restart, a synthetic message (`POST /api/session/:id/synthetic`) started a run: the turn stayed the real prompt's id, read from `ctx.session.context` (`type: "user"`), not the synthetic message's.
 - TUI (`opencode --server … -s <session>` in a 180-column tmux): the `sidebar.footer` widget showed `Advisor ✓ done 02:50`; a click (SGR mouse sequence) and `/advisor-review` opened the panel; the advice rendered as markdown and scrolled to its last line with the wheel; `f` toggled full screen, Esc closed it; `tui.sidebar: false` hid the widget while `/advisor-review` still worked.
 
 ## Re-verify recipe
-1. `npm i @opencode/cli@2.2.5` (the minimum) in a scratch dir. Set `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` to a scratch home.
-2. In the scratch `opencode.json`: `"plugins": ["<repo>/packages/opencode-auto-advisor"]`, a `mock` provider on `@opencode/ai/providers/openai-compatible` (or `/anthropic`) with `baseURL` at a local mock, and `"model": "mock/<id>"`.
-3. The mock logs every request body. For requests with `tools`, it answers with a tool call for the first two steps, then text; for requests without tools (title, Advisor), it answers with text.
-4. Start `opencode serve --port <p>`, read the password from its output, then `OPENCODE_PASSWORD=… opencode run --server http://127.0.0.1:<p> "<prompt>" < /dev/null`. Without `< /dev/null`, `run` can hang on an open stdin.
-5. Decision calls can be sent directly: `POST /api/experimental/generate/decisions?directory=<project>` with basic auth `opencode:<password>`; the response wraps the result in `data`.
-6. Kill servers by pid, not `pkill -f`, which can match the shell running the command.
-7. After an OpenCode upgrade, check that `compactContext`'s strings in `src/transcript.ts` still match `core/src/codemode/instructions.ts`, `mcp/instructions.ts` and `skill/instructions.ts`: run one explicit `advisor()` consult and confirm the Advisor's prompt has the three `[context-omitted: …]` markers. A mismatch only stops the compaction.
-8. Also check `SHELL_NOTICE` in `src/transcript.ts` against `core/src/shell/result.ts` (`Exited with code N`, `Killed by …`, `Timed out before completion`), that `tool/plugin/shell.ts` still emits the notice as its own text part, that `plugin/tool-input-repair.ts` still aliases only `bash` to `shell`, and that `to-llm-message.ts` still lowers synthetic and shell messages to `role: "user"` while `ctx.session.context` keeps their `type`. A mismatch hides failed commands from the Decision model.
+1. `bun run build`, then `bun run sandbox start` in `packages/opencode-auto-advisor` (`OPENCODE_VERSION` picks another version than 2.2.5, the minimum). It installs that OpenCode into a scratch HOME, loads this package from source with a `mock` provider (its request bodies go to `requests.jsonl`; it answers the agent with a `read` for two steps, then text, and anything without tools with text), starts `opencode serve`, and prints the URL, password and commands. `bun run sandbox stop <dir>` ends it. Add test models to the mock (`scripts/sandbox/mock.ts`) and the config it writes as a check needs them.
+2. Drive it with `opencode run --server <url> "<prompt>" < /dev/null`, with `OPENCODE_PASSWORD` set (`source <dir>/env.sh`). Without `< /dev/null`, `run` can hang on an open stdin.
+3. A large prompt (over 128 KB, the per-argument limit) goes straight to the API: `curl -u opencode:<password> -H 'content-type: application/json' --data-binary @body.json <url>/api/session/<id>/prompt`, with `{"text": "…"}` in `body.json`. Read `opencode api` output from a file, never a pipe (see "Timeline on a large session").
+4. Decision calls can be sent directly: `POST /api/experimental/generate/decisions?directory=<project>` with the same basic auth; the response wraps the result in `data`.
+5. Kill processes by pid or process group, not `pkill -f`, which can match the shell running the command. The sandbox script does this.
+6. After an OpenCode upgrade, check that `compactContext`'s strings in `src/transcript.ts` still match `core/src/codemode/instructions.ts`, `mcp/instructions.ts` and `skill/instructions.ts`: run one explicit `advisor()` consult and confirm the Advisor's prompt has the three `[context-omitted: …]` markers. A mismatch only stops the compaction.
+7. Also check `SHELL_NOTICE` in `src/transcript.ts` against `core/src/shell/result.ts` (`Exited with code N`, `Killed by …`, `Timed out before completion`), that `tool/plugin/shell.ts` still emits the notice as its own text part, that `plugin/tool-input-repair.ts` still aliases only `bash` to `shell`, and that `to-llm-message.ts` still lowers synthetic and shell messages to `role: "user"` while `ctx.session.context` keeps their `type`. A mismatch hides failed commands from the Decision model.
 
 ## Live check of round 3 (2026-10-31, OpenCode 2.2.0)
 - Advisor chain `["dead/x" (port 9), "mock/overflow", "mock/silent", "mock/keepalive"]`, provider `headerTimeout`/`chunkTimeout` 1500 ms, `advisor.timeoutMs` -1:
@@ -66,9 +65,9 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
   - `mock/silent` (headers, then nothing): ended by the chunk timeout after 1.5 s; moved on.
   - `mock/keepalive` (SSE comments for 4 s, then text): answered after 4.2 s, so keep-alives keep a slow model alive past `chunkTimeout`. The panel and telemetry named `mock/keepalive`.
 - A long plan prompt (8,266 chars), then `opencode run --session … "Leave .slim/deepwork/ unignored."`: the second turn's Decision input held the whole plan and the correction (8,372 chars of requests); the turn was the correction's id.
-- Real `opencode/jev-1.13-free` with a 300,180-char input: `ProviderRequestError (invalid_request)` in 296 ms, and the router moved to the next model. A decision model declared in config (`"type": "decision"` under `providers.openrouter.models`) resolved as `Generate.UnsupportedModelError`, so a mock decision model could not be tested.
+- Real `opencode/jev-1.13-free` with a 300,180-char input: `ProviderRequestError (invalid_request)` in 296 ms, and the router moved to the next model. A decision model declared in config (`"type": "decision"` under `providers.openrouter.models`) resolved as `Generate.UnsupportedModelError`, so a mock decision model could not be tested. That is not true of every OpenRouter model: in a real 2.2.5 setup (2026-11-01), `openrouter/typesafe/jev-1.14` answered every step as the first decision model, in 150–315 ms. Why the sandbox's declared model was refused is not established.
 - TUI: the sidebar widget is one line (`Advisor ✓ approach 11:03`); a click opened the panel.
-- `bun run timeline <session>` read the telemetry and `opencode api get …/message` and wrote the page; each step listed the messages since the previous one.
+- `bun run timeline <session>` read the telemetry and `opencode api get …/message` and wrote the page; each step listed the messages since the previous one. These sessions were small; for large ones see below.
 
 ## Recheck on OpenCode 2.2.5 (2026-10-31)
 - Diffed v2.2.0..v2.2.5 for every host file the plugin relies on.
@@ -89,6 +88,12 @@ Verified 2026-10-28 on `@opencode/cli@2.2.0` with an isolated HOME/XDG, a local 
   - A shell command that exited 3 reached the hook as a two-part content result (`(no output)`, `Exited with code 3`) and counted as failed.
   - A `read` of a file containing `Exited with code 1` counted as ok (`Latest tool result: ok`). The 2.2.5 `read` argument is `path`.
   - TUI (OpenTUI 0.8): the one-line widget showed `Advisor ✓ stuck 15:28`, a click opened the panel, and the markdown advice rendered.
+
+## Timeline on a large session (2026-11-01, OpenCode 2.2.5)
+- In a real session, `bun run timeline` failed with `JSON Parse error: Unterminated string`. The CLI writes the response and then calls `process.exit` (`packages/cli/src/index.ts`), so when stdout is a pipe, output still being written is lost.
+- Real CLI, a 3.2 MB message page, read 10 times through `Bun.spawnSync`: through a pipe it arrived at 877 KB, 1.1 MB, 2.0 MB or whole; written to a file it arrived whole every time. A 350 KB response arrived whole either way.
+- The timeline now sends each page to a file in a private temporary directory. Against a live server it then worked 5/5, where the old script failed 3/3. `scripts/timeline.test.ts` reproduces the cut with a fake CLI that writes 3 MB pages and exits at once (20/20 failures before the fix, 0/20 after).
+- Anything else that reads `opencode api` output must use a file, not a pipe.
 
 ## Known limitations
 - `routing.requestMaxChars` caps each request, not the Decision input as a whole. The input is up to `routing.requests` × the cap plus about 12k characters of recent steps. The default is 20k (about 72k characters in total, roughly 18k–24k tokens) because Zen's free `jev-1.13` declares a 64k-token window (`models-dev` snapshot, 2.2.5). At 60k it could reach about 193k characters, and live it rejected 250k. A raised cap, more requests or a smaller first model can still overflow: the step then falls through to the next model, or gets `no-decision`, and automatic reviews pause until the large requests leave the window. Follow-up: size the requests block from each decision model's window.
