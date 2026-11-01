@@ -25,6 +25,9 @@ const execFileAsync = promisify(execFile);
  */
 const CURRENT_OPENCODE_MAJOR = 2;
 const RELEASE_CHANNELS: readonly string[] = ["latest", "opencode2"];
+/** Trusted publishing needs an existing package, so CI can't publish a package's first version. */
+const FIRST_PUBLISH_HINT =
+  'needs a one-time manual publish; see CONTRIBUTING.md "First release of a new package"';
 
 type ReleaseClass = `v${number}`;
 type ReleaseChannel = "noop" | "latest" | "opencode2";
@@ -316,7 +319,9 @@ function printPlan(plan: ReleasePlan, output: (line: string) => void) {
       `${item.name}@${item.version} ${
         item.published
           ? "published"
-          : `${item.firstPublish ? "first publish" : "unpublished"} -> ${plan.channel}`
+          : item.firstPublish
+            ? `first publish -> ${plan.channel} (${FIRST_PUBLISH_HINT})`
+            : `unpublished -> ${plan.channel}`
       }`,
     );
   }
