@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { renderTimeline, timelineRows } from "./timeline.js";
+import { fetchMessages, renderTimeline, timelineRows } from "./timeline.js";
 
 const at = (n: number) => ({ created: 1_793_000_000_000 + n * 1_000 });
 const messages = [
@@ -92,5 +92,18 @@ describe("renderTimeline", () => {
     expect(html).toContain("(not logged)");
     expect(html).toContain("&lt;/pre&gt;&lt;script&gt;");
     expect(html).not.toContain("<script>");
+  });
+});
+
+describe("fetchMessages", () => {
+  // OpenCode's CLI exits right after writing, so a large page read through a pipe arrives cut
+  // short. Each page here is about 3 MB.
+  test("reads every page whole, even when the CLI exits right after writing", () => {
+    const fake = [process.execPath, `${import.meta.dir}/fixtures/fake-opencode.ts`];
+    for (let run = 0; run < 5; run++) {
+      const messages = fetchMessages("s", fake);
+      expect(messages.map((m) => m.id)).toEqual(["m1", "m2", "m3", "m4", "m5", "m6"]);
+      expect(messages.every((m) => m.text?.length === 1_000_003)).toBe(true);
+    }
   });
 });

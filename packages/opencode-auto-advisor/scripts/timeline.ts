@@ -5,7 +5,10 @@
  *
  *   bun run timeline <sessionID> [--out file.html]
  */
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveTelemetryPath, type TelemetryRecord } from "../src/telemetry.js";
 
 /** Lines written before `message`/`input` existed lack them. */
@@ -147,23 +150,40 @@ async function readTelemetry(path: string): Promise<Line[]> {
   );
 }
 
-/** Pages through `GET /api/session/:id/message` with the CLI, which finds the running service. */
-function fetchMessages(sessionID: string): StoredMessage[] {
+/**
+ * Pages through `GET /api/session/:id/message` with the CLI, which finds the running service.
+ * The CLI exits right after writing its output (OpenCode 2.2.5, `packages/cli/src/index.ts`),
+ * which cuts a large page short when stdout is a pipe, so each page goes to a file instead: a
+ * file write is complete when it returns. The file sits in a private (0700) temporary directory,
+ * since it holds the session's messages.
+ */
+export function fetchMessages(
+  sessionID: string,
+  opencode: readonly string[] = ["opencode"],
+): StoredMessage[] {
   const base = `/api/session/${encodeURIComponent(sessionID)}/message?limit=200`;
   const all: StoredMessage[] = [];
+  const dir = mkdtempSync(join(tmpdir(), "auto-advisor-timeline-"));
+  const file = join(dir, "page.json");
   let path = `${base}&order=asc`;
-  for (;;) {
-    const result = Bun.spawnSync(["opencode", "api", "get", path]);
-    if (result.exitCode !== 0) {
-      throw new Error(`opencode api get ${path} failed: ${result.stderr.toString().trim()}`);
+  try {
+    for (;;) {
+      const fd = openSync(file, "w");
+      const result = Bun.spawnSync([...opencode, "api", "get", path], { stdout: fd });
+      closeSync(fd);
+      if (result.exitCode !== 0) {
+        throw new Error(`opencode api get ${path} failed: ${result.stderr.toString().trim()}`);
+      }
+      const page = JSON.parse(readFileSync(file, "utf8")) as {
+        data: StoredMessage[];
+        cursor?: { next?: string };
+      };
+      all.push(...page.data);
+      if (page.data.length === 0 || !page.cursor?.next) return all;
+      path = `${base}&cursor=${encodeURIComponent(page.cursor.next)}`;
     }
-    const page = JSON.parse(result.stdout.toString()) as {
-      data: StoredMessage[];
-      cursor?: { next?: string };
-    };
-    all.push(...page.data);
-    if (page.data.length === 0 || !page.cursor?.next) return all;
-    path = `${base}&cursor=${encodeURIComponent(page.cursor.next)}`;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 
