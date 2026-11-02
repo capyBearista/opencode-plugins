@@ -56,19 +56,19 @@ describe("parseConfig", () => {
     expect(parseConfig({ advisor: { compactContext: false } }).advisor.compactContext).toBe(false);
   });
 
-  test("advisor.model accepts provider/model and inherit", () => {
-    expect(parseConfig({ advisor: { model: "openai/gpt-6" } }).advisor.models).toEqual([
+  test("advisor.models accepts provider/model and inherit", () => {
+    expect(parseConfig({ advisor: { models: "openai/gpt-6" } }).advisor.models).toEqual([
       { providerID: "openai", id: "gpt-6" },
     ]);
-    expect(parseConfig({ advisor: { model: "inherit" } }).advisor.models).toEqual(["inherit"]);
-    expect(parseConfig({ advisor: { model: "openai/gpt-6#high" } }).advisor.models).toEqual([
+    expect(parseConfig({ advisor: { models: "inherit" } }).advisor.models).toEqual(["inherit"]);
+    expect(parseConfig({ advisor: { models: "openai/gpt-6#high" } }).advisor.models).toEqual([
       { providerID: "openai", id: "gpt-6", variant: "high" },
     ]);
   });
 
-  test("advisor.model accepts an ordered fallback list, inherit included", () => {
+  test("advisor.models accepts an ordered fallback list, inherit included", () => {
     const config = parseConfig({
-      advisor: { model: ["opencode-go/deepseek#max", "openrouter/meta/muse#xhigh", "inherit"] },
+      advisor: { models: ["opencode-go/deepseek#max", "openrouter/meta/muse#xhigh", "inherit"] },
     });
     expect(config.advisor.models).toEqual([
       { providerID: "opencode-go", id: "deepseek", variant: "max" },
@@ -80,6 +80,12 @@ describe("parseConfig", () => {
   test("advisor.timeoutMs is -1 for no limit or a positive total deadline", () => {
     expect(parseConfig({ advisor: { timeoutMs: -1 } }).advisor.timeoutMs).toBe(-1);
     expect(parseConfig({ advisor: { timeoutMs: 600_000 } }).advisor.timeoutMs).toBe(600_000);
+  });
+
+  test("routing.models accepts a single provider/model string", () => {
+    expect(parseConfig({ routing: { models: "opencode/jev-1.13-free" } }).routing.models).toEqual([
+      { providerID: "opencode", id: "jev-1.13-free" },
+    ]);
   });
 
   test("routing.models keeps order and splits on the first slash", () => {
@@ -100,6 +106,8 @@ describe("parseConfig", () => {
     [{ routing: { models: Array.from({ length: 9 }, (_, i) => `p/m${i}`) } }, "routing.models"],
     [{ routing: { models: ["noslash"] } }, "routing.models"],
     [{ routing: { models: ["inherit"] } }, "routing.models"],
+    [{ routing: { models: "inherit" } }, "routing.models"],
+    [{ routing: { models: "noslash" } }, "routing.models"],
     [{ routing: { momentThreshold: 1.2 } }, "routing.momentThreshold"],
     [{ routing: { consequenceThreshold: -1 } }, "routing.consequenceThreshold"],
     [{ routing: { consequenceThreshold: 5 } }, "routing.consequenceThreshold"],
@@ -115,17 +123,18 @@ describe("parseConfig", () => {
     [{ routing: { requestMaxChars: -2 } }, "routing.requestMaxChars"],
     [{ routing: { requestMaxChars: 150.5 } }, "routing.requestMaxChars"],
     [{ advisor: { timeoutMs: 0 } }, "advisor.timeoutMs"],
-    [{ advisor: { model: "x" } }, "advisor.model"],
-    [{ advisor: { model: [] } }, "advisor.model"],
-    [{ advisor: { model: ["a/b", "a/b"] } }, "advisor.model"],
-    [{ advisor: { model: ["inherit", "inherit"] } }, "advisor.model"],
-    [{ advisor: { model: ["a/b", "x"] } }, "advisor.model"],
-    [{ advisor: { model: Array.from({ length: 9 }, (_, i) => `p/m${i}`) } }, "advisor.model"],
+    [{ advisor: { models: "x" } }, "advisor.models"],
+    [{ advisor: { models: [] } }, "advisor.models"],
+    [{ advisor: { models: ["a/b", "a/b"] } }, "advisor.models"],
+    [{ advisor: { models: ["inherit", "inherit"] } }, "advisor.models"],
+    [{ advisor: { models: ["a/b", "x"] } }, "advisor.models"],
+    [{ advisor: { models: Array.from({ length: 9 }, (_, i) => `p/m${i}`) } }, "advisor.models"],
     [{ advisor: { timeoutMs: -2 } }, "advisor.timeoutMs"],
     [{ advisor: { compactContext: "yes" } }, "advisor.compactContext"],
     [{ advisor: { maxTokens: 64 } }, "advisor.maxTokens must be"],
     [{ advisor: { maxTokens: 1_500.5 } }, "advisor.maxTokens must be"],
     [{ advisor: { other: 1 } }, "unknown key: advisor.other"],
+    [{ advisor: { model: "openai/gpt-6" } }, "unknown key: advisor.model"],
     [{ tui: { sidebar: "yes" } }, "tui.sidebar"],
     [{ tui: { footer: true } }, "unknown key: tui.footer"],
     [[], "must be a JSON object"],

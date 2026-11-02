@@ -146,7 +146,7 @@ try {
   );
   writeFileSync(
     join(config, "auto-advisor.json"),
-    JSON.stringify({ advisor: { model: "mock/exec" } }, null, 1),
+    JSON.stringify({ advisor: { models: "mock/exec" } }, null, 1),
   );
   writeFileSync(join(project, "notes.txt"), "Sandbox notes.\n");
 

@@ -107,8 +107,9 @@ function number(value: unknown, name: string, min: number, max: number, integer 
   return value as number;
 }
 
-/** 1..MAX_MODELS distinct entries, each a model ref or, where allowed, "inherit". */
-function modelList(list: unknown, inherit: boolean): (ModelRef | "inherit")[] | undefined {
+/** One entry or 1..MAX_MODELS distinct entries, each a model ref or, where allowed, "inherit". */
+function modelList(value: unknown, inherit: boolean): (ModelRef | "inherit")[] | undefined {
+  const list = typeof value === "string" ? [value] : value;
   if (!Array.isArray(list) || list.length === 0 || list.length > MAX_MODELS) return undefined;
   if (new Set(list).size !== list.length) return undefined;
   const refs = list.map((item) =>
@@ -143,7 +144,7 @@ export function parseConfig(input: unknown): Config {
       throw new ConfigError(`unknown key: ${key}`);
     }
   }
-  const advisor = section(input, "advisor", ["model", "timeoutMs", "compactContext", "maxTokens"]);
+  const advisor = section(input, "advisor", ["models", "timeoutMs", "compactContext", "maxTokens"]);
   const routing = section(input, "routing", [
     "mode",
     "models",
@@ -157,14 +158,11 @@ export function parseConfig(input: unknown): Config {
   const tui = section(input, "tui", ["sidebar"]);
 
   let advisorModels = DEFAULTS.advisor.models;
-  if (advisor.model !== undefined) {
-    const list = modelList(
-      typeof advisor.model === "string" ? [advisor.model] : advisor.model,
-      true,
-    );
+  if (advisor.models !== undefined) {
+    const list = modelList(advisor.models, true);
     if (!list) {
       throw new ConfigError(
-        `advisor.model must be "inherit", "provider/model[#variant]" or a list of 1..${MAX_MODELS} distinct such entries`,
+        `advisor.models must be "inherit", "provider/model[#variant]" or a list of 1..${MAX_MODELS} distinct such entries`,
       );
     }
     advisorModels = list;
@@ -183,7 +181,7 @@ export function parseConfig(input: unknown): Config {
     const list = modelList(routing.models, false);
     if (!list) {
       throw new ConfigError(
-        `routing.models must list 1..${MAX_MODELS} distinct "provider/model[#variant]" decision models`,
+        `routing.models must be "provider/model[#variant]" or a list of 1..${MAX_MODELS} distinct such decision models`,
       );
     }
     models = list as ModelRef[];

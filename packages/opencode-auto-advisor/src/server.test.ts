@@ -660,7 +660,7 @@ describe("invalid config", () => {
 
 describe("explicit advisor()", () => {
   test("reviews the last request plus the in-flight call, without spending the budget", async () => {
-    await writeConfig({ advisor: { model: "openai/gpt-6#high" } });
+    await writeConfig({ advisor: { models: "openai/gpt-6#high" } });
     const host = await start({ decision: async () => ROUTINE });
     await host.hooks.context(request("s", [user("u1"), ...step(1)]));
     const result = await host
@@ -673,7 +673,7 @@ describe("explicit advisor()", () => {
   });
 
   test("an invalid config fails the call instead of using the Executor's model", async () => {
-    await writeConfig({ advisor: { model: "openai/gpt-6", unknown: true } });
+    await writeConfig({ advisor: { models: "openai/gpt-6", unknown: true } });
     const host = await start();
     await host.hooks.context(request("s", [user("u1"), ...step(1)]));
     const result = await host
@@ -779,7 +779,7 @@ describe("advisor chain", () => {
 
   test("an Advisor that fails hands over to the next; the answering model is reported", async () => {
     // Neither is the Executor's model, so the report cannot fall back to it.
-    await writeConfig({ advisor: { model: ["mock/dead", "mock/small"] } });
+    await writeConfig({ advisor: { models: ["mock/dead", "mock/small"] } });
     const host = await start({
       advice: async (input) =>
         input.model.id === "dead"
@@ -802,7 +802,7 @@ describe("advisor chain", () => {
 
   test("the explicit tool names every model's failure", async () => {
     // Routing off: an automatic consult would rate-limit mock/a first, and it would be skipped.
-    await writeConfig({ advisor: { model: ["mock/a", "inherit"] }, routing: { mode: "off" } });
+    await writeConfig({ advisor: { models: ["mock/a", "inherit"] }, routing: { mode: "off" } });
     const host = await start({
       advice: async (input) =>
         Promise.reject(
@@ -821,7 +821,7 @@ describe("advisor chain", () => {
   });
 
   test("the transcript is rebuilt for each model's window", async () => {
-    await writeConfig({ advisor: { model: ["inherit", "mock/small"] } });
+    await writeConfig({ advisor: { models: ["inherit", "mock/small"] } });
     const host = await start({
       advice: async (input) =>
         input.model.id === "exec"
@@ -839,7 +839,7 @@ describe("advisor chain", () => {
   });
 
   test("timeoutMs is one deadline for the chain; running out is a timeout", async () => {
-    await writeConfig({ advisor: { model: ["inherit", "mock/small"], timeoutMs: 50 } });
+    await writeConfig({ advisor: { models: ["inherit", "mock/small"], timeoutMs: 50 } });
     const host = await start({ advice: () => new Promise(() => {}) });
     await host.hooks.context(request("s", [user("u1"), ...step(1)]));
     await Bun.sleep(20);
@@ -900,7 +900,7 @@ describe("decision context in telemetry", () => {
 
 describe("advisor chain, failures", () => {
   test("an interrupt ends the chain; the next model is never asked", async () => {
-    await writeConfig({ advisor: { model: ["inherit", "mock/small"] } });
+    await writeConfig({ advisor: { models: ["inherit", "mock/small"] } });
     let release: () => void = () => {};
     const host = await start({
       advice: () => new Promise((resolve) => (release = () => resolve({ text: "late" }))),
@@ -926,7 +926,7 @@ describe("advisor chain, failures", () => {
       },
     });
     await writeConfig({
-      advisor: { model: ["inherit", "mock/small"], timeoutMs: 40 },
+      advisor: { models: ["inherit", "mock/small"], timeoutMs: 40 },
       routing: { minStepsBetweenConsultations: 0 },
     });
     const history: Any[] = [user("u1"), ...step(1)];
