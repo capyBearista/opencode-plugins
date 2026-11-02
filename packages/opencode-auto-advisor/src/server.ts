@@ -69,6 +69,8 @@ interface SessionState {
   lastKey?: string;
   /** `steps` when the last automatic consult started, for the cooldown. */
   consultedAt?: number;
+  /** `steps` when the last Decision call started, for `routing.minStepsBetweenDecisions`. */
+  decidedAt?: number;
   /** Automatic consults started this turn. */
   started: number;
   /** Identity of the last evaluated state, so a retried step reuses its outcome. */
@@ -351,6 +353,12 @@ export default Plugin.define({
         }
         session.step++;
         session.steps++;
+        // Spacing saves Decision quota; a failed call counts, since it was still sent.
+        if (
+          session.decidedAt !== undefined &&
+          session.steps - session.decidedAt < routing.minStepsBetweenDecisions
+        )
+          return;
         const base = {
           ts: new Date().toISOString(),
           session: event.sessionID,
@@ -374,23 +382,30 @@ export default Plugin.define({
                 ? ("budget" as const)
                 : undefined;
 
-        if (mode === "observe" || blocked) {
-          // Decide without consulting, so telemetry still shows what the Decision model saw.
+        if (blocked) {
+          // No consult can start, so the Decision call would only feed telemetry: skip it.
+          telemetry.record({
+            ...base,
+            mode,
+            attempts: [],
+            verdict: "blocked",
+            blocked,
+            delivered: false,
+          });
+          return;
+        }
+
+        if (mode === "observe") {
+          // Decide without consulting, so telemetry shows what the Decision model saw.
           if (session.observing) return;
           session.observing = true;
+          session.decidedAt = session.steps;
           void route(routing.models, input)
             .then((routed) => {
               const verdict = routed.ok
                 ? decide({ answers: routed.value.answers, routing })
                 : undefined;
-              telemetry.record({
-                ...base,
-                mode,
-                ...summary(routed, verdict),
-                ...(blocked ? { blocked } : {}),
-                ...(blocked && verdict?.consult ? { verdict: "blocked" } : {}),
-                delivered: false,
-              });
+              telemetry.record({ ...base, mode, ...summary(routed, verdict), delivered: false });
             })
             .catch(() => {})
             .finally(() => {
@@ -407,6 +422,7 @@ export default Plugin.define({
         let delivered: Review | undefined;
         let record: TelemetryRecord | undefined;
         try {
+          session.decidedAt = session.steps;
           const routed = await route(routing.models, input);
           const verdict = routed.ok
             ? decide({ answers: routed.value.answers, routing })

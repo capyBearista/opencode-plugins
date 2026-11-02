@@ -19,6 +19,7 @@ beforeEach(async () => {
   process.env.OPENCODE_CONFIG_DIR = join(root, "config");
   process.env.XDG_DATA_HOME = join(root, "data");
   await mkdir(join(root, "config"), { recursive: true });
+  await writeConfig({});
 });
 
 afterEach(async () => {
@@ -29,8 +30,17 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-const writeConfig = (config: unknown) =>
-  writeFile(join(root, "config", "auto-advisor.json"), JSON.stringify(config));
+/**
+ * Most tests drive several steps and expect a decision on each, so the base config decides on
+ * every step; a test's own `routing` merges into it, and `routing: { minStepsBetweenDecisions:
+ * undefined }` restores the default.
+ */
+const BASE_ROUTING = { minStepsBetweenDecisions: 1 };
+const writeConfig = (config: Any) =>
+  writeFile(
+    join(root, "config", "auto-advisor.json"),
+    JSON.stringify({ ...config, routing: { ...BASE_ROUTING, ...config.routing } }),
+  );
 
 /** Queued as an event, it makes the fake stream's next read fail. */
 const READ_FAILURE = Symbol("read failure");
@@ -349,12 +359,14 @@ describe("active (default)", () => {
     await host.hooks.context(request("s", [...history]));
     await Bun.sleep(10);
     expect(host.textCalls).toHaveLength(1);
-    const input = host.decisionCalls.at(-1).input[0].text;
-    expect(input).toContain(
+    const lines = await telemetryLines();
+    // Step 2 is blocked by the budget, so its line keeps the input without a Decision call.
+    expect(lines[1].blocked).toBe("budget");
+    expect(lines[1].input).toContain(
       "User requests (oldest first; the last is the latest):\nUSER: Fix the login test\n\nRecent",
     );
-    expect(input).toContain("SUBAGENT: <subagent");
-    expect((await telemetryLines()).map((line) => line.turn)).toEqual(["u1", "u1"]);
+    expect(lines[1].input).toContain("SUBAGENT: <subagent");
+    expect(lines.map((line) => line.turn)).toEqual(["u1", "u1"]);
   });
 
   test("requests from before a restart and from the prompt hook are both shown", async () => {
@@ -623,6 +635,81 @@ describe("active (default)", () => {
     host.entries.s = first.entries.s;
     const status = await host.rpc().status({ sessionID: "s" });
     expect(status.latest).toMatchObject({ moment: "stuck", details: null });
+  });
+});
+
+describe("decision spacing", () => {
+  test("by default decides on the 1st and 11th distinct steps, across turns, not on retries", async () => {
+    await writeConfig({ routing: { minStepsBetweenDecisions: undefined } });
+    const host = await start({ decision: async () => ROUTINE });
+    const history: Any[] = [user("u1"), ...step(1)];
+    await host.hooks.context(request("s", [...history]));
+    for (let n = 2; n <= 10; n++) {
+      if (n === 5) {
+        await host.hooks.prompt({ sessionID: "s", messageID: "u2", delivery: "steer" });
+        history.push(user("u2", "next"));
+      }
+      history.push(...step(n));
+      await host.hooks.context(request("s", [...history]));
+      await host.hooks.context(request("s", [...history]));
+    }
+    expect(host.decisionCalls).toHaveLength(1);
+    history.push(...step(11));
+    await host.hooks.context(request("s", [...history]));
+    expect(host.decisionCalls).toHaveLength(2);
+    await Bun.sleep(10);
+    // A skipped step leaves no telemetry line.
+    expect((await telemetryLines()).map((line) => line.step)).toEqual([1, 7]);
+  });
+
+  test("a Decision call that fails still counts", async () => {
+    await writeConfig({ routing: { minStepsBetweenDecisions: 3 } });
+    const host = await start({
+      decision: () => Promise.reject({ _tag: "Generate.UnavailableError" }),
+    });
+    const history: Any[] = [user("u1")];
+    for (let n = 1; n <= 4; n++) {
+      history.push(...step(n));
+      await host.hooks.context(request("s", [...history]));
+    }
+    expect(host.decisionCalls).toHaveLength(2);
+    await Bun.sleep(10);
+    expect((await telemetryLines()).map((line) => line.verdict)).toEqual([
+      "no-decision",
+      "no-decision",
+    ]);
+  });
+
+  test("observe mode is spaced too", async () => {
+    await writeConfig({ routing: { mode: "observe", minStepsBetweenDecisions: 2 } });
+    const host = await start();
+    const history: Any[] = [user("u1")];
+    for (let n = 1; n <= 3; n++) {
+      history.push(...step(n));
+      await host.hooks.context(request("s", [...history]));
+      await Bun.sleep(10);
+    }
+    expect(host.decisionCalls).toHaveLength(2);
+  });
+
+  test("a blocked step makes no Decision call and logs why", async () => {
+    await writeConfig({
+      routing: { maxConsultationsPerTurn: 1, minStepsBetweenConsultations: 0 },
+    });
+    const host = await start();
+    const history: Any[] = [user("u1"), ...step(1)];
+    await host.hooks.context(request("s", [...history]));
+    history.push(...step(2));
+    await host.hooks.context(request("s", [...history]));
+    await Bun.sleep(10);
+    expect(host.decisionCalls).toHaveLength(1);
+    expect((await telemetryLines())[1]).toMatchObject({
+      step: 2,
+      blocked: "budget",
+      verdict: "blocked",
+      attempts: [],
+      delivered: false,
+    });
   });
 });
 

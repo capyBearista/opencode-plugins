@@ -8,7 +8,7 @@ export const MAX_BYTES = 5 * 1024 * 1024;
 export const LOGGED_INPUT_CHARS = 32_000;
 
 /**
- * One line per routing opportunity. Keeps the Decision input (its end) so a verdict can be
+ * One line per decided or blocked step. Keeps the Decision input (its end) so a verdict can be
  * judged later; never the Advisor transcript or advice text.
  */
 export interface TelemetryRecord {
@@ -28,7 +28,7 @@ export interface TelemetryRecord {
   readonly moment?: Record<string, number>;
   readonly consequence?: number;
   readonly verdict: string;
-  /** Set when the per-turn budget or the cooldown kept an automatic consult from starting. */
+  /** Set when the per-turn budget or the cooldown blocked the step; no Decision call was made. */
   readonly blocked?: "budget" | "cooldown";
   readonly advisor?: {
     readonly model: string;

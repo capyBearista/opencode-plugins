@@ -24,6 +24,7 @@ describe("parseConfig", () => {
         consequenceThreshold: 1.5,
         maxConsultationsPerTurn: 2,
         minStepsBetweenConsultations: 10,
+        minStepsBetweenDecisions: 10,
         requests: 3,
         requestMaxChars: 20_000,
       },
@@ -46,6 +47,13 @@ describe("parseConfig", () => {
   test("routing.minStepsBetweenConsultations accepts 0 to turn the cooldown off", () => {
     const config = parseConfig({ routing: { minStepsBetweenConsultations: 0 } });
     expect(config.routing.minStepsBetweenConsultations).toBe(0);
+  });
+
+  test("routing.minStepsBetweenDecisions accepts 1 (every step) to 1000", () => {
+    const every = parseConfig({ routing: { minStepsBetweenDecisions: 1 } });
+    expect(every.routing.minStepsBetweenDecisions).toBe(1);
+    const sparse = parseConfig({ routing: { minStepsBetweenDecisions: 1000 } });
+    expect(sparse.routing.minStepsBetweenDecisions).toBe(1000);
   });
 
   test("tui.sidebar accepts a boolean", () => {
@@ -115,6 +123,9 @@ describe("parseConfig", () => {
     [{ routing: { maxConsultationsPerTurn: 1.5 } }, "routing.maxConsultationsPerTurn"],
     [{ routing: { minStepsBetweenConsultations: -1 } }, "routing.minStepsBetweenConsultations"],
     [{ routing: { minStepsBetweenConsultations: 2.5 } }, "routing.minStepsBetweenConsultations"],
+    [{ routing: { minStepsBetweenDecisions: 0 } }, "routing.minStepsBetweenDecisions"],
+    [{ routing: { minStepsBetweenDecisions: 1001 } }, "routing.minStepsBetweenDecisions"],
+    [{ routing: { minStepsBetweenDecisions: 2.5 } }, "routing.minStepsBetweenDecisions"],
     [{ routing: { requests: 0 } }, "routing.requests"],
     [{ routing: { requests: 21 } }, "routing.requests"],
     [{ routing: { requests: 1.5 } }, "routing.requests"],

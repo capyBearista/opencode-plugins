@@ -30,6 +30,8 @@ export interface Config {
     readonly maxConsultationsPerTurn: number;
     /** Distinct Executor steps after an automatic consult starts before another may; 0 is off. */
     readonly minStepsBetweenConsultations: number;
+    /** Distinct Executor steps after a Decision call starts before another may; 1 is every step. */
+    readonly minStepsBetweenDecisions: number;
     /** How many of the user's latest requests the Decision model sees. */
     readonly requests: number;
     /** Characters per request in the Decision input, keeping the start; -1 is no cap. */
@@ -53,6 +55,7 @@ export const DEFAULTS: Config = {
     consequenceThreshold: 1.5,
     maxConsultationsPerTurn: 2,
     minStepsBetweenConsultations: 10,
+    minStepsBetweenDecisions: 10,
     requests: 3,
     requestMaxChars: 20_000,
   },
@@ -152,6 +155,7 @@ export function parseConfig(input: unknown): Config {
     "consequenceThreshold",
     "maxConsultationsPerTurn",
     "minStepsBetweenConsultations",
+    "minStepsBetweenDecisions",
     "requests",
     "requestMaxChars",
   ]);
@@ -231,6 +235,16 @@ export function parseConfig(input: unknown): Config {
               routing.minStepsBetweenConsultations,
               "routing.minStepsBetweenConsultations",
               0,
+              1_000,
+              true,
+            ),
+      minStepsBetweenDecisions:
+        routing.minStepsBetweenDecisions === undefined
+          ? DEFAULTS.routing.minStepsBetweenDecisions
+          : number(
+              routing.minStepsBetweenDecisions,
+              "routing.minStepsBetweenDecisions",
+              1,
               1_000,
               true,
             ),
