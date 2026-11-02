@@ -1,6 +1,6 @@
 {
   "name": "@capybearista/opencode-auto-advisor",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "A Claude Code-style Advisor for OpenCode: a second model reviews the agent's work on request or automatically at decision points.",
   "type": "module",
   "license": "MPL-2.0",
