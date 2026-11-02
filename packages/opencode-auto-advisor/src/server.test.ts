@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TOOL_DESCRIPTION } from "./advisor.js";
 import fixtures from "./fixtures/s1-decisions.json";
-import server from "./server.js";
+import server, { RESUBSCRIBE_MS } from "./server.js";
 import { COMPACTED, OMISSION_MARKER } from "./transcript.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: loosely typed fake host context
@@ -31,6 +31,9 @@ afterEach(async () => {
 
 const writeConfig = (config: unknown) =>
   writeFile(join(root, "config", "auto-advisor.json"), JSON.stringify(config));
+
+/** Queued as an event, it makes the fake stream's next read fail. */
+const READ_FAILURE = Symbol("read failure");
 
 const STUCK = fixtures.ok;
 const ROUTINE = {
@@ -130,18 +133,37 @@ async function start(setup: Setup = {}) {
       },
     },
     event: {
-      subscribe: () => ({
-        [Symbol.asyncIterator]: () => ({
-          next: async () => {
-            while (queue.length === 0) await new Promise<void>((resolve) => (wake = resolve));
-            return { done: false, value: queue.shift() };
-          },
-          return: async () => ({ done: true, value: undefined }),
-        }),
-      }),
+      // Like the real adapter (`promise/adapter.ts` at 2.2.5): a failed read closes the stream and
+      // rejects once; a closed stream (failed, returned, or unloaded) only reports `done`.
+      subscribe: () => {
+        subscriptions++;
+        let closed = false;
+        const done = { done: true, value: undefined };
+        return {
+          [Symbol.asyncIterator]: () => ({
+            next: async () => {
+              while (!closed && queue.length === 0)
+                await new Promise<void>((resolve) => (wake = resolve));
+              if (closed) return done;
+              const value = queue.shift();
+              if (value === READ_FAILURE) {
+                closed = true;
+                throw new Error("event stream read failed");
+              }
+              return { done: false, value };
+            },
+            return: async () => {
+              closed = true;
+              wake?.();
+              return done;
+            },
+          }),
+        };
+      },
     },
   };
 
+  let subscriptions = 0;
   const dispose = await server.setup(ctx);
   const send = async (event: Any) => {
     queue.push(event);
@@ -157,6 +179,7 @@ async function start(setup: Setup = {}) {
     emitted,
     send,
     dispose,
+    subscriptions: () => subscriptions,
     tool: () => tool,
     rpc: () => rpc,
   };
@@ -489,6 +512,34 @@ describe("active (default)", () => {
     await pending;
     expect(event.messages).toHaveLength(3);
     expect(host.entries.s).toBeUndefined();
+  });
+
+  test("after a failed event read, it re-subscribes and still drops a stale consult", async () => {
+    let release: (value: { text: string }) => void = () => {};
+    const host = await start({ advice: () => new Promise((resolve) => (release = resolve)) });
+    await host.send(READ_FAILURE);
+    await Bun.sleep(RESUBSCRIBE_MS + 50);
+    expect(host.subscriptions()).toBe(2);
+
+    const event = request("s", [user("u1"), ...step(1)]);
+    const pending = host.hooks.context(event);
+    await Bun.sleep(10);
+    await host.send({
+      type: "session.execution.interrupted",
+      data: { sessionID: "s", reason: "user" },
+    });
+    release({ text: "late advice" });
+    await pending;
+    expect(event.messages).toHaveLength(3);
+    expect(host.entries.s).toBeUndefined();
+  });
+
+  test("a dispose during the re-subscribe wait ends the listener", async () => {
+    const host = await start();
+    await host.send(READ_FAILURE);
+    await host.dispose();
+    await Bun.sleep(RESUBSCRIBE_MS + 50);
+    expect(host.subscriptions()).toBe(1);
   });
 
   test("an interrupt during the Decision call skips the consult", async () => {

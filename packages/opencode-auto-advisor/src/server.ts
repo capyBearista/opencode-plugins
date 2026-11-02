@@ -36,6 +36,8 @@ export const PLUGIN_ID = "capybearista.opencode-auto-advisor";
 const DEFAULT_CONTEXT_TOKENS = 128_000;
 /** Conservative chars-per-token, so the transcript fits even token-dense content. */
 const CHARS_PER_TOKEN = 3;
+/** Wait before re-subscribing after a failed event read, so a stream that keeps failing can't spin. */
+export const RESUBSCRIBE_MS = 1_000;
 
 interface Snapshot {
   readonly system: readonly SystemText[];
@@ -495,39 +497,59 @@ export default Plugin.define({
       }
     });
 
-    const events = ctx.event.subscribe({
-      types: [
-        "session.execution.succeeded",
-        "session.execution.failed",
-        "session.execution.interrupted",
-        "session.deleted",
-      ],
-    });
-    const iterator = events[Symbol.asyncIterator]();
+    let disposed = false;
+    let iterator: AsyncIterator<unknown> | undefined;
+    let backoff: ReturnType<typeof setTimeout> | undefined;
+    let resume: (() => void) | undefined;
     void (async () => {
-      for (;;) {
-        const next = await iterator.next();
-        if (next.done) return;
-        const event = next.value as { type: string; data?: { sessionID?: string } };
-        const sessionID = event.data?.sessionID;
-        if (!sessionID) continue;
-        if (event.type === "session.deleted") {
-          sessions.delete(sessionID);
-          continue;
-        }
-        const session = sessions.get(sessionID);
-        if (session) {
-          session.epoch++;
-          session.abort?.abort();
-          // The request reference can hold large attachments; drop it once the run ends.
-          session.last = undefined;
-          session.memo = undefined;
+      while (!disposed) {
+        iterator = ctx.event
+          .subscribe({
+            types: [
+              "session.execution.succeeded",
+              "session.execution.failed",
+              "session.execution.interrupted",
+              "session.deleted",
+            ],
+          })
+          [Symbol.asyncIterator]();
+        try {
+          for (;;) {
+            const next = await iterator.next();
+            // The stream ends only when the plugin unloads.
+            if (next.done) return;
+            const event = next.value as { type: string; data?: { sessionID?: string } };
+            const sessionID = event.data?.sessionID;
+            if (!sessionID) continue;
+            if (event.type === "session.deleted") {
+              sessions.delete(sessionID);
+              continue;
+            }
+            const session = sessions.get(sessionID);
+            if (session) {
+              session.epoch++;
+              session.abort?.abort();
+              // The request reference can hold large attachments; drop it once the run ends.
+              session.last = undefined;
+              session.memo = undefined;
+            }
+          }
+        } catch {
+          // The adapter closes the stream on a failed read, so subscribe again. Events sent
+          // during the wait are missed.
+          await new Promise<void>((resolve) => {
+            resume = resolve;
+            backoff = setTimeout(resolve, RESUBSCRIBE_MS);
+          });
         }
       }
     })().catch(() => {});
 
     return async () => {
-      await iterator.return?.();
+      disposed = true;
+      clearTimeout(backoff);
+      resume?.();
+      await iterator?.return?.();
       await toolRegistration.dispose();
       await promptHook.dispose();
       await contextHook.dispose();
