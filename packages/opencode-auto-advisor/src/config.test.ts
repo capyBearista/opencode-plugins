@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULTS, parseConfig, parseModelRef, resolveConfigPath } from "./config.js";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  createConfigLoader,
+  DEFAULTS,
+  parseConfig,
+  parseModelRef,
+  resolveConfigPath,
+} from "./config.js";
 
 describe("parseConfig", () => {
   test("empty object yields every default", () => {
@@ -182,4 +191,46 @@ describe("resolveConfigPath", () => {
     );
     expect(resolveConfigPath({}, "/h")).toBe("/h/.config/opencode/auto-advisor.json");
   });
+});
+
+describe("createConfigLoader", () => {
+  const load = async (text: string) => {
+    const dir = await mkdtemp(join(tmpdir(), "auto-advisor-config-"));
+    try {
+      const path = join(dir, "auto-advisor.json");
+      await writeFile(path, text);
+      return await createConfigLoader(path)();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+
+  test("accepts comments and trailing commas", async () => {
+    const loaded = await load(`{
+      // The Advisor
+      "advisor": { "models": ["openai/gpt-6#high", "inherit",] },
+      /* Decisions */
+      "routing": { "mode": "observe", },
+    }`);
+    expect(loaded.error).toBeUndefined();
+    expect(loaded.config.advisor.models).toEqual([
+      { providerID: "openai", id: "gpt-6", variant: "high" },
+      "inherit",
+    ]);
+    expect(loaded.config.routing.mode).toBe("observe");
+  });
+
+  test("a syntax error turns routing off and names the file", async () => {
+    const loaded = await load(`{ "routing": }`);
+    expect(loaded.config.routing.mode).toBe("off");
+    expect(loaded.error).toContain("auto-advisor.json: ");
+  });
+});
+
+test("the README's default configuration is the real defaults", async () => {
+  const readme = await readFile(join(import.meta.dir, "..", "README.md"), "utf8");
+  const block = readme.split("<summary><strong>Default configuration")[1]?.split("```jsonc\n")[1];
+  expect(block).toBeDefined();
+  const parsed = parseConfig(Bun.JSONC.parse((block ?? "").split("\n```")[0]));
+  expect(parsed).toEqual(DEFAULTS);
 });

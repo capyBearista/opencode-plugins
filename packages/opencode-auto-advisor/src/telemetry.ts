@@ -30,15 +30,27 @@ export interface TelemetryRecord {
   readonly verdict: string;
   /** Set when the per-turn budget or the cooldown blocked the step; no Decision call was made. */
   readonly blocked?: "budget" | "cooldown";
-  readonly advisor?: {
-    readonly model: string;
-    readonly ms: number;
-    readonly outcome: "ok" | "error" | "timeout" | "stale";
-    readonly chars?: number;
-    /** One per Advisor model tried, in chain order. */
-    readonly attempts?: readonly Attempt[];
-  };
+  readonly advisor?: AdvisorRecord;
   readonly delivered: boolean;
+}
+
+export interface AdvisorRecord {
+  readonly model: string;
+  readonly ms: number;
+  readonly outcome: "ok" | "error" | "timeout" | "stale";
+  readonly chars?: number;
+  /** One per Advisor model tried, in chain order. */
+  readonly attempts?: readonly Attempt[];
+}
+
+/** One line per explicit `advisor()` call: no step, no Decision call, no budget. */
+export interface ExplicitRecord {
+  readonly ts: string;
+  readonly session: string;
+  /** Id of the assistant message that made the call. */
+  readonly message: string;
+  readonly kind: "explicit";
+  readonly advisor: AdvisorRecord;
 }
 
 export function resolveTelemetryPath(
@@ -72,7 +84,7 @@ export function createTelemetry(path: string = resolveTelemetryPath(), maxBytes 
     }
   };
   return {
-    record(entry: TelemetryRecord): void {
+    record(entry: TelemetryRecord | ExplicitRecord): void {
       const line = `${JSON.stringify(entry)}\n`;
       queue = queue.then(() => write(line)).catch(() => {});
     },

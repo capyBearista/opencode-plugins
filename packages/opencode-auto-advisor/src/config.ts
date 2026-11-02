@@ -297,7 +297,8 @@ export function createConfigLoader(path: string = resolveConfigPath()) {
       mtime = (await file.stat()).mtimeMs;
       if (cached?.mtime === mtime) return cached.loaded;
       try {
-        loaded = { config: parseConfig(JSON.parse(await file.readFile("utf8"))) };
+        // JSONC: comments and trailing commas, so the README's commented defaults paste as is.
+        loaded = { config: parseConfig(Bun.JSONC.parse(await file.readFile("utf8"))) };
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         loaded = {

@@ -12,6 +12,7 @@ export const PANEL = "auto-advisor";
 
 type View = "reviewing" | "finished" | "failed" | "idle";
 type Latest = Status["latest"];
+type Explicit = Status["explicit"];
 type Context = Plugin.Context;
 /** The fields used from the host's `session.panel` input (not exported by `@opencode/plugin`). */
 interface PanelInput {
@@ -31,7 +32,7 @@ interface Client {
   status(input: { sessionID: string }, options?: unknown): Promise<Status>;
   readonly events: {
     on(
-      name: "review.started" | "review.finished",
+      name: "review.started" | "review.finished" | "explicit.finished",
       handler: (envelope: Envelope) => void,
     ): () => void;
   };
@@ -58,13 +59,21 @@ export function sidebarStatus(view: View, latest: Latest, mode: Status["mode"]):
   return mode === "active" ? "no review yet" : mode;
 }
 
+const detailsText = (details: NonNullable<Explicit>) =>
+  `${details.model} · ${(details.ms / 1000).toFixed(1)} s · ${clock(details.at)}`;
+
 /** The panel's one-line summary above the advice. */
 export function panelSummary(latest: Latest): string {
   if (!latest) return "No automatic review in this session yet.";
   const details = latest.details
-    ? `${latest.details.model} · ${(latest.details.ms / 1000).toFixed(1)} s · ${clock(latest.details.at)}`
+    ? detailsText(latest.details)
     : "delivered before OpenCode restarted";
   return `Moment: ${latest.moment} · ${details}`;
+}
+
+/** The panel's line for the last explicit `advisor()` call, or "" when none was answered. */
+export function explicitSummary(explicit: Explicit): string {
+  return explicit ? `Last advisor() call: ${detailsText(explicit)}` : "";
 }
 
 type Prop = unknown | (() => unknown);
@@ -136,6 +145,7 @@ export default Plugin.define({
     const client = context.client.rpc(AutoAdvisorRpc) as unknown as Client;
     const [views, setViews] = createSignal<Record<string, View>>({});
     const [reviews, setReviews] = createSignal<Record<string, Latest>>({});
+    const [explicits, setExplicits] = createSignal<Record<string, Explicit>>({});
     // Config is global; undefined until the server first answers, so a hidden widget never flashes.
     const [config, setConfig] = createSignal<Pick<Status, "mode" | "sidebar"> | undefined>(
       undefined,
@@ -152,6 +162,7 @@ export default Plugin.define({
     const apply = (status: Status) => {
       setConfig({ mode: status.mode, sidebar: status.sidebar });
       setReviews((known) => ({ ...known, [status.sessionID]: status.latest }));
+      setExplicits((known) => ({ ...known, [status.sessionID]: status.explicit }));
     };
     /** Reads the stored review, so one from before a restart shows too. */
     const refresh = (sessionID: string) => {
@@ -163,6 +174,9 @@ export default Plugin.define({
       apply(data);
       before.set(data.sessionID, data.latest?.id);
       setView(data.sessionID, "reviewing");
+    });
+    const offExplicit = client.events.on("explicit.finished", ({ data }) => {
+      if (data) apply(data);
     });
     const offFinished = client.events.on("review.finished", ({ data }) => {
       if (!data) return;
@@ -298,6 +312,7 @@ export default Plugin.define({
         ],
       }));
       const review = () => latest(input.sessionID);
+      const explicit = () => explicits()[input.sessionID] ?? null;
       return node(
         "box",
         {
@@ -313,6 +328,9 @@ export default Plugin.define({
           node("box", { flexDirection: "column", flexShrink: 0 }, [
             node("text", { fg: () => theme().text.base }, "Advisor review"),
             node("text", { fg: () => theme().text.muted }, () => panelSummary(review())),
+            node("text", { fg: () => theme().text.muted, visible: () => Boolean(explicit()) }, () =>
+              explicitSummary(explicit()),
+            ),
           ]),
           node(
             "scrollbox",
@@ -345,6 +363,7 @@ export default Plugin.define({
 
     return () => {
       offStarted();
+      offExplicit();
       offFinished();
       for (const timer of timers) clearTimeout(timer);
       unregisterFooter();

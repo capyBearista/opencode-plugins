@@ -20,7 +20,12 @@ import {
 import { createWalker } from "./fallback.js";
 import { decide } from "./policy.js";
 import { AutoAdvisorRpc, type ReviewDetails, type Status } from "./rpc.js";
-import { createTelemetry, LOGGED_INPUT_CHARS, type TelemetryRecord } from "./telemetry.js";
+import {
+  type AdvisorRecord,
+  createTelemetry,
+  LOGGED_INPUT_CHARS,
+  type TelemetryRecord,
+} from "./telemetry.js";
 import {
   advisorTranscript,
   decisionInput,
@@ -79,6 +84,8 @@ interface SessionState {
   abort?: AbortController;
   /** The latest delivered review's details; memory only, unlike the entry that holds its text. */
   latest?: { id: string; details: ReviewDetails };
+  /** The last explicit `advisor()` call a model answered; memory only. */
+  explicit?: ReviewDetails;
   observing: boolean;
   reviewing: boolean;
   failed: boolean;
@@ -88,6 +95,21 @@ const asText = (part: unknown) =>
   typeof (part as { text?: unknown })?.text === "string"
     ? { text: (part as { text: string }).text }
     : undefined;
+
+/** The Advisor part of a telemetry line for a consult in which no model answered. */
+function failedAdvisor(cause: unknown, ms: number, stale = false): AdvisorRecord {
+  const attempts = cause instanceof AdvisorChainError ? cause.attempts : [];
+  return {
+    model: attempts.at(-1)?.model ?? "unknown",
+    attempts,
+    ms,
+    outcome: stale
+      ? "stale"
+      : attempts.some((attempt) => attempt.outcome === "timeout")
+        ? "timeout"
+        : "error",
+  };
+}
 
 /** Identity of a request's history, ignoring system updates (entries admitted on a retry). */
 function stateKey(messages: readonly Message[]): string {
@@ -197,6 +219,7 @@ export default Plugin.define({
         reviewing: session?.reviewing ?? false,
         failed: session?.failed ?? false,
         latest: await latestReview(sessionID),
+        explicit: session?.explicit ?? null,
       };
     };
 
@@ -205,14 +228,13 @@ export default Plugin.define({
     });
     // Each event awaits a status lookup; chaining keeps `finished` from overtaking `started`.
     let emitting: Promise<unknown> = Promise.resolve();
-    const emit = (name: "review.started" | "review.finished", sessionID: string) => {
+    const emit = (
+      name: "review.started" | "review.finished" | "explicit.finished",
+      sessionID: string,
+    ) => {
       emitting = emitting
         .then(() => status(sessionID))
-        .then((snapshot) =>
-          name === "review.started"
-            ? rpc.events.emit("review.started", { ...snapshot })
-            : rpc.events.emit("review.finished", { ...snapshot }),
-        )
+        .then((snapshot) => rpc.events.emit(name, { ...snapshot }))
         .catch(() => {});
     };
 
@@ -277,13 +299,38 @@ export default Plugin.define({
             const { config, error } = await loadConfig();
             // An invalid file falls back to defaults; consulting the Executor's model would hide that.
             if (error) throw new Error(`invalid config: ${error}`);
-            const { advice } = await review(
-              { ...snapshot, messages: [...snapshot.messages, ...inflight] },
-              config.advisor,
-              undefined,
-              tool.signal,
-            );
-            return { content: advice };
+            const start = Date.now();
+            const logged = (advisor: AdvisorRecord) => {
+              telemetry.record({
+                ts: new Date(start).toISOString(),
+                session: tool.sessionID,
+                message: tool.messageID,
+                kind: "explicit",
+                advisor,
+              });
+              emit("explicit.finished", tool.sessionID);
+            };
+            try {
+              const consulted = await review(
+                { ...snapshot, messages: [...snapshot.messages, ...inflight] },
+                config.advisor,
+                undefined,
+                tool.signal,
+              );
+              const ms = Date.now() - start;
+              session.explicit = { at: new Date().toISOString(), model: consulted.model, ms };
+              logged({
+                model: consulted.model,
+                attempts: consulted.attempts,
+                ms,
+                outcome: "ok",
+                chars: consulted.advice.length,
+              });
+              return { content: consulted.advice };
+            } catch (cause) {
+              logged(failedAdvisor(cause, Date.now() - start));
+              throw cause;
+            }
           } catch (cause) {
             const message = cause instanceof Error ? cause.message : String(cause);
             return {
@@ -485,21 +532,7 @@ export default Plugin.define({
           } catch (cause) {
             const stale = session.epoch !== epoch;
             if (!stale) session.failed = true;
-            const attempts = cause instanceof AdvisorChainError ? cause.attempts : [];
-            const last = attempts.at(-1);
-            record = {
-              ...record,
-              advisor: {
-                model: last?.model ?? "unknown",
-                attempts,
-                ms: Date.now() - start,
-                outcome: stale
-                  ? "stale"
-                  : attempts.some((attempt) => attempt.outcome === "timeout")
-                    ? "timeout"
-                    : "error",
-              },
-            };
+            record = { ...record, advisor: failedAdvisor(cause, Date.now() - start, stale) };
           } finally {
             session.reviewing = false;
             emit("review.finished", event.sessionID);

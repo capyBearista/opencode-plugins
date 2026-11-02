@@ -907,6 +907,51 @@ describe("advisor chain", () => {
     );
   });
 
+  test("an explicit consult logs its chain and reports the answering model", async () => {
+    await writeConfig({
+      advisor: { models: ["mock/dead", "mock/small"] },
+      routing: { mode: "off" },
+    });
+    const host = await start({
+      advice: async (input) =>
+        input.model.id === "dead"
+          ? Promise.reject(providerError("rate_limit"))
+          : { text: "Check the token clock skew first." },
+    });
+    await host.hooks.context(request("s", [user("u1")]));
+    await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
+    await Bun.sleep(20);
+    const [line] = await telemetryLines();
+    expect(line).toMatchObject({ session: "s", message: "m", kind: "explicit" });
+    expect(line.advisor).toMatchObject({ model: "mock/small", outcome: "ok", chars: 33 });
+    expect(line.advisor.attempts.map((a: Any) => [a.model, a.outcome])).toEqual([
+      ["mock/dead", "next"],
+      ["mock/small", "ok"],
+    ]);
+    expect(host.emitted).toEqual(["explicit.finished"]);
+    const status = await host.rpc().status({ sessionID: "s" });
+    expect(status.explicit).toMatchObject({ model: "mock/small" });
+    expect(status.latest).toBeNull();
+  });
+
+  test("a failed explicit consult is logged and leaves the last answering model", async () => {
+    await writeConfig({ advisor: { models: "mock/dead" }, routing: { mode: "off" } });
+    const host = await start({ advice: async () => Promise.reject(providerError("rate_limit")) });
+    await host.hooks.context(request("s", [user("u1")]));
+    await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
+    await Bun.sleep(20);
+    const [line] = await telemetryLines();
+    expect(line).toMatchObject({
+      kind: "explicit",
+      advisor: { model: "mock/dead", outcome: "error" },
+    });
+    expect((await host.rpc().status({ sessionID: "s" })).explicit).toBeNull();
+  });
+
   test("the transcript is rebuilt for each model's window", async () => {
     await writeConfig({ advisor: { models: ["inherit", "mock/small"] } });
     const host = await start({
