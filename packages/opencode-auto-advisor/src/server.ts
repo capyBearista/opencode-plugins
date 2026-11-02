@@ -102,6 +102,7 @@ function failedAdvisor(cause: unknown, ms: number, stale = false): AdvisorRecord
   return {
     model: attempts.at(-1)?.model ?? "unknown",
     attempts,
+    error: cause instanceof Error ? cause.message : String(cause),
     ms,
     outcome: stale
       ? "stale"
@@ -281,12 +282,25 @@ export default Plugin.define({
         options: { codemode: false },
         execute: async (_input, tool) => {
           const session = state(tool.sessionID);
+          /** Set once the call is a consult; the refusals above it are not logged. */
+          let start: number | undefined;
+          const logged = (at: number, advisor: AdvisorRecord) => {
+            telemetry.record({
+              ts: new Date(at).toISOString(),
+              session: tool.sessionID,
+              message: tool.messageID,
+              kind: "explicit",
+              advisor,
+            });
+            emit("explicit.finished", tool.sessionID);
+          };
           try {
             if (await isChild(tool.sessionID, session)) {
               return { content: "The Advisor is only available in top-level sessions." };
             }
             const snapshot = session.last;
             if (!snapshot) return { content: "The Advisor has no conversation to review yet." };
+            start = Date.now();
             // With routing off, nothing has read the stored prompts yet.
             await realPrompts(tool.sessionID, session);
             // The cached request predates this step; add the in-flight message holding this call.
@@ -299,39 +313,26 @@ export default Plugin.define({
             const { config, error } = await loadConfig();
             // An invalid file falls back to defaults; consulting the Executor's model would hide that.
             if (error) throw new Error(`invalid config: ${error}`);
-            const start = Date.now();
-            const logged = (advisor: AdvisorRecord) => {
-              telemetry.record({
-                ts: new Date(start).toISOString(),
-                session: tool.sessionID,
-                message: tool.messageID,
-                kind: "explicit",
-                advisor,
-              });
-              emit("explicit.finished", tool.sessionID);
-            };
-            try {
-              const consulted = await review(
-                { ...snapshot, messages: [...snapshot.messages, ...inflight] },
-                config.advisor,
-                undefined,
-                tool.signal,
-              );
-              const ms = Date.now() - start;
-              session.explicit = { at: new Date().toISOString(), model: consulted.model, ms };
-              logged({
-                model: consulted.model,
-                attempts: consulted.attempts,
-                ms,
-                outcome: "ok",
-                chars: consulted.advice.length,
-              });
-              return { content: consulted.advice };
-            } catch (cause) {
-              logged(failedAdvisor(cause, Date.now() - start));
-              throw cause;
-            }
+            // Like an automatic consult's, `ms` is the Advisor's time, not the history reads.
+            start = Date.now();
+            const consulted = await review(
+              { ...snapshot, messages: [...snapshot.messages, ...inflight] },
+              config.advisor,
+              undefined,
+              tool.signal,
+            );
+            const ms = Date.now() - start;
+            session.explicit = { at: new Date().toISOString(), model: consulted.model, ms };
+            logged(start, {
+              model: consulted.model,
+              attempts: consulted.attempts,
+              ms,
+              outcome: "ok",
+              chars: consulted.advice.length,
+            });
+            return { content: consulted.advice };
           } catch (cause) {
+            if (start !== undefined) logged(start, failedAdvisor(cause, Date.now() - start));
             const message = cause instanceof Error ? cause.message : String(cause);
             return {
               content: `Advisor consultation failed: ${message}`,

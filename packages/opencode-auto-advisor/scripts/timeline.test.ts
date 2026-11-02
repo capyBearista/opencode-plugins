@@ -39,6 +39,15 @@ const record = (step: number, message: string | undefined, extra: object = {}) =
   ...extra,
 });
 
+/** An explicit `advisor()` call's line: no step, verdict or Decision input. */
+const explicit = (at: number, message: string, advisor: object = {}) => ({
+  ts: new Date(1_793_000_000_000 + at * 1_000).toISOString(),
+  session: "s",
+  message,
+  kind: "explicit",
+  advisor: { model: "mock/deep", ms: 4_200, outcome: "ok", attempts: [], ...advisor },
+});
+
 describe("timelineRows", () => {
   test("each step gets the messages since the previous step, in session order", () => {
     const rows = timelineRows(
@@ -49,6 +58,19 @@ describe("timelineRows", () => {
     expect(rows.map((row) => row.record.step)).toEqual([1, 2]);
     expect(rows[0].messages.map((m) => m.id)).toEqual(["u1", "a1"]);
     expect(rows[1].messages.map((m) => m.id)).toEqual(["u2", "a2"]);
+  });
+
+  test("an advisor() call takes no messages from the routing steps around it", () => {
+    const rows = timelineRows(
+      "s",
+      [record(1, "a1"), explicit(1.5, "a2"), record(2, "a2")],
+      messages,
+    );
+    expect(rows.map((row) => row.messages.map((m) => m.id))).toEqual([
+      ["u1", "a1"],
+      [],
+      ["u2", "a2"],
+    ]);
   });
 
   test("a step whose message is unknown, or from before the field existed, has none", () => {
@@ -83,6 +105,26 @@ describe("renderTimeline", () => {
     expect(html).toContain("The big plan");
     expect(html).toContain("Done &lt;b&gt;now&lt;/b&gt;");
     expect(html).not.toContain("<b>now</b>");
+  });
+
+  test("renders advisor() calls as their own rows next to routing steps", () => {
+    const rows = timelineRows(
+      "s",
+      [
+        record(1, "a1"),
+        explicit(1.5, "a2", { model: "mock/<deep>", ms: 1_000, outcome: "error", error: "down" }),
+        explicit(1.7, "a2"),
+        record(2, "a2"),
+      ],
+      messages,
+    );
+    const html = renderTimeline("s", rows);
+    expect(html).toContain("2 routing decisions and 2 advisor() calls");
+    expect(html).toContain("advisor() call");
+    expect(html).toContain("mock/&lt;deep&gt;");
+    expect(html).toContain("error · 1.0 s · down");
+    expect(html).toContain("mock/deep · ok · 4.2 s");
+    expect(html).not.toContain("undefined");
   });
 
   test("escapes the logged input and renders lines from before it was logged", () => {

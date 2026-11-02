@@ -771,6 +771,53 @@ describe("explicit advisor()", () => {
     expect(host.textCalls).toHaveLength(0);
   });
 
+  test("an invalid config is logged as a failed call with its reason", async () => {
+    await writeConfig({ advisor: { model: "openai/gpt-6" }, routing: { mode: "off" } });
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1")]));
+    await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
+    await Bun.sleep(20);
+    const [line] = await telemetryLines();
+    expect(line).toMatchObject({ session: "s", message: "m", kind: "explicit" });
+    expect(line.advisor).toMatchObject({ model: "unknown", attempts: [], outcome: "error" });
+    expect(line.advisor.error).toContain("invalid config:");
+    expect(line.advisor.error).toContain("unknown key: advisor.model");
+    expect(host.emitted).toEqual(["explicit.finished"]);
+  });
+
+  test("a failed history read is logged once, with its reason", async () => {
+    await writeConfig({ routing: { mode: "off" } });
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1")]));
+    host.ctx.session.context = async () => Promise.reject(new Error("history unavailable"));
+    const result = await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
+    expect(result.content).toBe("Advisor consultation failed: history unavailable");
+    await Bun.sleep(20);
+    const lines = await telemetryLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0].advisor).toMatchObject({
+      model: "unknown",
+      attempts: [],
+      outcome: "error",
+      error: "history unavailable",
+    });
+    expect(host.emitted).toEqual(["explicit.finished"]);
+  });
+
+  test("a refused call is not a consult and writes no line", async () => {
+    await writeConfig({ routing: { mode: "off" } });
+    const host = await start();
+    const call = { messageID: "m", signal: new AbortController().signal };
+    await host.tool().execute({}, { ...call, sessionID: "child" });
+    await host.tool().execute({}, { ...call, sessionID: "s" });
+    await Bun.sleep(20);
+    expect(await telemetryLines()).toEqual([]);
+  });
+
   test("ignores the per-turn budget and the cooldown", async () => {
     const host = await start();
     await host.hooks.context(request("s", [user("u1"), ...step(1)]));
@@ -944,11 +991,14 @@ describe("advisor chain", () => {
       .tool()
       .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
     await Bun.sleep(20);
-    const [line] = await telemetryLines();
-    expect(line).toMatchObject({
+    const lines = await telemetryLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
       kind: "explicit",
       advisor: { model: "mock/dead", outcome: "error" },
     });
+    expect(lines[0].advisor.error).toStartWith("all models failed (mock/dead:");
+    expect(host.emitted).toEqual(["explicit.finished"]);
     expect((await host.rpc().status({ sessionID: "s" })).explicit).toBeNull();
   });
 

@@ -39,6 +39,8 @@ export interface AdvisorRecord {
   readonly ms: number;
   readonly outcome: "ok" | "error" | "timeout" | "stale";
   readonly chars?: number;
+  /** Why no model answered: the chain's summary, or a failure before any model was tried. */
+  readonly error?: string;
   /** One per Advisor model tried, in chain order. */
   readonly attempts?: readonly Attempt[];
 }
