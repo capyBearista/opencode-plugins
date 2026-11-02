@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { type JSX, testRender } from "@opentui/solid";
 import { createSignal } from "solid-js";
 import type { Status } from "./rpc.js";
-import tui, { footerText, PANEL, panelSummary, sidebarStatus } from "./tui.js";
+import tui, { explicitSummary, footerText, PANEL, panelSummary, sidebarStatus } from "./tui.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: loosely typed fake TUI context
 type Any = any;
@@ -23,6 +23,7 @@ const status = (overrides: Partial<Status> = {}): Status => ({
   reviewing: false,
   failed: false,
   latest,
+  explicit: null,
   ...overrides,
 });
 
@@ -51,6 +52,13 @@ describe("text", () => {
       "Moment: stuck · delivered before OpenCode restarted",
     );
     expect(panelSummary(null)).toBe("No automatic review in this session yet.");
+  });
+
+  test("explicit summary names the model that answered the last advisor() call", () => {
+    expect(explicitSummary({ at, model: "opencode/deepseek#max", ms: 12_340 })).toBe(
+      "Last advisor() call: opencode/deepseek#max · 12.3 s · 13:08",
+    );
+    expect(explicitSummary(null)).toBe("");
   });
 });
 
@@ -151,10 +159,14 @@ describe("setup", () => {
       "session.panel",
       "sidebar.footer",
     ]);
-    expect(Object.keys(host.handlers).sort()).toEqual(["review.finished", "review.started"]);
+    expect(Object.keys(host.handlers).sort()).toEqual([
+      "explicit.finished",
+      "review.finished",
+      "review.started",
+    ]);
     host.cleanup();
     expect(Object.keys(host.slots)).toEqual([]);
-    expect(host.unsubscribed()).toBe(2);
+    expect(host.unsubscribed()).toBe(3);
   });
 
   test("the palette command toggles the review panel", () => {
@@ -236,6 +248,21 @@ describe("review panel", () => {
     const hint = lines.findIndex((line) => line.includes("esc close"));
     await setup.mockMouse.click(lines[hint].indexOf("esc"), hint);
     expect(closed).toBe(1);
+    setup.renderer.destroy();
+  });
+
+  test("shows the last advisor() call's model, even with no automatic review", async () => {
+    const host = harness(
+      status({ latest: null, explicit: { at, model: "opencode/deepseek#max", ms: 12_340 } }),
+    );
+    const { setup, frame } = await host.mount(
+      () => host.slots["session.panel"].render(panel(PANEL)),
+      80,
+      12,
+    );
+    const text = await frame();
+    expect(text).toContain("No automatic review in this session yet.");
+    expect(text).toContain("Last advisor() call: opencode/deepseek#max · 12.3 s · 13:08");
     setup.renderer.destroy();
   });
 

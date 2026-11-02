@@ -128,6 +128,27 @@ Pass options in the plugin's `cli.json` entry, using the object form:
 > [!WARNING]
 > Use the object form above. The V1 tuple form (`["@capybearista/opencode-ram-monitor", { ... }]`) is not valid in V2's `cli.json`, and one invalid entry makes OpenCode ignore the whole file, including your theme, keybinds, and every other plugin.
 
+<details>
+<summary><strong>Default options</strong> (click to expand)</summary>
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "@capybearista/opencode-ram-monitor@latest",
+      "options": {
+        // "full" (bordered two-row card) or "minimal" (one borderless line).
+        "layout": "full",
+        // Polling interval in ms, clamped between 1000 and 60000.
+        "refreshIntervalMs": 5000,
+      },
+    },
+  ],
+}
+```
+
+</details>
+
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `layout` | `"full"` \| `"minimal"` | `"full"` | `full` is the bordered two-row card. `minimal` is one borderless line: `RAM ● 4.88 GB (tools 3.39 GB)`. |

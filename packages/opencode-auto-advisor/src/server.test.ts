@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TOOL_DESCRIPTION } from "./advisor.js";
 import fixtures from "./fixtures/s1-decisions.json";
-import server from "./server.js";
+import server, { RESUBSCRIBE_MS } from "./server.js";
 import { COMPACTED, OMISSION_MARKER } from "./transcript.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: loosely typed fake host context
@@ -19,6 +19,7 @@ beforeEach(async () => {
   process.env.OPENCODE_CONFIG_DIR = join(root, "config");
   process.env.XDG_DATA_HOME = join(root, "data");
   await mkdir(join(root, "config"), { recursive: true });
+  await writeConfig({});
 });
 
 afterEach(async () => {
@@ -29,8 +30,20 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-const writeConfig = (config: unknown) =>
-  writeFile(join(root, "config", "auto-advisor.json"), JSON.stringify(config));
+/**
+ * Most tests drive several steps and expect a decision on each, so the base config decides on
+ * every step; a test's own `routing` merges into it, and `routing: { minStepsBetweenDecisions:
+ * undefined }` restores the default.
+ */
+const BASE_ROUTING = { minStepsBetweenDecisions: 1 };
+const writeConfig = (config: Any) =>
+  writeFile(
+    join(root, "config", "auto-advisor.json"),
+    JSON.stringify({ ...config, routing: { ...BASE_ROUTING, ...config.routing } }),
+  );
+
+/** Queued as an event, it makes the fake stream's next read fail. */
+const READ_FAILURE = Symbol("read failure");
 
 const STUCK = fixtures.ok;
 const ROUTINE = {
@@ -130,18 +143,37 @@ async function start(setup: Setup = {}) {
       },
     },
     event: {
-      subscribe: () => ({
-        [Symbol.asyncIterator]: () => ({
-          next: async () => {
-            while (queue.length === 0) await new Promise<void>((resolve) => (wake = resolve));
-            return { done: false, value: queue.shift() };
-          },
-          return: async () => ({ done: true, value: undefined }),
-        }),
-      }),
+      // Like the real adapter (`promise/adapter.ts` at 2.2.5): a failed read closes the stream and
+      // rejects once; a closed stream (failed, returned, or unloaded) only reports `done`.
+      subscribe: () => {
+        subscriptions++;
+        let closed = false;
+        const done = { done: true, value: undefined };
+        return {
+          [Symbol.asyncIterator]: () => ({
+            next: async () => {
+              while (!closed && queue.length === 0)
+                await new Promise<void>((resolve) => (wake = resolve));
+              if (closed) return done;
+              const value = queue.shift();
+              if (value === READ_FAILURE) {
+                closed = true;
+                throw new Error("event stream read failed");
+              }
+              return { done: false, value };
+            },
+            return: async () => {
+              closed = true;
+              wake?.();
+              return done;
+            },
+          }),
+        };
+      },
     },
   };
 
+  let subscriptions = 0;
   const dispose = await server.setup(ctx);
   const send = async (event: Any) => {
     queue.push(event);
@@ -157,6 +189,7 @@ async function start(setup: Setup = {}) {
     emitted,
     send,
     dispose,
+    subscriptions: () => subscriptions,
     tool: () => tool,
     rpc: () => rpc,
   };
@@ -326,12 +359,14 @@ describe("active (default)", () => {
     await host.hooks.context(request("s", [...history]));
     await Bun.sleep(10);
     expect(host.textCalls).toHaveLength(1);
-    const input = host.decisionCalls.at(-1).input[0].text;
-    expect(input).toContain(
+    const lines = await telemetryLines();
+    // Step 2 is blocked by the budget, so its line keeps the input without a Decision call.
+    expect(lines[1].blocked).toBe("budget");
+    expect(lines[1].input).toContain(
       "User requests (oldest first; the last is the latest):\nUSER: Fix the login test\n\nRecent",
     );
-    expect(input).toContain("SUBAGENT: <subagent");
-    expect((await telemetryLines()).map((line) => line.turn)).toEqual(["u1", "u1"]);
+    expect(lines[1].input).toContain("SUBAGENT: <subagent");
+    expect(lines.map((line) => line.turn)).toEqual(["u1", "u1"]);
   });
 
   test("requests from before a restart and from the prompt hook are both shown", async () => {
@@ -491,6 +526,34 @@ describe("active (default)", () => {
     expect(host.entries.s).toBeUndefined();
   });
 
+  test("after a failed event read, it re-subscribes and still drops a stale consult", async () => {
+    let release: (value: { text: string }) => void = () => {};
+    const host = await start({ advice: () => new Promise((resolve) => (release = resolve)) });
+    await host.send(READ_FAILURE);
+    await Bun.sleep(RESUBSCRIBE_MS + 50);
+    expect(host.subscriptions()).toBe(2);
+
+    const event = request("s", [user("u1"), ...step(1)]);
+    const pending = host.hooks.context(event);
+    await Bun.sleep(10);
+    await host.send({
+      type: "session.execution.interrupted",
+      data: { sessionID: "s", reason: "user" },
+    });
+    release({ text: "late advice" });
+    await pending;
+    expect(event.messages).toHaveLength(3);
+    expect(host.entries.s).toBeUndefined();
+  });
+
+  test("a dispose during the re-subscribe wait ends the listener", async () => {
+    const host = await start();
+    await host.send(READ_FAILURE);
+    await host.dispose();
+    await Bun.sleep(RESUBSCRIBE_MS + 50);
+    expect(host.subscriptions()).toBe(1);
+  });
+
   test("an interrupt during the Decision call skips the consult", async () => {
     let answer: (value: Any) => void = () => {};
     const host = await start({ decision: () => new Promise((resolve) => (answer = resolve)) });
@@ -575,6 +638,81 @@ describe("active (default)", () => {
   });
 });
 
+describe("decision spacing", () => {
+  test("by default decides on the 1st and 11th distinct steps, across turns, not on retries", async () => {
+    await writeConfig({ routing: { minStepsBetweenDecisions: undefined } });
+    const host = await start({ decision: async () => ROUTINE });
+    const history: Any[] = [user("u1"), ...step(1)];
+    await host.hooks.context(request("s", [...history]));
+    for (let n = 2; n <= 10; n++) {
+      if (n === 5) {
+        await host.hooks.prompt({ sessionID: "s", messageID: "u2", delivery: "steer" });
+        history.push(user("u2", "next"));
+      }
+      history.push(...step(n));
+      await host.hooks.context(request("s", [...history]));
+      await host.hooks.context(request("s", [...history]));
+    }
+    expect(host.decisionCalls).toHaveLength(1);
+    history.push(...step(11));
+    await host.hooks.context(request("s", [...history]));
+    expect(host.decisionCalls).toHaveLength(2);
+    await Bun.sleep(10);
+    // A skipped step leaves no telemetry line.
+    expect((await telemetryLines()).map((line) => line.step)).toEqual([1, 7]);
+  });
+
+  test("a Decision call that fails still counts", async () => {
+    await writeConfig({ routing: { minStepsBetweenDecisions: 3 } });
+    const host = await start({
+      decision: () => Promise.reject({ _tag: "Generate.UnavailableError" }),
+    });
+    const history: Any[] = [user("u1")];
+    for (let n = 1; n <= 4; n++) {
+      history.push(...step(n));
+      await host.hooks.context(request("s", [...history]));
+    }
+    expect(host.decisionCalls).toHaveLength(2);
+    await Bun.sleep(10);
+    expect((await telemetryLines()).map((line) => line.verdict)).toEqual([
+      "no-decision",
+      "no-decision",
+    ]);
+  });
+
+  test("observe mode is spaced too", async () => {
+    await writeConfig({ routing: { mode: "observe", minStepsBetweenDecisions: 2 } });
+    const host = await start();
+    const history: Any[] = [user("u1")];
+    for (let n = 1; n <= 3; n++) {
+      history.push(...step(n));
+      await host.hooks.context(request("s", [...history]));
+      await Bun.sleep(10);
+    }
+    expect(host.decisionCalls).toHaveLength(2);
+  });
+
+  test("a blocked step makes no Decision call and logs why", async () => {
+    await writeConfig({
+      routing: { maxConsultationsPerTurn: 1, minStepsBetweenConsultations: 0 },
+    });
+    const host = await start();
+    const history: Any[] = [user("u1"), ...step(1)];
+    await host.hooks.context(request("s", [...history]));
+    history.push(...step(2));
+    await host.hooks.context(request("s", [...history]));
+    await Bun.sleep(10);
+    expect(host.decisionCalls).toHaveLength(1);
+    expect((await telemetryLines())[1]).toMatchObject({
+      step: 2,
+      blocked: "budget",
+      verdict: "blocked",
+      attempts: [],
+      delivered: false,
+    });
+  });
+});
+
 describe("observe", () => {
   test("records telemetry without blocking or changing the request", async () => {
     await writeConfig({ routing: { mode: "observe" } });
@@ -609,7 +747,7 @@ describe("invalid config", () => {
 
 describe("explicit advisor()", () => {
   test("reviews the last request plus the in-flight call, without spending the budget", async () => {
-    await writeConfig({ advisor: { model: "openai/gpt-6#high" } });
+    await writeConfig({ advisor: { models: "openai/gpt-6#high" } });
     const host = await start({ decision: async () => ROUTINE });
     await host.hooks.context(request("s", [user("u1"), ...step(1)]));
     const result = await host
@@ -622,7 +760,7 @@ describe("explicit advisor()", () => {
   });
 
   test("an invalid config fails the call instead of using the Executor's model", async () => {
-    await writeConfig({ advisor: { model: "openai/gpt-6", unknown: true } });
+    await writeConfig({ advisor: { models: "openai/gpt-6", unknown: true } });
     const host = await start();
     await host.hooks.context(request("s", [user("u1"), ...step(1)]));
     const result = await host
@@ -631,6 +769,53 @@ describe("explicit advisor()", () => {
     expect(result.content).toContain("Advisor consultation failed");
     expect(result.content).toContain("unknown key: advisor.unknown");
     expect(host.textCalls).toHaveLength(0);
+  });
+
+  test("an invalid config is logged as a failed call with its reason", async () => {
+    await writeConfig({ advisor: { model: "openai/gpt-6" }, routing: { mode: "off" } });
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1")]));
+    await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
+    await Bun.sleep(20);
+    const [line] = await telemetryLines();
+    expect(line).toMatchObject({ session: "s", message: "m", kind: "explicit" });
+    expect(line.advisor).toMatchObject({ model: "unknown", attempts: [], outcome: "error" });
+    expect(line.advisor.error).toContain("invalid config:");
+    expect(line.advisor.error).toContain("unknown key: advisor.model");
+    expect(host.emitted).toEqual(["explicit.finished"]);
+  });
+
+  test("a failed history read is logged once, with its reason", async () => {
+    await writeConfig({ routing: { mode: "off" } });
+    const host = await start();
+    await host.hooks.context(request("s", [user("u1")]));
+    host.ctx.session.context = async () => Promise.reject(new Error("history unavailable"));
+    const result = await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
+    expect(result.content).toBe("Advisor consultation failed: history unavailable");
+    await Bun.sleep(20);
+    const lines = await telemetryLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0].advisor).toMatchObject({
+      model: "unknown",
+      attempts: [],
+      outcome: "error",
+      error: "history unavailable",
+    });
+    expect(host.emitted).toEqual(["explicit.finished"]);
+  });
+
+  test("a refused call is not a consult and writes no line", async () => {
+    await writeConfig({ routing: { mode: "off" } });
+    const host = await start();
+    const call = { messageID: "m", signal: new AbortController().signal };
+    await host.tool().execute({}, { ...call, sessionID: "child" });
+    await host.tool().execute({}, { ...call, sessionID: "s" });
+    await Bun.sleep(20);
+    expect(await telemetryLines()).toEqual([]);
   });
 
   test("ignores the per-turn budget and the cooldown", async () => {
@@ -728,7 +913,7 @@ describe("advisor chain", () => {
 
   test("an Advisor that fails hands over to the next; the answering model is reported", async () => {
     // Neither is the Executor's model, so the report cannot fall back to it.
-    await writeConfig({ advisor: { model: ["mock/dead", "mock/small"] } });
+    await writeConfig({ advisor: { models: ["mock/dead", "mock/small"] } });
     const host = await start({
       advice: async (input) =>
         input.model.id === "dead"
@@ -751,7 +936,7 @@ describe("advisor chain", () => {
 
   test("the explicit tool names every model's failure", async () => {
     // Routing off: an automatic consult would rate-limit mock/a first, and it would be skipped.
-    await writeConfig({ advisor: { model: ["mock/a", "inherit"] }, routing: { mode: "off" } });
+    await writeConfig({ advisor: { models: ["mock/a", "inherit"] }, routing: { mode: "off" } });
     const host = await start({
       advice: async (input) =>
         Promise.reject(
@@ -769,8 +954,56 @@ describe("advisor chain", () => {
     );
   });
 
+  test("an explicit consult logs its chain and reports the answering model", async () => {
+    await writeConfig({
+      advisor: { models: ["mock/dead", "mock/small"] },
+      routing: { mode: "off" },
+    });
+    const host = await start({
+      advice: async (input) =>
+        input.model.id === "dead"
+          ? Promise.reject(providerError("rate_limit"))
+          : { text: "Check the token clock skew first." },
+    });
+    await host.hooks.context(request("s", [user("u1")]));
+    await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
+    await Bun.sleep(20);
+    const [line] = await telemetryLines();
+    expect(line).toMatchObject({ session: "s", message: "m", kind: "explicit" });
+    expect(line.advisor).toMatchObject({ model: "mock/small", outcome: "ok", chars: 33 });
+    expect(line.advisor.attempts.map((a: Any) => [a.model, a.outcome])).toEqual([
+      ["mock/dead", "next"],
+      ["mock/small", "ok"],
+    ]);
+    expect(host.emitted).toEqual(["explicit.finished"]);
+    const status = await host.rpc().status({ sessionID: "s" });
+    expect(status.explicit).toMatchObject({ model: "mock/small" });
+    expect(status.latest).toBeNull();
+  });
+
+  test("a failed explicit consult is logged and leaves the last answering model", async () => {
+    await writeConfig({ advisor: { models: "mock/dead" }, routing: { mode: "off" } });
+    const host = await start({ advice: async () => Promise.reject(providerError("rate_limit")) });
+    await host.hooks.context(request("s", [user("u1")]));
+    await host
+      .tool()
+      .execute({}, { sessionID: "s", messageID: "m", signal: new AbortController().signal });
+    await Bun.sleep(20);
+    const lines = await telemetryLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      kind: "explicit",
+      advisor: { model: "mock/dead", outcome: "error" },
+    });
+    expect(lines[0].advisor.error).toStartWith("all models failed (mock/dead:");
+    expect(host.emitted).toEqual(["explicit.finished"]);
+    expect((await host.rpc().status({ sessionID: "s" })).explicit).toBeNull();
+  });
+
   test("the transcript is rebuilt for each model's window", async () => {
-    await writeConfig({ advisor: { model: ["inherit", "mock/small"] } });
+    await writeConfig({ advisor: { models: ["inherit", "mock/small"] } });
     const host = await start({
       advice: async (input) =>
         input.model.id === "exec"
@@ -788,7 +1021,7 @@ describe("advisor chain", () => {
   });
 
   test("timeoutMs is one deadline for the chain; running out is a timeout", async () => {
-    await writeConfig({ advisor: { model: ["inherit", "mock/small"], timeoutMs: 50 } });
+    await writeConfig({ advisor: { models: ["inherit", "mock/small"], timeoutMs: 50 } });
     const host = await start({ advice: () => new Promise(() => {}) });
     await host.hooks.context(request("s", [user("u1"), ...step(1)]));
     await Bun.sleep(20);
@@ -849,7 +1082,7 @@ describe("decision context in telemetry", () => {
 
 describe("advisor chain, failures", () => {
   test("an interrupt ends the chain; the next model is never asked", async () => {
-    await writeConfig({ advisor: { model: ["inherit", "mock/small"] } });
+    await writeConfig({ advisor: { models: ["inherit", "mock/small"] } });
     let release: () => void = () => {};
     const host = await start({
       advice: () => new Promise((resolve) => (release = () => resolve({ text: "late" }))),
@@ -875,7 +1108,7 @@ describe("advisor chain, failures", () => {
       },
     });
     await writeConfig({
-      advisor: { model: ["inherit", "mock/small"], timeoutMs: 40 },
+      advisor: { models: ["inherit", "mock/small"], timeoutMs: 40 },
       routing: { minStepsBetweenConsultations: 0 },
     });
     const history: Any[] = [user("u1"), ...step(1)];

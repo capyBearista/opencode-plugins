@@ -139,9 +139,38 @@ A file with the same id replaces the built-in completely: project over global ov
 
 ## Configuration
 
+Options go in the plugin's entry in `opencode.json(c)`, using the object form. The TUI half reads them from the server, so `cli.json` needs nothing. Styles themselves are files; see [Custom styles](#custom-styles).
+
+```jsonc
+{
+  "plugins": [
+    { "package": "@capybearista/opencode-output-styles@latest", "options": { "sidebar": false } }
+  ]
+}
+```
+
+<details>
+<summary><strong>Default options</strong> (click to expand)</summary>
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "@capybearista/opencode-output-styles@latest",
+      "options": {
+        // Show the "Output Style: <Name>" line in the session sidebar.
+        "sidebar": true,
+      },
+    },
+  ],
+}
+```
+
+</details>
+
 | Option | Default | Description |
 | --- | --- | --- |
-| `sidebar` | `true` | Show the `Output Style: <Name>` line in the session sidebar. |
+| `sidebar` | `true` | Show the `Output Style: <Name>` line in the session sidebar. Any value other than `false` keeps it on. |
 
 ## Troubleshooting
 

@@ -9,11 +9,20 @@ import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs"
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveTelemetryPath, type TelemetryRecord } from "../src/telemetry.js";
+import {
+  type ExplicitRecord,
+  resolveTelemetryPath,
+  type TelemetryRecord,
+} from "../src/telemetry.js";
 
 /** Lines written before `message`/`input` existed lack them. */
-type Line = Omit<TelemetryRecord, "input" | "inputChars"> &
+type Step = Omit<TelemetryRecord, "input" | "inputChars"> &
   Partial<Pick<TelemetryRecord, "input" | "inputChars">>;
+/** A routing step, or an explicit `advisor()` call (no step, verdict or Decision input). */
+type Line = Step | ExplicitRecord;
+
+const isExplicit = (record: Line): record is ExplicitRecord =>
+  "kind" in record && record.kind === "explicit";
 
 interface StoredPart {
   readonly type: string;
@@ -48,6 +57,8 @@ export function timelineRows(
     .filter((record) => record.session === sessionID)
     .toSorted((a, b) => a.ts.localeCompare(b.ts))
     .map((record) => {
+      // A call's message is also the next step's: leave the messages to the routing steps.
+      if (isExplicit(record)) return { record, messages: [] };
       const at = record.message === undefined ? undefined : index.get(record.message);
       if (at === undefined) return { record, messages: [] };
       const since = messages.slice(from, at + 1);
@@ -85,7 +96,14 @@ const VERDICT_CLASS: Record<string, string> = {
   "no-decision": "failed",
 };
 
+function callHtml(record: ExplicitRecord): string {
+  const { model, outcome, ms, error } = record.advisor;
+  const facts = [model, outcome, `${(ms / 1000).toFixed(1)} s`, error ?? ""].filter(Boolean);
+  return `<div class="call"><span class="time">${html(new Date(record.ts).toLocaleTimeString())}</span><span class="verdict">advisor() call</span><span class="facts">${html(facts.join(" · "))}</span></div>`;
+}
+
 function rowHtml({ record, messages }: Row): string {
+  if (isExplicit(record)) return callHtml(record);
   const time = new Date(record.ts).toLocaleTimeString();
   const moment = Object.entries(record.moment ?? {})
     .map(([name, p]) => `${name} ${p.toFixed(2)}`)
@@ -111,6 +129,13 @@ function rowHtml({ record, messages }: Row): string {
 <h3>Decision input${record.inputChars ? ` (${record.inputChars} chars; last ${record.input?.length ?? 0} logged)` : ""}</h3><pre class="input">${html(record.input ?? "(not logged)")}</pre></details>`;
 }
 
+function counts(rows: readonly Row[]): string {
+  const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+  const calls = rows.filter((row) => isExplicit(row.record)).length;
+  const steps = plural(rows.length - calls, "routing decision");
+  return calls ? `${steps} and ${plural(calls, "advisor() call")}` : steps;
+}
+
 export function renderTimeline(sessionID: string, rows: readonly Row[]): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -126,9 +151,10 @@ summary { cursor: pointer; display: flex; gap: 10px; flex-wrap: wrap; align-item
 .verdict { font-weight: 600; } .consult { color: var(--consult); } .blocked { color: var(--blocked); } .failed { color: var(--failed); }
 pre { background: var(--code); margin: 0; padding: 8px; white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; }
 .msg { margin: 6px 0; } .type { font-size: 12px; color: var(--muted); }
+.call { border-bottom: 1px solid var(--line); display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; padding: 6px 0 6px 16px; }
 </style></head><body>
 <h1>Auto-Advisor timeline · ${html(sessionID)}</h1>
-<p>${rows.length} routing decisions. Expand a step to see what happened since the previous one and what the Decision model read.</p>
+<p>${counts(rows)}. Expand a step to see what happened since the previous one and what the Decision model read.</p>
 ${rows.map(rowHtml).join("\n")}
 </body></html>
 `;
@@ -203,5 +229,5 @@ if (import.meta.main) {
   // like telemetry. `mode` applies only to a new file, so an existing one is replaced.
   await rm(file, { force: true });
   await writeFile(file, renderTimeline(sessionID, rows), { mode: 0o600, flag: "wx" });
-  console.log(`${rows.length} steps → ${file}`);
+  console.log(`${counts(rows)} → ${file}`);
 }

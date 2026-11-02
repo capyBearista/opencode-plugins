@@ -8,7 +8,7 @@ export const MAX_BYTES = 5 * 1024 * 1024;
 export const LOGGED_INPUT_CHARS = 32_000;
 
 /**
- * One line per routing opportunity. Keeps the Decision input (its end) so a verdict can be
+ * One line per decided or blocked step. Keeps the Decision input (its end) so a verdict can be
  * judged later; never the Advisor transcript or advice text.
  */
 export interface TelemetryRecord {
@@ -28,17 +28,31 @@ export interface TelemetryRecord {
   readonly moment?: Record<string, number>;
   readonly consequence?: number;
   readonly verdict: string;
-  /** Set when the per-turn budget or the cooldown kept an automatic consult from starting. */
+  /** Set when the per-turn budget or the cooldown blocked the step; no Decision call was made. */
   readonly blocked?: "budget" | "cooldown";
-  readonly advisor?: {
-    readonly model: string;
-    readonly ms: number;
-    readonly outcome: "ok" | "error" | "timeout" | "stale";
-    readonly chars?: number;
-    /** One per Advisor model tried, in chain order. */
-    readonly attempts?: readonly Attempt[];
-  };
+  readonly advisor?: AdvisorRecord;
   readonly delivered: boolean;
+}
+
+export interface AdvisorRecord {
+  readonly model: string;
+  readonly ms: number;
+  readonly outcome: "ok" | "error" | "timeout" | "stale";
+  readonly chars?: number;
+  /** Why no model answered: the chain's summary, or a failure before any model was tried. */
+  readonly error?: string;
+  /** One per Advisor model tried, in chain order. */
+  readonly attempts?: readonly Attempt[];
+}
+
+/** One line per explicit `advisor()` call: no step, no Decision call, no budget. */
+export interface ExplicitRecord {
+  readonly ts: string;
+  readonly session: string;
+  /** Id of the assistant message that made the call. */
+  readonly message: string;
+  readonly kind: "explicit";
+  readonly advisor: AdvisorRecord;
 }
 
 export function resolveTelemetryPath(
@@ -72,7 +86,7 @@ export function createTelemetry(path: string = resolveTelemetryPath(), maxBytes 
     }
   };
   return {
-    record(entry: TelemetryRecord): void {
+    record(entry: TelemetryRecord | ExplicitRecord): void {
       const line = `${JSON.stringify(entry)}\n`;
       queue = queue.then(() => write(line)).catch(() => {});
     },

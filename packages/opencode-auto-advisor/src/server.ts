@@ -20,7 +20,12 @@ import {
 import { createWalker } from "./fallback.js";
 import { decide } from "./policy.js";
 import { AutoAdvisorRpc, type ReviewDetails, type Status } from "./rpc.js";
-import { createTelemetry, LOGGED_INPUT_CHARS, type TelemetryRecord } from "./telemetry.js";
+import {
+  type AdvisorRecord,
+  createTelemetry,
+  LOGGED_INPUT_CHARS,
+  type TelemetryRecord,
+} from "./telemetry.js";
 import {
   advisorTranscript,
   decisionInput,
@@ -36,6 +41,8 @@ export const PLUGIN_ID = "capybearista.opencode-auto-advisor";
 const DEFAULT_CONTEXT_TOKENS = 128_000;
 /** Conservative chars-per-token, so the transcript fits even token-dense content. */
 const CHARS_PER_TOKEN = 3;
+/** Wait before re-subscribing after a failed event read, so a stream that keeps failing can't spin. */
+export const RESUBSCRIBE_MS = 1_000;
 
 interface Snapshot {
   readonly system: readonly SystemText[];
@@ -67,6 +74,8 @@ interface SessionState {
   lastKey?: string;
   /** `steps` when the last automatic consult started, for the cooldown. */
   consultedAt?: number;
+  /** `steps` when the last Decision call started, for `routing.minStepsBetweenDecisions`. */
+  decidedAt?: number;
   /** Automatic consults started this turn. */
   started: number;
   /** Identity of the last evaluated state, so a retried step reuses its outcome. */
@@ -75,6 +84,8 @@ interface SessionState {
   abort?: AbortController;
   /** The latest delivered review's details; memory only, unlike the entry that holds its text. */
   latest?: { id: string; details: ReviewDetails };
+  /** The last explicit `advisor()` call a model answered; memory only. */
+  explicit?: ReviewDetails;
   observing: boolean;
   reviewing: boolean;
   failed: boolean;
@@ -84,6 +95,22 @@ const asText = (part: unknown) =>
   typeof (part as { text?: unknown })?.text === "string"
     ? { text: (part as { text: string }).text }
     : undefined;
+
+/** The Advisor part of a telemetry line for a consult in which no model answered. */
+function failedAdvisor(cause: unknown, ms: number, stale = false): AdvisorRecord {
+  const attempts = cause instanceof AdvisorChainError ? cause.attempts : [];
+  return {
+    model: attempts.at(-1)?.model ?? "unknown",
+    attempts,
+    error: cause instanceof Error ? cause.message : String(cause),
+    ms,
+    outcome: stale
+      ? "stale"
+      : attempts.some((attempt) => attempt.outcome === "timeout")
+        ? "timeout"
+        : "error",
+  };
+}
 
 /** Identity of a request's history, ignoring system updates (entries admitted on a retry). */
 function stateKey(messages: readonly Message[]): string {
@@ -193,6 +220,7 @@ export default Plugin.define({
         reviewing: session?.reviewing ?? false,
         failed: session?.failed ?? false,
         latest: await latestReview(sessionID),
+        explicit: session?.explicit ?? null,
       };
     };
 
@@ -201,14 +229,13 @@ export default Plugin.define({
     });
     // Each event awaits a status lookup; chaining keeps `finished` from overtaking `started`.
     let emitting: Promise<unknown> = Promise.resolve();
-    const emit = (name: "review.started" | "review.finished", sessionID: string) => {
+    const emit = (
+      name: "review.started" | "review.finished" | "explicit.finished",
+      sessionID: string,
+    ) => {
       emitting = emitting
         .then(() => status(sessionID))
-        .then((snapshot) =>
-          name === "review.started"
-            ? rpc.events.emit("review.started", { ...snapshot })
-            : rpc.events.emit("review.finished", { ...snapshot }),
-        )
+        .then((snapshot) => rpc.events.emit(name, { ...snapshot }))
         .catch(() => {});
     };
 
@@ -255,12 +282,25 @@ export default Plugin.define({
         options: { codemode: false },
         execute: async (_input, tool) => {
           const session = state(tool.sessionID);
+          /** Set once the call is a consult; the refusals above it are not logged. */
+          let start: number | undefined;
+          const logged = (at: number, advisor: AdvisorRecord) => {
+            telemetry.record({
+              ts: new Date(at).toISOString(),
+              session: tool.sessionID,
+              message: tool.messageID,
+              kind: "explicit",
+              advisor,
+            });
+            emit("explicit.finished", tool.sessionID);
+          };
           try {
             if (await isChild(tool.sessionID, session)) {
               return { content: "The Advisor is only available in top-level sessions." };
             }
             const snapshot = session.last;
             if (!snapshot) return { content: "The Advisor has no conversation to review yet." };
+            start = Date.now();
             // With routing off, nothing has read the stored prompts yet.
             await realPrompts(tool.sessionID, session);
             // The cached request predates this step; add the in-flight message holding this call.
@@ -273,14 +313,26 @@ export default Plugin.define({
             const { config, error } = await loadConfig();
             // An invalid file falls back to defaults; consulting the Executor's model would hide that.
             if (error) throw new Error(`invalid config: ${error}`);
-            const { advice } = await review(
+            // Like an automatic consult's, `ms` is the Advisor's time, not the history reads.
+            start = Date.now();
+            const consulted = await review(
               { ...snapshot, messages: [...snapshot.messages, ...inflight] },
               config.advisor,
               undefined,
               tool.signal,
             );
-            return { content: advice };
+            const ms = Date.now() - start;
+            session.explicit = { at: new Date().toISOString(), model: consulted.model, ms };
+            logged(start, {
+              model: consulted.model,
+              attempts: consulted.attempts,
+              ms,
+              outcome: "ok",
+              chars: consulted.advice.length,
+            });
+            return { content: consulted.advice };
           } catch (cause) {
+            if (start !== undefined) logged(start, failedAdvisor(cause, Date.now() - start));
             const message = cause instanceof Error ? cause.message : String(cause);
             return {
               content: `Advisor consultation failed: ${message}`,
@@ -349,6 +401,12 @@ export default Plugin.define({
         }
         session.step++;
         session.steps++;
+        // Spacing saves Decision quota; a failed call counts, since it was still sent.
+        if (
+          session.decidedAt !== undefined &&
+          session.steps - session.decidedAt < routing.minStepsBetweenDecisions
+        )
+          return;
         const base = {
           ts: new Date().toISOString(),
           session: event.sessionID,
@@ -372,23 +430,30 @@ export default Plugin.define({
                 ? ("budget" as const)
                 : undefined;
 
-        if (mode === "observe" || blocked) {
-          // Decide without consulting, so telemetry still shows what the Decision model saw.
+        if (blocked) {
+          // No consult can start, so the Decision call would only feed telemetry: skip it.
+          telemetry.record({
+            ...base,
+            mode,
+            attempts: [],
+            verdict: "blocked",
+            blocked,
+            delivered: false,
+          });
+          return;
+        }
+
+        if (mode === "observe") {
+          // Decide without consulting, so telemetry shows what the Decision model saw.
           if (session.observing) return;
           session.observing = true;
+          session.decidedAt = session.steps;
           void route(routing.models, input)
             .then((routed) => {
               const verdict = routed.ok
                 ? decide({ answers: routed.value.answers, routing })
                 : undefined;
-              telemetry.record({
-                ...base,
-                mode,
-                ...summary(routed, verdict),
-                ...(blocked ? { blocked } : {}),
-                ...(blocked && verdict?.consult ? { verdict: "blocked" } : {}),
-                delivered: false,
-              });
+              telemetry.record({ ...base, mode, ...summary(routed, verdict), delivered: false });
             })
             .catch(() => {})
             .finally(() => {
@@ -405,6 +470,7 @@ export default Plugin.define({
         let delivered: Review | undefined;
         let record: TelemetryRecord | undefined;
         try {
+          session.decidedAt = session.steps;
           const routed = await route(routing.models, input);
           const verdict = routed.ok
             ? decide({ answers: routed.value.answers, routing })
@@ -467,21 +533,7 @@ export default Plugin.define({
           } catch (cause) {
             const stale = session.epoch !== epoch;
             if (!stale) session.failed = true;
-            const attempts = cause instanceof AdvisorChainError ? cause.attempts : [];
-            const last = attempts.at(-1);
-            record = {
-              ...record,
-              advisor: {
-                model: last?.model ?? "unknown",
-                attempts,
-                ms: Date.now() - start,
-                outcome: stale
-                  ? "stale"
-                  : attempts.some((attempt) => attempt.outcome === "timeout")
-                    ? "timeout"
-                    : "error",
-              },
-            };
+            record = { ...record, advisor: failedAdvisor(cause, Date.now() - start, stale) };
           } finally {
             session.reviewing = false;
             emit("review.finished", event.sessionID);
@@ -495,39 +547,59 @@ export default Plugin.define({
       }
     });
 
-    const events = ctx.event.subscribe({
-      types: [
-        "session.execution.succeeded",
-        "session.execution.failed",
-        "session.execution.interrupted",
-        "session.deleted",
-      ],
-    });
-    const iterator = events[Symbol.asyncIterator]();
+    let disposed = false;
+    let iterator: AsyncIterator<unknown> | undefined;
+    let backoff: ReturnType<typeof setTimeout> | undefined;
+    let resume: (() => void) | undefined;
     void (async () => {
-      for (;;) {
-        const next = await iterator.next();
-        if (next.done) return;
-        const event = next.value as { type: string; data?: { sessionID?: string } };
-        const sessionID = event.data?.sessionID;
-        if (!sessionID) continue;
-        if (event.type === "session.deleted") {
-          sessions.delete(sessionID);
-          continue;
-        }
-        const session = sessions.get(sessionID);
-        if (session) {
-          session.epoch++;
-          session.abort?.abort();
-          // The request reference can hold large attachments; drop it once the run ends.
-          session.last = undefined;
-          session.memo = undefined;
+      while (!disposed) {
+        iterator = ctx.event
+          .subscribe({
+            types: [
+              "session.execution.succeeded",
+              "session.execution.failed",
+              "session.execution.interrupted",
+              "session.deleted",
+            ],
+          })
+          [Symbol.asyncIterator]();
+        try {
+          for (;;) {
+            const next = await iterator.next();
+            // The stream ends only when the plugin unloads.
+            if (next.done) return;
+            const event = next.value as { type: string; data?: { sessionID?: string } };
+            const sessionID = event.data?.sessionID;
+            if (!sessionID) continue;
+            if (event.type === "session.deleted") {
+              sessions.delete(sessionID);
+              continue;
+            }
+            const session = sessions.get(sessionID);
+            if (session) {
+              session.epoch++;
+              session.abort?.abort();
+              // The request reference can hold large attachments; drop it once the run ends.
+              session.last = undefined;
+              session.memo = undefined;
+            }
+          }
+        } catch {
+          // The adapter closes the stream on a failed read, so subscribe again. Events sent
+          // during the wait are missed.
+          await new Promise<void>((resolve) => {
+            resume = resolve;
+            backoff = setTimeout(resolve, RESUBSCRIBE_MS);
+          });
         }
       }
     })().catch(() => {});
 
     return async () => {
-      await iterator.return?.();
+      disposed = true;
+      clearTimeout(backoff);
+      resume?.();
+      await iterator?.return?.();
       await toolRegistration.dispose();
       await promptHook.dispose();
       await contextHook.dispose();

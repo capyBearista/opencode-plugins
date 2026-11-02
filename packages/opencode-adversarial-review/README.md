@@ -121,11 +121,15 @@ Nothing is pinned — model and temperature are both inherited. Resolution order
 ```jsonc
 {
   "agents": {
+    // Used by /adversarial-review. Omit to inherit the invoking session's model.
     "adversarial-reviewer": { "model": "openrouter/openai/gpt-6-sol" },
+    // Used by /constructive-review.
     "constructive-reviewer": { "model": "openrouter/openai/gpt-6-sol" }
   }
 }
 ```
+
+The plugin has no options of its own and nothing to show as defaults: with no `agents` entry, both reviewers use the invoking session's model and temperature. Their mode, hidden flag, description and read-only permissions are set by the plugin; a `system` or `color` you set on either agent is kept (see [Permissions & Security](#permissions--security)).
 
 ## Permissions & Security
 

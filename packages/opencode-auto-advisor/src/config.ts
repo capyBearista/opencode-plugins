@@ -30,6 +30,8 @@ export interface Config {
     readonly maxConsultationsPerTurn: number;
     /** Distinct Executor steps after an automatic consult starts before another may; 0 is off. */
     readonly minStepsBetweenConsultations: number;
+    /** Distinct Executor steps after a Decision call starts before another may; 1 is every step. */
+    readonly minStepsBetweenDecisions: number;
     /** How many of the user's latest requests the Decision model sees. */
     readonly requests: number;
     /** Characters per request in the Decision input, keeping the start; -1 is no cap. */
@@ -53,6 +55,7 @@ export const DEFAULTS: Config = {
     consequenceThreshold: 1.5,
     maxConsultationsPerTurn: 2,
     minStepsBetweenConsultations: 10,
+    minStepsBetweenDecisions: 10,
     requests: 3,
     requestMaxChars: 20_000,
   },
@@ -107,8 +110,9 @@ function number(value: unknown, name: string, min: number, max: number, integer 
   return value as number;
 }
 
-/** 1..MAX_MODELS distinct entries, each a model ref or, where allowed, "inherit". */
-function modelList(list: unknown, inherit: boolean): (ModelRef | "inherit")[] | undefined {
+/** One entry or 1..MAX_MODELS distinct entries, each a model ref or, where allowed, "inherit". */
+function modelList(value: unknown, inherit: boolean): (ModelRef | "inherit")[] | undefined {
+  const list = typeof value === "string" ? [value] : value;
   if (!Array.isArray(list) || list.length === 0 || list.length > MAX_MODELS) return undefined;
   if (new Set(list).size !== list.length) return undefined;
   const refs = list.map((item) =>
@@ -143,7 +147,7 @@ export function parseConfig(input: unknown): Config {
       throw new ConfigError(`unknown key: ${key}`);
     }
   }
-  const advisor = section(input, "advisor", ["model", "timeoutMs", "compactContext", "maxTokens"]);
+  const advisor = section(input, "advisor", ["models", "timeoutMs", "compactContext", "maxTokens"]);
   const routing = section(input, "routing", [
     "mode",
     "models",
@@ -151,20 +155,18 @@ export function parseConfig(input: unknown): Config {
     "consequenceThreshold",
     "maxConsultationsPerTurn",
     "minStepsBetweenConsultations",
+    "minStepsBetweenDecisions",
     "requests",
     "requestMaxChars",
   ]);
   const tui = section(input, "tui", ["sidebar"]);
 
   let advisorModels = DEFAULTS.advisor.models;
-  if (advisor.model !== undefined) {
-    const list = modelList(
-      typeof advisor.model === "string" ? [advisor.model] : advisor.model,
-      true,
-    );
+  if (advisor.models !== undefined) {
+    const list = modelList(advisor.models, true);
     if (!list) {
       throw new ConfigError(
-        `advisor.model must be "inherit", "provider/model[#variant]" or a list of 1..${MAX_MODELS} distinct such entries`,
+        `advisor.models must be "inherit", "provider/model[#variant]" or a list of 1..${MAX_MODELS} distinct such entries`,
       );
     }
     advisorModels = list;
@@ -183,7 +185,7 @@ export function parseConfig(input: unknown): Config {
     const list = modelList(routing.models, false);
     if (!list) {
       throw new ConfigError(
-        `routing.models must list 1..${MAX_MODELS} distinct "provider/model[#variant]" decision models`,
+        `routing.models must be "provider/model[#variant]" or a list of 1..${MAX_MODELS} distinct such decision models`,
       );
     }
     models = list as ModelRef[];
@@ -236,6 +238,16 @@ export function parseConfig(input: unknown): Config {
               1_000,
               true,
             ),
+      minStepsBetweenDecisions:
+        routing.minStepsBetweenDecisions === undefined
+          ? DEFAULTS.routing.minStepsBetweenDecisions
+          : number(
+              routing.minStepsBetweenDecisions,
+              "routing.minStepsBetweenDecisions",
+              1,
+              1_000,
+              true,
+            ),
       requests:
         routing.requests === undefined
           ? DEFAULTS.routing.requests
@@ -285,7 +297,8 @@ export function createConfigLoader(path: string = resolveConfigPath()) {
       mtime = (await file.stat()).mtimeMs;
       if (cached?.mtime === mtime) return cached.loaded;
       try {
-        loaded = { config: parseConfig(JSON.parse(await file.readFile("utf8"))) };
+        // JSONC: comments and trailing commas, so the README's commented defaults paste as is.
+        loaded = { config: parseConfig(Bun.JSONC.parse(await file.readFile("utf8"))) };
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         loaded = {

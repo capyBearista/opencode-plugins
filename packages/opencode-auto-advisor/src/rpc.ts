@@ -26,9 +26,21 @@ export interface Status {
   readonly failed: boolean;
   /** Latest automatic review, read from the session's instruction entry. */
   readonly latest: ReviewSummary | null;
+  /** The last explicit `advisor()` call that a model answered; server memory only. */
+  readonly explicit: ReviewDetails | null;
 }
 
 const string = { type: "string" } as const;
+const details = {
+  anyOf: [
+    { type: "null" },
+    {
+      type: "object",
+      properties: { at: string, model: string, ms: { type: "number" } },
+      required: ["at", "model", "ms"],
+    },
+  ],
+} as const;
 const status = {
   type: "object",
   properties: {
@@ -47,23 +59,24 @@ const status = {
             id: string,
             moment: string,
             advice: string,
-            details: {
-              anyOf: [
-                { type: "null" },
-                {
-                  type: "object",
-                  properties: { at: string, model: string, ms: { type: "number" } },
-                  required: ["at", "model", "ms"],
-                },
-              ],
-            },
+            details,
           },
           required: ["id", "moment", "advice", "details"],
         },
       ],
     },
+    explicit: details,
   },
-  required: ["sessionID", "mode", "sidebar", "configError", "reviewing", "failed", "latest"],
+  required: [
+    "sessionID",
+    "mode",
+    "sidebar",
+    "configError",
+    "reviewing",
+    "failed",
+    "latest",
+    "explicit",
+  ],
 } as const;
 
 export const AutoAdvisorRpc = Rpc.define({
@@ -82,5 +95,6 @@ export const AutoAdvisorRpc = Rpc.define({
   events: {
     "review.started": { schema: status },
     "review.finished": { schema: status },
+    "explicit.finished": { schema: status },
   },
 });

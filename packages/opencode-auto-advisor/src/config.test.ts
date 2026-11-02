@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULTS, parseConfig, parseModelRef, resolveConfigPath } from "./config.js";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  createConfigLoader,
+  DEFAULTS,
+  parseConfig,
+  parseModelRef,
+  resolveConfigPath,
+} from "./config.js";
 
 describe("parseConfig", () => {
   test("empty object yields every default", () => {
@@ -24,6 +33,7 @@ describe("parseConfig", () => {
         consequenceThreshold: 1.5,
         maxConsultationsPerTurn: 2,
         minStepsBetweenConsultations: 10,
+        minStepsBetweenDecisions: 10,
         requests: 3,
         requestMaxChars: 20_000,
       },
@@ -48,6 +58,13 @@ describe("parseConfig", () => {
     expect(config.routing.minStepsBetweenConsultations).toBe(0);
   });
 
+  test("routing.minStepsBetweenDecisions accepts 1 (every step) to 1000", () => {
+    const every = parseConfig({ routing: { minStepsBetweenDecisions: 1 } });
+    expect(every.routing.minStepsBetweenDecisions).toBe(1);
+    const sparse = parseConfig({ routing: { minStepsBetweenDecisions: 1000 } });
+    expect(sparse.routing.minStepsBetweenDecisions).toBe(1000);
+  });
+
   test("tui.sidebar accepts a boolean", () => {
     expect(parseConfig({ tui: { sidebar: false } }).tui.sidebar).toBe(false);
   });
@@ -56,19 +73,19 @@ describe("parseConfig", () => {
     expect(parseConfig({ advisor: { compactContext: false } }).advisor.compactContext).toBe(false);
   });
 
-  test("advisor.model accepts provider/model and inherit", () => {
-    expect(parseConfig({ advisor: { model: "openai/gpt-6" } }).advisor.models).toEqual([
+  test("advisor.models accepts provider/model and inherit", () => {
+    expect(parseConfig({ advisor: { models: "openai/gpt-6" } }).advisor.models).toEqual([
       { providerID: "openai", id: "gpt-6" },
     ]);
-    expect(parseConfig({ advisor: { model: "inherit" } }).advisor.models).toEqual(["inherit"]);
-    expect(parseConfig({ advisor: { model: "openai/gpt-6#high" } }).advisor.models).toEqual([
+    expect(parseConfig({ advisor: { models: "inherit" } }).advisor.models).toEqual(["inherit"]);
+    expect(parseConfig({ advisor: { models: "openai/gpt-6#high" } }).advisor.models).toEqual([
       { providerID: "openai", id: "gpt-6", variant: "high" },
     ]);
   });
 
-  test("advisor.model accepts an ordered fallback list, inherit included", () => {
+  test("advisor.models accepts an ordered fallback list, inherit included", () => {
     const config = parseConfig({
-      advisor: { model: ["opencode-go/deepseek#max", "openrouter/meta/muse#xhigh", "inherit"] },
+      advisor: { models: ["opencode-go/deepseek#max", "openrouter/meta/muse#xhigh", "inherit"] },
     });
     expect(config.advisor.models).toEqual([
       { providerID: "opencode-go", id: "deepseek", variant: "max" },
@@ -80,6 +97,12 @@ describe("parseConfig", () => {
   test("advisor.timeoutMs is -1 for no limit or a positive total deadline", () => {
     expect(parseConfig({ advisor: { timeoutMs: -1 } }).advisor.timeoutMs).toBe(-1);
     expect(parseConfig({ advisor: { timeoutMs: 600_000 } }).advisor.timeoutMs).toBe(600_000);
+  });
+
+  test("routing.models accepts a single provider/model string", () => {
+    expect(parseConfig({ routing: { models: "opencode/jev-1.13-free" } }).routing.models).toEqual([
+      { providerID: "opencode", id: "jev-1.13-free" },
+    ]);
   });
 
   test("routing.models keeps order and splits on the first slash", () => {
@@ -100,6 +123,8 @@ describe("parseConfig", () => {
     [{ routing: { models: Array.from({ length: 9 }, (_, i) => `p/m${i}`) } }, "routing.models"],
     [{ routing: { models: ["noslash"] } }, "routing.models"],
     [{ routing: { models: ["inherit"] } }, "routing.models"],
+    [{ routing: { models: "inherit" } }, "routing.models"],
+    [{ routing: { models: "noslash" } }, "routing.models"],
     [{ routing: { momentThreshold: 1.2 } }, "routing.momentThreshold"],
     [{ routing: { consequenceThreshold: -1 } }, "routing.consequenceThreshold"],
     [{ routing: { consequenceThreshold: 5 } }, "routing.consequenceThreshold"],
@@ -107,6 +132,9 @@ describe("parseConfig", () => {
     [{ routing: { maxConsultationsPerTurn: 1.5 } }, "routing.maxConsultationsPerTurn"],
     [{ routing: { minStepsBetweenConsultations: -1 } }, "routing.minStepsBetweenConsultations"],
     [{ routing: { minStepsBetweenConsultations: 2.5 } }, "routing.minStepsBetweenConsultations"],
+    [{ routing: { minStepsBetweenDecisions: 0 } }, "routing.minStepsBetweenDecisions"],
+    [{ routing: { minStepsBetweenDecisions: 1001 } }, "routing.minStepsBetweenDecisions"],
+    [{ routing: { minStepsBetweenDecisions: 2.5 } }, "routing.minStepsBetweenDecisions"],
     [{ routing: { requests: 0 } }, "routing.requests"],
     [{ routing: { requests: 21 } }, "routing.requests"],
     [{ routing: { requests: 1.5 } }, "routing.requests"],
@@ -115,17 +143,18 @@ describe("parseConfig", () => {
     [{ routing: { requestMaxChars: -2 } }, "routing.requestMaxChars"],
     [{ routing: { requestMaxChars: 150.5 } }, "routing.requestMaxChars"],
     [{ advisor: { timeoutMs: 0 } }, "advisor.timeoutMs"],
-    [{ advisor: { model: "x" } }, "advisor.model"],
-    [{ advisor: { model: [] } }, "advisor.model"],
-    [{ advisor: { model: ["a/b", "a/b"] } }, "advisor.model"],
-    [{ advisor: { model: ["inherit", "inherit"] } }, "advisor.model"],
-    [{ advisor: { model: ["a/b", "x"] } }, "advisor.model"],
-    [{ advisor: { model: Array.from({ length: 9 }, (_, i) => `p/m${i}`) } }, "advisor.model"],
+    [{ advisor: { models: "x" } }, "advisor.models"],
+    [{ advisor: { models: [] } }, "advisor.models"],
+    [{ advisor: { models: ["a/b", "a/b"] } }, "advisor.models"],
+    [{ advisor: { models: ["inherit", "inherit"] } }, "advisor.models"],
+    [{ advisor: { models: ["a/b", "x"] } }, "advisor.models"],
+    [{ advisor: { models: Array.from({ length: 9 }, (_, i) => `p/m${i}`) } }, "advisor.models"],
     [{ advisor: { timeoutMs: -2 } }, "advisor.timeoutMs"],
     [{ advisor: { compactContext: "yes" } }, "advisor.compactContext"],
     [{ advisor: { maxTokens: 64 } }, "advisor.maxTokens must be"],
     [{ advisor: { maxTokens: 1_500.5 } }, "advisor.maxTokens must be"],
     [{ advisor: { other: 1 } }, "unknown key: advisor.other"],
+    [{ advisor: { model: "openai/gpt-6" } }, "unknown key: advisor.model"],
     [{ tui: { sidebar: "yes" } }, "tui.sidebar"],
     [{ tui: { footer: true } }, "unknown key: tui.footer"],
     [[], "must be a JSON object"],
@@ -162,4 +191,46 @@ describe("resolveConfigPath", () => {
     );
     expect(resolveConfigPath({}, "/h")).toBe("/h/.config/opencode/auto-advisor.json");
   });
+});
+
+describe("createConfigLoader", () => {
+  const load = async (text: string) => {
+    const dir = await mkdtemp(join(tmpdir(), "auto-advisor-config-"));
+    try {
+      const path = join(dir, "auto-advisor.json");
+      await writeFile(path, text);
+      return await createConfigLoader(path)();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+
+  test("accepts comments and trailing commas", async () => {
+    const loaded = await load(`{
+      // The Advisor
+      "advisor": { "models": ["openai/gpt-6#high", "inherit",] },
+      /* Decisions */
+      "routing": { "mode": "observe", },
+    }`);
+    expect(loaded.error).toBeUndefined();
+    expect(loaded.config.advisor.models).toEqual([
+      { providerID: "openai", id: "gpt-6", variant: "high" },
+      "inherit",
+    ]);
+    expect(loaded.config.routing.mode).toBe("observe");
+  });
+
+  test("a syntax error turns routing off and names the file", async () => {
+    const loaded = await load(`{ "routing": }`);
+    expect(loaded.config.routing.mode).toBe("off");
+    expect(loaded.error).toContain("auto-advisor.json: ");
+  });
+});
+
+test("the README's default configuration is the real defaults", async () => {
+  const readme = await readFile(join(import.meta.dir, "..", "README.md"), "utf8");
+  const block = readme.split("<summary><strong>Default configuration")[1]?.split("```jsonc\n")[1];
+  expect(block).toBeDefined();
+  const parsed = parseConfig(Bun.JSONC.parse((block ?? "").split("\n```")[0]));
+  expect(parsed).toEqual(DEFAULTS);
 });
