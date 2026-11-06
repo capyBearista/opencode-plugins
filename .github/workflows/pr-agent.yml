@@ -40,12 +40,23 @@ jobs:
 
           echo "GitHub OIDC request succeeded"
 
-          token=$(curl -sSf https://opencode.ai/console/auth/oauth/token \
+          response=$(mktemp)
+          trap 'rm -f "$response"' EXIT
+
+          status=$(curl -sS -o "$response" -w '%{http_code}' \
+            https://opencode.ai/console/auth/oauth/token \
             -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
             -d subject_token_type=urn:ietf:params:oauth:token-type:jwt \
             -d "client_id=$CLIENT_ID" \
-            -d "subject_token=$oidc" \
-            | jq -er '.access_token')
+            -d "subject_token=$oidc")
+
+          if [[ "$status" != "200" ]]; then
+            echo "OpenCode token exchange failed: HTTP $status"
+            jq -r '.error // .code // "No structured error code"' "$response"
+            exit 1
+          fi
+
+          token=$(jq -er '.access_token' "$response")
 
           echo "::add-mask::$token"
           echo "OpenCode token exchange succeeded"
