@@ -27,7 +27,7 @@ jobs:
       - name: Sign in to OpenCode
         env:
           AUDIENCE: https://opencode.ai/console
-          CLIENT_ID: ${{ vars.OPENCODE_OIDC_CLIENT_ID }}
+          CLIENT_ID: ${{ secrets.OPENCODE_OIDC_CLIENT_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -38,6 +38,8 @@ jobs:
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$AUDIENCE" \
             | jq -er '.value')
 
+          echo "GitHub OIDC request succeeded"
+
           token=$(curl -sSf https://opencode.ai/console/auth/oauth/token \
             -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
             -d subject_token_type=urn:ietf:params:oauth:token-type:jwt \
@@ -46,6 +48,7 @@ jobs:
             | jq -er '.access_token')
 
           echo "::add-mask::$token"
+          echo "OpenCode token exchange succeeded"
           echo "OPENAI_KEY=$token" >> "$GITHUB_ENV"
 
       - name: Review with PR-Agent
