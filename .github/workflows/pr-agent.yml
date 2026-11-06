@@ -1,0 +1,73 @@
+name: AI PR review
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.pull_request.user.login == 'capyBearista' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Sign in to OpenCode
+        env:
+          AUDIENCE: https://opencode.ai/console
+          CLIENT_ID: ${{ vars.OPENCODE_OIDC_CLIENT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${CLIENT_ID:?Missing OPENCODE_OIDC_CLIENT_ID}"
+
+          oidc=$(curl -sSf \
+            --oauth2-bearer "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$AUDIENCE" \
+            | jq -er '.value')
+
+          token=$(curl -sSf https://opencode.ai/console/auth/oauth/token \
+            -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+            -d subject_token_type=urn:ietf:params:oauth:token-type:jwt \
+            -d "client_id=$CLIENT_ID" \
+            -d "subject_token=$oidc" \
+            | jq -er '.access_token')
+
+          echo "::add-mask::$token"
+          echo "OPENAI_KEY=$token" >> "$GITHUB_ENV"
+
+      - name: Review with PR-Agent
+        uses: docker://pragent/pr-agent:0.49.0-github_action
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+          # OpenCode Go, using its OpenAI-compatible Chat Completions API.
+          OPENAI__API_BASE: https://opencode.ai/inference/go/openai/v1
+          config.model: "openai/beam-free"
+          config.fallback_models: '[]'
+          config.custom_model_max_tokens: "1048576"
+          config.max_model_tokens: "1048576"
+
+          # Required by OpenCode Go. Keep one session ID per PR.
+          LITELLM.EXTRA_HEADERS: '{"x-opencode-session":"ses_${{ github.repository_id }}_pr_${{ github.event.pull_request.number }}","User-Agent":"pr-agent-opencode-plugins/1.0"}'
+
+          github_action_config.auto_review: "true"
+          github_action_config.auto_improve: "false"
+          github_action_config.auto_describe: "false"
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
+
+          github_action_config.handle_push_trigger: "true"
+          github_action_config.push_commands: '["/review"]'
+          github_action_config.fail_on_tool_errors: "true"

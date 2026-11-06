@@ -1,0 +1,37 @@
+# PR-Agent runs through OpenCode Go but does not run the OpenCode CLI.
+# Read-only reviewer with inline comments. No auto-approval or automatic edits.
+
+[config]
+ai_timeout = 120
+num_retries = 2
+
+# All paths are always included, subject to the line budget.
+repo_context_from_default_branch = true
+repo_context_max_lines = 900
+repo_context_files = [
+  "AGENTS.md"
+]
+
+persistent_inline_comments = true
+output_run_details = true
+publish_output = true
+enable_auto_approval = false
+
+[pr_reviewer]
+inline_key_issues = true
+num_max_findings = 5
+persistent_comment = true
+persistent_finding_state = true
+publish_output_no_suggestions = false
+enable_review_labels_security = false
+enable_review_labels_effort = false
+require_estimate_effort_to_review = false
+require_tests_review = true
+require_security_review = true
+require_ticket_analysis_review = true
+enable_review_coverage_footer = true
+enable_large_pr_chunking = true
+max_number_of_calls = 3
+
+extra_instructions = """
+"""
