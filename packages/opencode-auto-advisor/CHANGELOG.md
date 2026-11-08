@@ -1,5 +1,11 @@
 # @capybearista/opencode-auto-advisor
 
+## 2.1.1
+
+### Patch Changes
+
+- 4eb95f9: Narrow the advisor() guidance to user requests, unresolved consequential decisions after focused investigation, and genuine stalls; reuse automatic reviews instead of re-requesting.
+
 ## 2.1.0
 
 ### Minor Changes
