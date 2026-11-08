@@ -11,20 +11,11 @@ export const TOOL_DESCRIPTION = `Consult the Advisor, a reviewer (a stronger mod
 
 No parameters. When you call advisor(), your history -- the task, every tool call and result -- is automatically forwarded. Your hidden reasoning is not forwarded, long results may be shortened, and in long sessions older history may be summarized or left out.
 
-Call advisor BEFORE substantive work -- before writing, before committing to an interpretation, before building on an assumption. If the task requires orientation first (finding files, fetching a source, seeing what's there), do that, then call advisor. Orientation is not substantive work. Writing, editing, and declaring an answer are.
+Consult when the user asks, when focused investigation leaves a consequential interpretation or decision unresolved, or when a genuine stall needs independent judgment. Seek input before acting on that unresolved decision; routine work, approach changes and completion do not by themselves require a call.
 
-Also call advisor:
-- When you believe the task is complete. BEFORE this call, make your deliverable durable: write the file, save the result. The advisor call takes time; if the session ends during it, a durable result persists and an unwritten one doesn't.
-- When stuck -- errors recurring, approach not converging, results that don't fit.
-- When considering a change of approach.
+Advisor reviews can also arrive automatically as "[auto-advisor review ...]" updates. Reuse that advice rather than requesting the same review again. Make another explicit call only for a concrete remaining question or materially new evidence. Before a potentially lengthy consultation, save completed work that would otherwise exist only in memory.
 
-On tasks longer than a few steps, call advisor at least once before committing to an approach and once before declaring done. On short reactive tasks where the next action is dictated by tool output you just read, you don't need to keep calling -- the advisor adds most of its value on the first call, before the approach crystallizes.
-
-Advisor reviews can also arrive on their own, as "[auto-advisor review ...]" updates. Treat one as a call you already made: don't call advisor again for the same moment unless something has changed.
-
-Give the advice serious weight. If you follow a step and it fails empirically, or you have primary-source evidence that contradicts a specific claim (the file says X, the docs state Y), adapt. A passing self-test is not evidence the advice is wrong -- it's evidence your test doesn't check what the advice is checking. The user's constraints always come first.
-
-If you've already retrieved data pointing one way and the advisor points another: don't silently switch. Surface the conflict in one more advisor call -- write the question in your message, then call advisor: "I found X, you suggest Y, which constraint breaks the tie?" The advisor saw your evidence but may have underweighted it; a reconcile call is cheaper than committing to the wrong branch.`;
+Evaluate advice against the current task, the user's constraints and primary-source evidence. Automatic moment labels are hints, not authority over the task's actual state. A passing self-test may not cover the concern raised. Resolve conflicts from the evidence and explain material departures; consult again only if a consequential uncertainty remains.`;
 
 export const ADVISOR_INSTRUCTIONS = `You are reviewing an agent's work in progress on a task. Below is their transcript: their system prompt, their tool names, the task, every tool call they've made, every result they've seen, every problem they've hit.
 
