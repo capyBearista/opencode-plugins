@@ -90,8 +90,10 @@ describe("advisorPrompt", () => {
 
 describe("TOOL_DESCRIPTION", () => {
   test("tells the agent when to call, what is forwarded and how to weigh the advice", () => {
-    expect(TOOL_DESCRIPTION).toContain("Call advisor BEFORE substantive work");
-    expect(TOOL_DESCRIPTION).toContain("make your deliverable durable");
+    expect(TOOL_DESCRIPTION).toContain("when focused investigation leaves a consequential");
+    expect(TOOL_DESCRIPTION).toContain(
+      "routine work, approach changes and completion do not by themselves require a call",
+    );
     expect(TOOL_DESCRIPTION).toContain("Your hidden reasoning is not forwarded");
     // The marker the description names is the one delivered reviews carry.
     expect(reviewText({ id: "r", moment: "done", advice: "a" })).toStartWith(
@@ -101,9 +103,11 @@ describe("TOOL_DESCRIPTION", () => {
     // The default Advisor is the agent's own model: never promise a stronger one.
     expect(TOOL_DESCRIPTION).not.toContain("Consult a stronger reviewer");
     expect(TOOL_DESCRIPTION).toContain("long results may be shortened");
-    expect(TOOL_DESCRIPTION).toContain("write the question in your message, then call advisor");
-    expect(TOOL_DESCRIPTION).toContain("which constraint breaks the tie?");
-    expect(TOOL_DESCRIPTION).toContain("The user's constraints always come first.");
+    expect(TOOL_DESCRIPTION).toContain(
+      "Reuse that advice rather than requesting the same review again",
+    );
+    expect(TOOL_DESCRIPTION).toContain("Automatic moment labels are hints");
+    expect(TOOL_DESCRIPTION).toContain("Resolve conflicts from the evidence");
   });
 });
 
