@@ -41,8 +41,8 @@
   },
   "devDependencies": {
     "@opencode/plugin": "2.2.5",
-    "@opentui/solid": "0.8.0",
-    "@opentui/core": "0.8.0",
-    "solid-js": "1.9.17"
+    "@opentui/solid": "0.8.2",
+    "@opentui/core": "0.8.2",
+    "solid-js": "1.9.18"
   }
 }
