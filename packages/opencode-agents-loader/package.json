@@ -37,6 +37,6 @@
     "@opencode/plugin": ">=2.0.2 <3"
   },
   "devDependencies": {
-    "@opencode/plugin": "2.2.5"
+    "@opencode/plugin": "2.3.0"
   }
 }
