@@ -36,8 +36,8 @@
     "@opencode/plugin": ">=2.0.2 <3"
   },
   "devDependencies": {
-    "@opencode/plugin": "2.2.5",
-    "@tsconfig/node22": "^22.0.6",
+    "@opencode/plugin": "2.3.2",
+    "@tsconfig/node22": "^22.0.7",
     "@types/bun": "latest",
     "typescript": "^7.0.2"
   }
